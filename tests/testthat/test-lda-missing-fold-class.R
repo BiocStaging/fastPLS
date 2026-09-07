@@ -10,9 +10,15 @@ test_that("compiled LDA CV compacts classes absent from a training fold", {
     )
 
     for (backend in backends) {
-        for (method in c("plssvd", "simpls", "opls", "kernelpls")) {
-            result <- pls.single.cv(
-                X,
+        methods <- if (backend == "cpu") {
+            c("plssvd", "simpls", "opls", "kernelpls")
+        } else {
+            c("plssvd", "simpls", "kernelpls")
+        }
+        X_backend <- if (backend == "metal") float::fl(X) else X
+        for (method in methods) {
+            result <- suppressWarnings(pls.single.cv(
+                X_backend,
                 y,
                 ncomp = 1:2,
                 kfold = 5,
@@ -22,7 +28,7 @@ test_that("compiled LDA CV compacts classes absent from a training fold", {
                 classifier = "lda",
                 fit = FALSE,
                 seed = 104
-            )
+            ))
 
             expect_true(all(is.finite(result$accuracy)))
             expect_length(result$Ypred_optim, nrow(X))

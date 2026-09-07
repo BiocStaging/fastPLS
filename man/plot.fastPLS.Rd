@@ -5,14 +5,14 @@
 \title{Plot PLS latent scores}
 \usage{
 \method{plot}{fastPLS}(
-    x,
-    comps = c(1L, 2L),
-    groups = NULL,
-    score.set = c("auto", "train", "test"),
-    ellipse = FALSE,
-    ellipse.type = c("confidence", "hotelling"),
-    conf = 0.95,
-    ...
+  x,
+  comps = c(1L, 2L),
+  groups = NULL,
+  score.set = c("auto", "train", "test"),
+  ellipse = FALSE,
+  ellipse.type = c("confidence", "hotelling"),
+  conf = 0.95,
+  ...
 )
 }
 \arguments{
@@ -23,8 +23,7 @@
 \item{groups}{Optional grouping vector used for point fills and grouped
 ellipses.}
 
-\item{score.set}{Plot \code{train} scores, \code{test} scores, or use
-\code{auto} to select
+\item{score.set}{Plot \code{train} scores, \code{test} scores, or use \code{auto} to select
 stored training scores before test scores.}
 
 \item{ellipse}{Draw confidence ellipses when \code{TRUE}.}

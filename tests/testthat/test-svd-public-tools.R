@@ -15,7 +15,7 @@ test_that("fastsvd returns decomposition outputs from public backends", {
   expect_equal(ncol(out$v), 5)
   expect_true(out$diagnostics$status %in% c(
     "rsvd_case_audit_passed",
-    "rsvd_case_audit_recovered_with_deterministic_irlba"
+    "rsvd_case_audit_passed_with_deterministic_recovery"
   ))
   expect_true(out$diagnostics$rsvd_case_audit$performed)
   expect_true(out$diagnostics$rsvd_case_audit$certified)
@@ -28,39 +28,39 @@ test_that("fastsvd returns decomposition outputs from public backends", {
   }
 })
 
-test_that("unsupported fastsvd method labels use standard choices error", {
+test_that("unsupported fastsvd method labels fail explicitly", {
   set.seed(11)
   A <- matrix(rnorm(80 * 12), 80, 12)
-  expect_error(fastsvd(A, ncomp = 4, backend = "cpu", method = "unsupported"), "should be one of")
-  expect_error(fastsvd(A, ncomp = 4, backend = "cpu", method = "full"), "should be one of")
+  expect_error(fastsvd(A, ncomp = 4, backend = "cpu", method = "unsupported"), "rsvd.*only")
+  expect_error(fastsvd(A, ncomp = 4, backend = "cpu", method = "full"), "rsvd.*only")
+  expect_error(fastsvd(A, work = 10L), "unused argument")
 })
 
 test_that("fastsvd maps backend and method to the intended internal SVD", {
   set.seed(12)
   A <- matrix(rnorm(70 * 10), 70, 10)
 
-  cpu_irlba <- fastsvd(A, ncomp = 4, backend = "cpu", method = "irlba")
-  expect_identical(cpu_irlba$svd.method, "irlba")
+  expect_error(fastsvd(A, ncomp = 4, backend = "cpu", method = "irlba"), "rsvd.*only")
 
   cpu_rsvd <- fastsvd(A, ncomp = 4, backend = "cpu", method = "rsvd")
   expect_identical(cpu_rsvd$svd.method, "cpu_rsvd")
 
   expect_error(
     fastsvd(A, ncomp = 4, backend = "cuda", method = "irlba"),
-    "only available with backend='cpu'|No CPU fallback"
+    "rsvd.*only|No CPU fallback"
   )
   expect_error(
     fastsvd(A, ncomp = 4, backend = "metal", method = "irlba"),
-    "only available with backend='cpu'|No CPU fallback"
+    "rsvd.*only|No CPU fallback"
   )
 })
 
-test_that("small SVD inputs use exact fallback for iterative public backends", {
+test_that("small rSVD inputs use the dense full-subspace calculation", {
   set.seed(42)
   A <- matrix(rnorm(40 * 5), 40, 5)
   ref <- base::svd(A, nu = 3, nv = 3)
 
-  for (method in c("irlba", "rsvd")) {
+  for (method in "rsvd") {
     out <- suppressWarnings(fastsvd(
       A,
       ncomp = 3,

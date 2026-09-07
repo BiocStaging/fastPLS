@@ -247,7 +247,11 @@ test_that("float32 label-aware products match dense one-hot fitting", {
 
     expect_equal(abs(compact_r), abs(dense_r), tolerance = 2e-3)
     expect_equal(compact$R2Y, dense$R2Y, tolerance = 2e-3)
-    expect_identical(compact$xprod_mode, "float32_label_class_sums")
+    expect_identical(
+      compact$xprod_mode,
+      if (method == 1L) "float32_label_class_sums" else
+        "float32_label_class_sums_blocked"
+    )
   }
 })
 
@@ -270,7 +274,7 @@ test_that("float32 classification avoids fitted and double-score work by default
   ))
 
   expect_null(fit$Yfit)
-  expect_identical(fit$xprod_mode, "float32_label_class_sums")
+  expect_identical(fit$xprod_mode, "float32_label_class_sums_blocked")
   pred <- predict(fit, X)
   expect_true(is.factor(pred$Ypred[["ncomp=4"]]))
 
@@ -297,7 +301,7 @@ test_that("float32 input refuses unsupported non-float routes", {
   }
 })
 
-test_that("float32 input supports CPU IRLBA-style SVD", {
+test_that("float32 input supports CPU rSVD for regression and classification", {
   skip_if_not_installed("float")
   skip_native_float32_on_windows()
   set.seed(13)
@@ -313,7 +317,7 @@ test_that("float32 input supports CPU IRLBA-style SVD", {
       ncomp = 1:2,
       method = "simpls",
       backend = "cpu",
-      svd.method = "irlba",
+      svd.method = "rsvd",
       return_variance = FALSE
     )
   )
@@ -331,7 +335,7 @@ test_that("float32 input supports CPU IRLBA-style SVD", {
     ncomp = 2,
     method = "plssvd",
     backend = "cpu",
-    svd.method = "irlba",
+    svd.method = "rsvd",
     classifier = "argmax",
     return_variance = FALSE
   )
@@ -392,18 +396,17 @@ test_that("CUDA float32 rSVD sketch matches CPU float32 arithmetic", {
   )
 })
 
-test_that("public CUDA float32 rSVD and PLS routes work when available", {
+test_that("public CUDA float32 PLS is resident and standalone SVD is rejected", {
   skip_if_not_installed("float")
   skip_native_float32_on_windows()
   skip_if_not(has_cuda(), "CUDA backend not available")
 
   set.seed(1234)
   A <- float::fl(matrix(rnorm(120), nrow = 20))
-  sv <- fastsvd(A, ncomp = 3, backend = "cuda", method = "rsvd", seed = 9)
-  expect_true(inherits(sv$u, "float32"))
-  expect_true(inherits(sv$v, "float32"))
-  expect_identical(sv$precision, "float32")
-  expect_equal(dim(sv$u), c(20L, 3L))
+  expect_error(
+    fastsvd(A, ncomp = 3, backend = "cuda", method = "rsvd", seed = 9),
+    "fully device-native"
+  )
   expect_error(
     fastsvd(A, ncomp = 3, backend = "cuda", method = "irlba", seed = 9),
     "supports method = 'rsvd' only"
@@ -425,7 +428,7 @@ test_that("public CUDA float32 rSVD and PLS routes work when available", {
   )
   expect_s3_class(fit, "fastPLS")
   expect_equal(attr(fit, "fastPLS_internal")$precision, "float32")
-  expect_equal(attr(fit, "fastPLS_internal")$predict_backend, "float32_cuda")
+  expect_equal(attr(fit, "fastPLS_internal")$predict_backend, "cuda_resident")
   expect_true(is.factor(fit$Ypred[[1L]]))
   expect_named(fit$accuracy, "ncomp=2")
 })
@@ -482,30 +485,6 @@ test_that("Metal float32 rSVD sketch matches CPU float32 arithmetic", {
   )
 })
 
-test_that("Metal float32 IRLBA-style SVD returns a valid approximation", {
-  skip_if_not_installed("float")
-  skip_native_float32_on_windows()
-  skip_if_not(has_metal(), "Metal backend not available")
-
-  set.seed(126)
-  A_mat <- matrix(rnorm(80), nrow = 10)
-  A <- float::fl(A_mat)
-  out <- fastPLS:::metal_float32_irlba_cpp(A, k = 3L, seed = 46L)
-  U <- fastPLS:::.float32_from_bits(out$u)
-  V <- fastPLS:::.float32_from_bits(out$v)
-
-  expect_true(inherits(U, "float32"))
-  expect_true(inherits(V, "float32"))
-  expect_equal(dim(U), c(10L, 3L))
-  expect_equal(dim(V), c(8L, 3L))
-  expect_equal(length(out$d), 3L)
-  expect_true(all(is.finite(out$d)))
-  expect_true(all(diff(out$d) <= 1e-5))
-
-  exact <- svd(A_mat, nu = 3, nv = 3)$d[1:3]
-  expect_equal(as.numeric(out$d), exact, tolerance = 2e-1)
-})
-
 test_that("fastsvd supports public float32 CPU routes", {
   skip_if_not_installed("float")
   skip_native_float32_on_windows()
@@ -519,58 +498,57 @@ test_that("fastsvd supports public float32 CPU routes", {
   expect_equal(dim(out_rsvd$u), c(12L, 3L))
   expect_equal(dim(out_rsvd$v), c(6L, 3L))
 
-  out_irlba <- fastsvd(A, ncomp = 3, backend = "cpu", method = "irlba", seed = 1)
-  expect_true(inherits(out_irlba$u, "float32"))
-  expect_true(inherits(out_irlba$v, "float32"))
-  expect_identical(out_irlba$precision, "float32")
-  expect_true(all(is.finite(out_irlba$d)))
+  expect_error(fastsvd(A, ncomp = 3, backend = "cpu", method = "irlba"),
+    "rsvd.*only")
 })
 
-test_that("fastsvd supports public float32 Metal rSVD route", {
+test_that("fastsvd rejects the hybrid float32 Metal rSVD route", {
   skip_if_not_installed("float")
   skip_native_float32_on_windows()
   skip_if_not(has_metal(), "Metal backend not available")
   set.seed(128)
   A <- float::fl(matrix(rnorm(72), nrow = 12))
-  out <- fastsvd(A, ncomp = 3, backend = "metal", method = "rsvd", seed = 1)
-  expect_true(inherits(out$u, "float32"))
-  expect_true(inherits(out$v, "float32"))
-  expect_identical(out$precision, "float32")
-  expect_equal(dim(out$u), c(12L, 3L))
-  expect_equal(dim(out$v), c(6L, 3L))
-
-  out_irlba <- fastsvd(A, ncomp = 3, backend = "metal", method = "irlba", seed = 1)
-  expect_true(inherits(out_irlba$u, "float32"))
-  expect_true(inherits(out_irlba$v, "float32"))
-  expect_identical(out_irlba$precision, "float32")
-  expect_true(all(is.finite(out_irlba$d)))
+  expect_error(
+    fastsvd(A, ncomp = 3, backend = "metal", method = "rsvd", seed = 1),
+    "fully device-native"
+  )
 })
 
-test_that("float32 accelerator rSVD remains finite for large operators", {
+test_that("float32 standalone accelerator rSVD rejects hybrid execution", {
   skip_if_not_installed("float")
   skip_native_float32_on_windows()
-  available <- c(
-    if (has_cuda()) "cuda",
-    if (has_metal()) "metal"
-  )
-  skip_if(!length(available), "No accelerator backend is available")
+  available <- if (has_cuda()) "cuda" else character()
+  skip_if(!length(available), "CUDA backend is not available")
 
   set.seed(129)
   A <- float::fl(matrix(rnorm(128L * 96L) * 1e12, nrow = 128L))
-  for (backend in available) {
-    out <- fastsvd(
+  expect_error(
+    fastsvd(
       A,
       ncomp = 3L,
-      backend = backend,
+      backend = available[[1L]],
       method = "rsvd",
       oversample = 32L,
       power = 5L,
       seed = 129L
+    ),
+    "fully device-native"
+  )
+})
+
+test_that("float32 multivariate regression CV preserves response dimensions", {
+    set.seed(731)
+    X <- float::fl(matrix(rnorm(80 * 12), 80, 12))
+    Y <- float::fl(matrix(rnorm(80 * 5), 80, 5))
+
+    fit <- pls.single.cv(
+        X, Y, ncomp = c(1L, 3L), kfold = 4L,
+        method = "simpls", backend = "cpu", fit = FALSE, seed = 19
     )
-    expect_equal(dim(out$u), c(128L, 3L), info = backend)
-    expect_equal(dim(out$v), c(96L, 3L), info = backend)
-    expect_true(all(is.finite(out$d)), info = backend)
-  }
+
+    expect_identical(dim(fit$Ypred), c(80L, 5L, 2L))
+    expect_length(fit$RMSD, 2L)
+    expect_true(all(is.finite(fit$RMSD)))
 })
 
 test_that("float32 accelerator SIMPLS retains a nonempty reduced left basis", {
@@ -634,7 +612,8 @@ test_that("pls supports float32 Metal backend when available", {
   )
   expect_s3_class(fit, "fastPLS")
   expect_equal(attr(fit, "fastPLS_internal")$precision, "float32")
-  expect_equal(attr(fit, "fastPLS_internal")$predict_backend, "float32_metal")
+  expect_equal(attr(fit, "fastPLS_internal")$predict_backend, "metal_resident")
+  expect_equal(attr(fit, "fastPLS_internal")$execution_route, "resident Metal")
   expect_true(inherits(fit$Ypred[[1L]], "float32"))
   expect_named(fit$Q2Y, c("ncomp=1", "ncomp=2"))
 })
@@ -817,46 +796,44 @@ test_that("float32 kernel PLS-LDA supports linear, RBF, and polynomial kernels",
   }
 })
 
-test_that("float32 OPLS and kernel PLS use Metal when available", {
+test_that("Metal runs native OPLS and nonlinear kernel PLS routes", {
   skip_if_not_installed("float")
   skip_native_float32_on_windows()
   skip_if_not(has_metal(), "Metal backend not available")
   X <- float::fl(as.matrix(iris[, 1:4]))
   y <- iris$Species
 
-  opls_fit <- suppressWarnings(pls(
-    X, y, X[1:12, ], y[1:12], ncomp = 2, method = "opls",
-    backend = "metal", svd.method = "rsvd", classifier = "lda",
-    return_variance = FALSE,
-    seed = 15
-  ))
-  kernel_fit <- suppressWarnings(pls(
-    X, y, X[1:12, ], y[1:12], ncomp = 2, method = "kernelpls",
-    kernel = "rbf", backend = "metal", svd.method = "rsvd",
-    classifier = "lda", return_variance = FALSE, seed = 15
-  ))
-  expect_identical(attr(opls_fit, "fastPLS_internal")$precision, "float32")
-  expect_identical(attr(kernel_fit, "fastPLS_internal")$precision, "float32")
-  expect_match(opls_fit$opls_engine, "metal")
-  expect_match(kernel_fit$kernel_engine, "metal")
-  expect_true(is.factor(opls_fit$Ypred[[1L]]))
-  expect_true(is.factor(kernel_fit$Ypred[[1L]]))
+  for (arguments in list(
+    list(method = "opls", kernel = "linear"),
+    list(method = "kernelpls", kernel = "rbf")
+  )) {
+    fit <- do.call(pls, c(list(
+      X, y, ncomp = 2,
+      backend = "metal", return_variance = FALSE
+    ), arguments))
+    expect_identical(fit$diagnostics$residency$route, "resident metal")
+  }
 })
 
-test_that("float32 OPLS and kernel PLS use CUDA when available", {
+test_that("CUDA runs native OPLS and nonlinear kernel PLS routes", {
   skip_if_not_installed("float")
   skip_native_float32_on_windows()
   skip_if_not(has_cuda(), "CUDA backend not available")
   X <- float::fl(as.matrix(iris[, 1:4]))
   y <- iris$Species
 
-  for (method in c("opls", "kernelpls")) {
-    fit <- pls(
-      X, y, X[1:12, ], y[1:12], ncomp = 2, method = method,
-      kernel = "rbf", backend = "cuda", svd.method = "rsvd",
+  for (arguments in list(
+    list(method = "opls", kernel = "linear"),
+    list(method = "kernelpls", kernel = "rbf")
+  )) {
+    fit <- do.call(pls, c(list(
+      X, y, X[1:12, ], y[1:12], ncomp = 2,
+      backend = "cuda", svd.method = "rsvd",
       classifier = "lda", return_variance = FALSE, seed = 16
+    ), arguments))
+    expect_identical(
+      fit$diagnostics$residency$route,
+      "resident cuda"
     )
-    expect_identical(attr(fit, "fastPLS_internal")$precision, "float32")
-    expect_true(is.factor(fit$Ypred[[1L]]))
   }
 })

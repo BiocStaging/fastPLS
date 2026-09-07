@@ -4,8 +4,8 @@ PKG_CPPFLAGS = @FASTPLS_WIN_PKG_CPPFLAGS@
 PKG_CXXFLAGS = -I../inst/include/ -IANN -O3 -DWIN32 -DDLL_EXPORTS -DANN_NO_RANDOM -DRANN -DARMA_64BIT_WORD=1 @FASTPLS_WIN_PKG_CXXFLAGS@
 PKG_LIBS = @FASTPLS_WIN_PKG_LIBS@ $(LAPACK_LIBS) $(BLAS_LIBS) $(FLIBS)
 
-OBJECTS = RcppExports.o export-inline-header.o fastPLS.o fastpls_cpp_bridge.o irlba.o \
-	 svd_iface.o svd_cpu_exact.o svd_cpu_irlba.o svd_cpu_rsvd.o svd_cuda_rsvd.o \
+OBJECTS = RcppExports.o export-inline-header.o fastPLS.o prediction_metrics.o cuda_resident_r.o metal_resident_r.o \
+	 svd_iface.o svd_cpu_exact.o svd_cpu_rsvd.o svd_cuda_rsvd.o \
 	 svd_metal_api.o svd_metal_backend_stub.o@FASTPLS_WIN_CUDA_OBJECTS@
 
 @FASTPLS_WIN_CUDA_RULE@

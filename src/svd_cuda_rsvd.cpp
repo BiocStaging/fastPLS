@@ -10,6 +10,7 @@
 
 #include <cstdlib>
 #include <limits>
+#include <mutex>
 #include <random>
 #include <stdexcept>
 #include <string>
@@ -463,17 +464,23 @@ class CudaRSVDWorkspace {
     int p,
     int m,
     int max_ncomp,
-    bool fit
+    bool fit,
+    bool store_B
   ) {
     ensure_buffer(dRRmat_, bytes_for(p, max_ncomp), bytes_RRmat_, "cudaMalloc(dRRmat)");
     ensure_buffer(dQQmat_, bytes_for(m, max_ncomp), bytes_QQmat_, "cudaMalloc(dQQmat)");
     ensure_buffer(dVVmat_, bytes_for(p, max_ncomp), bytes_VVmat_, "cudaMalloc(dVVmat)");
-    ensure_buffer(dBcur_, bytes_for(p, m), bytes_Bcur_, "cudaMalloc(dBcur)");
     ensure_buffer(dCoeff_, bytes_for(std::max(max_ncomp, 1), 1), bytes_Coeff_, "cudaMalloc(dCoeff)");
     check_cuda(cudaMemset(dRRmat_, 0, bytes_for(p, max_ncomp)), "cudaMemset(dRRmat)");
     check_cuda(cudaMemset(dQQmat_, 0, bytes_for(m, max_ncomp)), "cudaMemset(dQQmat)");
     check_cuda(cudaMemset(dVVmat_, 0, bytes_for(p, max_ncomp)), "cudaMemset(dVVmat)");
-    check_cuda(cudaMemset(dBcur_, 0, bytes_for(p, m)), "cudaMemset(dBcur)");
+    if (store_B) {
+      ensure_buffer(dBcur_, bytes_for(p, m), bytes_Bcur_, "cudaMalloc(dBcur)");
+      check_cuda(cudaMemset(dBcur_, 0, bytes_for(p, m)), "cudaMemset(dBcur)");
+    } else {
+      // Compact prediction uses RR and QQ; no dense coefficient accumulator.
+      release_pls_coefficient_buffer();
+    }
     if (fit) {
       ensure_buffer(dYfit_, bytes_for(n, m), bytes_Yfit_, "cudaMalloc(dYfit)");
       check_cuda(cudaMemset(dYfit_, 0, bytes_for(n, m)), "cudaMemset(dYfit)");
@@ -759,10 +766,12 @@ class CudaRSVDWorkspace {
       cublasDcopy(handle_, p, dPvec_, 1, dVVmat_ + static_cast<size_t>(a_idx) * static_cast<size_t>(p), 1),
       "cublasDcopy(v->VV)"
     );
-    check_cublas(
-      cublasDger(handle_, p, m, &alpha, dRvec_, 1, dQvec_, 1, dBcur_, p),
-      "cublasDger(Bcur+=rq^T)"
-    );
+    if (dBcur_ != nullptr) {
+      check_cublas(
+        cublasDger(handle_, p, m, &alpha, dRvec_, 1, dQvec_, 1, dBcur_, p),
+        "cublasDger(Bcur+=rq^T)"
+      );
+    }
 
     if (fit) {
       check_cublas(
@@ -783,6 +792,9 @@ class CudaRSVDWorkspace {
   }
 
   void simpls_fast_copy_bcur(double* hB, int p, int m) {
+    if (dBcur_ == nullptr) {
+      throw std::runtime_error("Dense SIMPLS coefficients were not requested");
+    }
     check_cuda(cudaMemcpy(hB, dBcur_, bytes_for(p, m), cudaMemcpyDeviceToHost), "cudaMemcpy(Bcur)");
   }
 
@@ -2400,6 +2412,118 @@ bool cuda_runtime_available() {
   return (status == cudaSuccess && n_devices > 0);
 }
 
+struct CudaFloatCrossproduct::Impl {
+  Impl(const arma::fmat& X, const arma::fmat& Y) {
+    if (!cuda_runtime_available()) {
+      throw std::runtime_error("CUDA cross-product unavailable; no CPU fallback is performed");
+    }
+    if (X.n_rows != Y.n_rows || X.n_elem == 0 || Y.n_elem == 0) {
+      throw std::runtime_error("CUDA cross-product requires nonempty X and Y with matching rows");
+    }
+    const auto limit = static_cast<arma::uword>(std::numeric_limits<int>::max());
+    if (X.n_rows > limit || X.n_cols > limit || Y.n_cols > limit) {
+      throw std::runtime_error("CUDA cross-product dimensions exceed CUDA int limits");
+    }
+    n = static_cast<int>(X.n_rows);
+    p = static_cast<int>(X.n_cols);
+    q = static_cast<int>(Y.n_cols);
+    workspace.initialize();
+    x.ensure(X.n_elem);
+    y.ensure(Y.n_elem);
+    check_cuda(cudaMemcpyAsync(x.data(), X.memptr(), sizeof(float) * X.n_elem,
+      cudaMemcpyHostToDevice, workspace.stream()), "upload float32 cross-product X");
+    check_cuda(cudaMemcpyAsync(y.data(), Y.memptr(), sizeof(float) * Y.n_elem,
+      cudaMemcpyHostToDevice, workspace.stream()), "upload float32 cross-product Y");
+    check_cuda(cudaStreamSynchronize(workspace.stream()), "synchronize cross-product upload");
+  }
+  int n, p, q;
+  CudaFloatWorkspace workspace;
+  CudaLDADeviceBuffer<float> x, y;
+  std::mutex mutex;
+};
+
+CudaFloatCrossproduct::CudaFloatCrossproduct(const arma::fmat& X, const arma::fmat& Y)
+    : impl_(new Impl(X, Y)) {}
+CudaFloatCrossproduct::~CudaFloatCrossproduct() = default;
+arma::fmat CudaFloatCrossproduct::multiply(const arma::fmat& B, bool transpose) {
+  std::lock_guard<std::mutex> lock(impl_->mutex);
+  const int inner = transpose ? impl_->p : impl_->q;
+  const int rows = transpose ? impl_->q : impl_->p;
+  if (B.n_rows != static_cast<arma::uword>(inner) ||
+      B.n_cols > static_cast<arma::uword>(std::numeric_limits<int>::max())) {
+    throw std::runtime_error("CUDA float32 cross-product: invalid matrix dimensions");
+  }
+  arma::fmat result(rows, B.n_cols);
+  if (B.n_cols == 0) return result;
+  const int width = static_cast<int>(B.n_cols);
+  auto& ws = impl_->workspace;
+  ws.b.ensure(B.n_elem);
+  ws.z.ensure(static_cast<std::size_t>(impl_->n) * width);
+  ws.c.ensure(result.n_elem);
+  check_cuda(cudaMemcpyAsync(ws.b.data(), B.memptr(), sizeof(float) * B.n_elem,
+    cudaMemcpyHostToDevice, ws.stream()), "upload float32 cross-product sketch");
+  const float one = 1.0f, zero = 0.0f;
+  check_cublas(cublasSgemm(ws.blas(), CUBLAS_OP_N, CUBLAS_OP_N,
+    impl_->n, width, inner, &one, transpose ? impl_->x.data() : impl_->y.data(),
+    impl_->n, ws.b.data(), inner, &zero, ws.z.data(), impl_->n),
+    "float32 cross-product inner GEMM");
+  check_cublas(cublasSgemm(ws.blas(), CUBLAS_OP_T, CUBLAS_OP_N,
+    rows, width, impl_->n, &one, transpose ? impl_->y.data() : impl_->x.data(),
+    impl_->n, ws.z.data(), impl_->n, &zero, ws.c.data(), rows),
+    "float32 cross-product outer GEMM");
+  check_cuda(cudaMemcpyAsync(result.memptr(), ws.c.data(), sizeof(float) * result.n_elem,
+    cudaMemcpyDeviceToHost, ws.stream()), "download float32 cross-product result");
+  check_cuda(cudaStreamSynchronize(ws.stream()), "synchronize float32 cross-product");
+  return result;
+}
+
+void CudaFloatCrossproduct::deflate(const arma::fvec& v) {
+  std::lock_guard<std::mutex> lock(impl_->mutex);
+  if (v.n_elem != static_cast<arma::uword>(impl_->p)) {
+    throw std::runtime_error("CUDA float32 factor deflation: invalid direction size");
+  }
+  auto& ws = impl_->workspace;
+  ws.b.ensure(v.n_elem);
+  ws.z.ensure(impl_->n);
+  check_cuda(cudaMemcpyAsync(ws.b.data(), v.memptr(), sizeof(float) * v.n_elem,
+    cudaMemcpyHostToDevice, ws.stream()), "upload float32 factor deflation direction");
+  const float one = 1.0f, zero = 0.0f, negative = -1.0f;
+  check_cublas(cublasSgemv(ws.blas(), CUBLAS_OP_N, impl_->n, impl_->p,
+    &one, impl_->x.data(), impl_->n, ws.b.data(), 1, &zero, ws.z.data(), 1),
+    "float32 factor deflation score");
+  check_cublas(cublasSger(ws.blas(), impl_->n, impl_->p, &negative,
+    ws.z.data(), 1, ws.b.data(), 1, impl_->x.data(), impl_->n),
+    "float32 factor deflation update");
+  check_cuda(cudaStreamSynchronize(ws.stream()), "synchronize float32 factor deflation");
+}
+
+arma::fmat CudaFloatCrossproduct::left_factor() {
+  std::lock_guard<std::mutex> lock(impl_->mutex);
+  arma::fmat X(impl_->n, impl_->p);
+  auto& ws = impl_->workspace;
+  check_cuda(cudaMemcpyAsync(X.memptr(), impl_->x.data(), sizeof(float) * X.n_elem,
+    cudaMemcpyDeviceToHost, ws.stream()), "download float32 left factor");
+  check_cuda(cudaStreamSynchronize(ws.stream()), "synchronize float32 left factor");
+  return X;
+}
+
+void CudaFloatCrossproduct::orthonormalize(arma::fmat& B) {
+  std::lock_guard<std::mutex> lock(impl_->mutex);
+  if (B.n_rows > static_cast<arma::uword>(std::numeric_limits<int>::max()) ||
+      B.n_cols > B.n_rows || B.n_cols == 0) {
+    throw std::runtime_error("Invalid float32 cross-product QR dimensions");
+  }
+  auto& ws = impl_->workspace;
+  ws.a.ensure(B.n_elem);
+  check_cuda(cudaMemcpyAsync(ws.a.data(), B.memptr(), sizeof(float) * B.n_elem,
+    cudaMemcpyHostToDevice, ws.stream()), "upload float32 cross-product QR");
+  ws.orthonormalize(ws.a.data(), static_cast<int>(B.n_rows),
+                    static_cast<int>(B.n_cols), "float32 cross-product QR");
+  check_cuda(cudaMemcpyAsync(B.memptr(), ws.a.data(), sizeof(float) * B.n_elem,
+    cudaMemcpyDeviceToHost, ws.stream()), "download float32 cross-product QR");
+  check_cuda(cudaStreamSynchronize(ws.stream()), "synchronize float32 cross-product QR");
+}
+
 void cuda_reset_workspace() {
   g_workspace.reset();
   g_float_workspace.reset();
@@ -2865,12 +2989,13 @@ void cuda_simpls_fast_begin_device_loop(
   int p,
   int m,
   int max_ncomp,
-  bool fit
+  bool fit,
+  bool store_B
 ) {
   if (!cuda_runtime_available()) {
     throw std::runtime_error("CUDA runtime not available");
   }
-  g_workspace.simpls_fast_begin_device_loop(n, p, m, max_ncomp, fit);
+  g_workspace.simpls_fast_begin_device_loop(n, p, m, max_ncomp, fit, store_B);
 }
 
 void cuda_simpls_fast_refresh_block_resident(
@@ -4553,6 +4678,24 @@ SVDResult truncated_svd_cuda_rsvd(const Mat& A, int k, const SVDOptions& opt) {
 
 namespace fastpls_svd {
 
+struct CudaFloatCrossproduct::Impl {};
+CudaFloatCrossproduct::CudaFloatCrossproduct(const arma::fmat&, const arma::fmat&) {
+  throw std::runtime_error("CUDA backend not compiled; no CPU fallback is performed");
+}
+CudaFloatCrossproduct::~CudaFloatCrossproduct() = default;
+arma::fmat CudaFloatCrossproduct::multiply(const arma::fmat&, bool) {
+  throw std::runtime_error("CUDA backend not compiled; no CPU fallback is performed");
+}
+void CudaFloatCrossproduct::orthonormalize(arma::fmat&) {
+  throw std::runtime_error("CUDA backend not compiled; no CPU fallback is performed");
+}
+void CudaFloatCrossproduct::deflate(const arma::fvec&) {
+  throw std::runtime_error("CUDA backend not compiled; no CPU fallback is performed");
+}
+arma::fmat CudaFloatCrossproduct::left_factor() {
+  throw std::runtime_error("CUDA backend not compiled; no CPU fallback is performed");
+}
+
 SVDResult truncated_svd_cuda_rsvd(const Mat&, int, const SVDOptions&) {
   throw std::runtime_error("CUDA backend not compiled");
 }
@@ -4799,6 +4942,7 @@ void cuda_simpls_fast_begin_device_loop(
   int,
   int,
   int,
+  bool,
   bool
 ) {
   throw std::runtime_error("CUDA backend not compiled");

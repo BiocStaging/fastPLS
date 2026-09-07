@@ -8,10 +8,15 @@
 #include <dispatch/dispatch.h>
 #include <cmath>
 #include <cstring>
+#include <initializer_list>
 #include <limits>
+#include <list>
+#include <memory>
+#include <mutex>
 #include <random>
 #include <stdexcept>
 #include <string>
+#include <type_traits>
 #include <vector>
 
 namespace fastpls_svd {
@@ -34,68 +39,76 @@ id<MTLCommandQueue> default_command_queue() {
   return queue;
 }
 
-void copy_arma_to_mps_buffer(const arma::mat& X,
-                             id<MTLBuffer> buffer,
-                             const NSUInteger row_bytes) {
+template<typename T>
+void copy_to_mps_buffer(const arma::Mat<T>& X, id<MTLBuffer> buffer,
+                        const NSUInteger row_bytes) {
   const arma::uword nr = X.n_rows;
   const arma::uword nc = X.n_cols;
   char* base = static_cast<char*>([buffer contents]);
-
-  for (arma::uword i = 0; i < nr; ++i) {
-    float* row = reinterpret_cast<float*>(base + static_cast<NSUInteger>(i) * row_bytes);
-    for (arma::uword j = 0; j < nc; ++j) {
-      row[j] = static_cast<float>(X(i, j));
+  // Tile the column-major/row-major copy so neither side repeatedly evicts
+  // cache lines from the other. Casts and matrix entries are unchanged.
+  constexpr arma::uword tile = 32;
+  for (arma::uword row0 = 0; row0 < nr; row0 += tile) {
+    const arma::uword row_end = std::min(nr, row0 + tile);
+    for (arma::uword col0 = 0; col0 < nc; col0 += tile) {
+      const arma::uword col_end = std::min(nc, col0 + tile);
+      for (arma::uword j = col0; j < col_end; ++j) {
+        const T* column = X.colptr(j);
+        for (arma::uword i = row0; i < row_end; ++i) {
+          float* row = reinterpret_cast<float*>(base + static_cast<NSUInteger>(i) * row_bytes);
+          row[j] = static_cast<float>(column[i]);
+        }
+      }
     }
   }
+}
+
+void copy_arma_to_mps_buffer(const arma::mat& X,
+                             id<MTLBuffer> buffer,
+                             const NSUInteger row_bytes) {
+  copy_to_mps_buffer(X, buffer, row_bytes);
 }
 
 void copy_fmat_to_mps_buffer(const arma::fmat& X,
                              id<MTLBuffer> buffer,
                              const NSUInteger row_bytes) {
-  const arma::uword nr = X.n_rows;
-  const arma::uword nc = X.n_cols;
-  char* base = static_cast<char*>([buffer contents]);
+  copy_to_mps_buffer(X, buffer, row_bytes);
+}
 
-  for (arma::uword i = 0; i < nr; ++i) {
-    float* row = reinterpret_cast<float*>(base + static_cast<NSUInteger>(i) * row_bytes);
-    for (arma::uword j = 0; j < nc; ++j) {
-      row[j] = X(i, j);
+template<typename T>
+arma::Mat<T> copy_from_mps_buffer(id<MTLBuffer> buffer, const arma::uword nr,
+                                  const arma::uword nc, const NSUInteger row_bytes) {
+  arma::Mat<T> out(nr, nc);
+  const char* base = static_cast<const char*>([buffer contents]);
+  constexpr arma::uword tile = 32;
+  for (arma::uword row0 = 0; row0 < nr; row0 += tile) {
+    const arma::uword row_end = std::min(nr, row0 + tile);
+    for (arma::uword col0 = 0; col0 < nc; col0 += tile) {
+      const arma::uword col_end = std::min(nc, col0 + tile);
+      for (arma::uword j = col0; j < col_end; ++j) {
+        T* column = out.colptr(j);
+        for (arma::uword i = row0; i < row_end; ++i) {
+          const float* row = reinterpret_cast<const float*>(base + static_cast<NSUInteger>(i) * row_bytes);
+          column[i] = static_cast<T>(row[j]);
+        }
+      }
     }
   }
+  return out;
 }
 
 arma::mat copy_mps_buffer_to_arma(id<MTLBuffer> buffer,
                                   const arma::uword nr,
                                   const arma::uword nc,
                                   const NSUInteger row_bytes) {
-  arma::mat out(nr, nc);
-  const char* base = static_cast<const char*>([buffer contents]);
-
-  for (arma::uword i = 0; i < nr; ++i) {
-    const float* row = reinterpret_cast<const float*>(base + static_cast<NSUInteger>(i) * row_bytes);
-    for (arma::uword j = 0; j < nc; ++j) {
-      out(i, j) = static_cast<double>(row[j]);
-    }
-  }
-
-  return out;
+  return copy_from_mps_buffer<double>(buffer, nr, nc, row_bytes);
 }
 
 arma::fmat copy_mps_buffer_to_fmat(id<MTLBuffer> buffer,
                                    const arma::uword nr,
                                    const arma::uword nc,
                                    const NSUInteger row_bytes) {
-  arma::fmat out(nr, nc);
-  const char* base = static_cast<const char*>([buffer contents]);
-
-  for (arma::uword i = 0; i < nr; ++i) {
-    const float* row = reinterpret_cast<const float*>(base + static_cast<NSUInteger>(i) * row_bytes);
-    for (arma::uword j = 0; j < nc; ++j) {
-      out(i, j) = row[j];
-    }
-  }
-
-  return out;
+  return copy_from_mps_buffer<float>(buffer, nr, nc, row_bytes);
 }
 
 struct MetalMatrix {
@@ -126,12 +139,6 @@ MetalMatrix make_matrix_from_arma(id<MTLDevice> device, const arma::mat& X) {
   return M;
 }
 
-MetalMatrix make_matrix_from_fmat(id<MTLDevice> device, const arma::fmat& X) {
-  MetalMatrix M = make_matrix(device, static_cast<NSUInteger>(X.n_rows), static_cast<NSUInteger>(X.n_cols));
-  copy_fmat_to_mps_buffer(X, M.buffer, M.row_bytes);
-  return M;
-}
-
 MPSMatrix* mps_matrix(const MetalMatrix& M) {
   MPSMatrixDescriptor* desc = [MPSMatrixDescriptor
     matrixDescriptorWithRows:M.rows
@@ -139,6 +146,130 @@ MPSMatrix* mps_matrix(const MetalMatrix& M) {
     rowBytes:M.row_bytes
     dataType:MPSDataTypeFloat32];
   return [[MPSMatrix alloc] initWithBuffer:M.buffer descriptor:desc];
+}
+
+class MetalProduct {
+ public:
+  MetalProduct(id<MTLDevice> device, const MetalMatrix& A,
+               const MetalMatrix& B, const MetalMatrix& C,
+               bool transpose_left, bool transpose_right) {
+    const NSUInteger rows = transpose_left ? A.cols : A.rows;
+    const NSUInteger inner = transpose_left ? A.rows : A.cols;
+    const NSUInteger columns = transpose_right ? B.rows : B.cols;
+    if (inner != (transpose_right ? B.cols : B.rows) ||
+        C.rows != rows || C.cols != columns) {
+      throw std::runtime_error("Metal product workspace dimensions do not match");
+    }
+    left_ = mps_matrix(A);
+    right_ = mps_matrix(B);
+    result_ = mps_matrix(C);
+    product_ = [[MPSMatrixMultiplication alloc]
+      initWithDevice:device transposeLeft:transpose_left
+      transposeRight:transpose_right resultRows:rows resultColumns:columns
+      interiorColumns:inner alpha:1.0 beta:0.0];
+  }
+
+  void encode(id<MTLCommandBuffer> command) const {
+    [product_ encodeToCommandBuffer:command leftMatrix:left_
+      rightMatrix:right_ resultMatrix:result_];
+  }
+
+ private:
+  MPSMatrix* left_;
+  MPSMatrix* right_;
+  MPSMatrix* result_;
+  MPSMatrixMultiplication* product_;
+};
+
+void run_metal_products(id<MTLCommandQueue> queue,
+                        std::initializer_list<const MetalProduct*> products) {
+  id<MTLCommandBuffer> command = [queue commandBuffer];
+  if (command == nil) {
+    throw std::runtime_error("Metal workspace failed to create a command buffer");
+  }
+  for (const MetalProduct* product : products) product->encode(command);
+  [command commit];
+  [command waitUntilCompleted];
+  NSError* error = [command error];
+  if (error != nil) {
+    throw std::runtime_error(std::string("Metal workspace command failed: ") +
+      std::string([[error localizedDescription] UTF8String]));
+  }
+}
+
+class MetalHostProduct {
+ public:
+  MetalHostProduct(id<MTLDevice> device, NSUInteger ar, NSUInteger ac,
+                   NSUInteger br, NSUInteger bc, bool tl, bool tr)
+      : left(make_matrix(device, ar, ac)), right(make_matrix(device, br, bc)),
+        result(make_matrix(device, tl ? ac : ar, tr ? br : bc)),
+        product(device, left, right, result, tl, tr),
+        transpose_left(tl), transpose_right(tr) {}
+
+  bool matches(NSUInteger ar, NSUInteger ac, NSUInteger br, NSUInteger bc,
+                bool tl, bool tr) const {
+    return left.rows == ar && left.cols == ac && right.rows == br &&
+      right.cols == bc && transpose_left == tl && transpose_right == tr;
+  }
+
+  MetalMatrix left, right, result;
+  MetalProduct product;
+  bool transpose_left, transpose_right;
+};
+
+// Cache allocation and descriptors, never matrix values. The lock covers the
+// synchronous product and output copy, so another caller cannot reuse live data.
+class MetalHostProductCache {
+ public:
+  std::mutex mutex;
+
+  MetalHostProduct& acquire(id<MTLDevice> device, NSUInteger ar, NSUInteger ac,
+                            NSUInteger br, NSUInteger bc, bool tl, bool tr,
+                            std::unique_ptr<MetalHostProduct>& transient) {
+    for (auto item = entries_.begin(); item != entries_.end(); ++item) {
+      if ((*item)->matches(ar, ac, br, bc, tl, tr)) {
+        entries_.splice(entries_.begin(), entries_, item);
+        return *entries_.front();
+      }
+    }
+    const std::size_t bytes = storage(ar, ac) + storage(br, bc) +
+      storage(tl ? ac : ar, tr ? br : bc);
+    // Large one-off products must not retain device memory between fits.
+    if (bytes > limit_) {
+      entries_.clear();
+      bytes_ = 0;
+      transient.reset(new MetalHostProduct(device, ar, ac, br, bc, tl, tr));
+      return *transient;
+    }
+    while (!entries_.empty() && (entries_.size() >= 8 || bytes_ + bytes > limit_)) {
+      const auto& last = *entries_.back();
+      bytes_ -= storage(last.left.rows, last.left.cols) +
+        storage(last.right.rows, last.right.cols) +
+        storage(last.result.rows, last.result.cols);
+      entries_.pop_back();
+    }
+    auto entry = std::unique_ptr<MetalHostProduct>(
+      new MetalHostProduct(device, ar, ac, br, bc, tl, tr));
+    entries_.push_front(std::move(entry));
+    bytes_ += bytes;
+    return *entries_.front();
+  }
+
+ private:
+  static std::size_t storage(NSUInteger rows, NSUInteger columns) {
+    const NSUInteger stride = [MPSMatrixDescriptor rowBytesFromColumns:columns
+      dataType:MPSDataTypeFloat32];
+    if (stride != 0 && rows > limit_ / stride) return limit_ + 1;
+    return rows * stride;
+  }
+  static constexpr std::size_t limit_ = 64u * 1024u * 1024u;
+  std::size_t bytes_ = 0;
+  std::list<std::unique_ptr<MetalHostProduct>> entries_;
+};
+
+MetalHostProductCache& host_product_cache() {
+  static MetalHostProductCache cache;
+  return cache;
 }
 
 MetalMatrix metal_matmul(id<MTLDevice> device,
@@ -305,25 +436,216 @@ void project_left_inplace(arma::vec& x,
   x -= Vprev * (Vprev.t() * x);
 }
 
-MetalMatrix metal_crossprod_x_y_times(id<MTLDevice> device,
-                                      id<MTLCommandQueue> queue,
-                                      const MetalMatrix& X,
-                                      const MetalMatrix& Y,
-                                      const MetalMatrix& v) {
-  MetalMatrix yv = metal_matmul(device, queue, Y, v, false, false);
-  return metal_matmul(device, queue, X, yv, true, false);
-}
-
-MetalMatrix metal_tcrossprod_x_y_times(id<MTLDevice> device,
-                                       id<MTLCommandQueue> queue,
-                                       const MetalMatrix& X,
-                                       const MetalMatrix& Y,
-                                       const MetalMatrix& u) {
-  MetalMatrix xu = metal_matmul(device, queue, X, u, false, false);
-  return metal_matmul(device, queue, Y, xu, true, false);
-}
-
 } // namespace
+
+struct MetalFloatOperator::Impl {
+  struct Product {
+    Product(id<MTLDevice> device, const MetalMatrix& left,
+            NSUInteger columns, bool transpose)
+        : right(make_matrix(device, transpose ? left.rows : left.cols, columns)),
+          result(make_matrix(device, transpose ? left.cols : left.rows, columns)),
+          operation(device, left, right, result, transpose, false),
+          transpose_left(transpose) {}
+    MetalMatrix right, result;
+    MetalProduct operation;
+    bool transpose_left;
+  };
+
+  explicit Impl(const arma::fmat& A) {
+    device = default_device();
+    queue = default_command_queue();
+    if (device == nil || queue == nil) {
+      throw std::runtime_error(
+        "Metal float32 operator is unavailable; no CPU fallback is performed");
+    }
+    if (A.n_rows == 0 || A.n_cols == 0) {
+      throw std::runtime_error("Metal float32 operator requires a nonempty matrix");
+    }
+    left = make_matrix(device, A.n_rows, A.n_cols);
+    copy_fmat_to_mps_buffer(A, left.buffer, left.row_bytes);
+  }
+
+  Product& product(NSUInteger columns, bool transpose) {
+    for (auto item = products.begin(); item != products.end(); ++item) {
+      if ((*item)->right.cols == columns && (*item)->transpose_left == transpose) {
+        products.splice(products.begin(), products, item);
+        return *products.front();
+      }
+    }
+    // A range solve alternates forward/reverse products of one sketch width.
+    // Keep that pair, not every width ever requested by the caller.
+    if (products.size() == 2) products.pop_back();
+    products.emplace_front(new Product(device, left, columns, transpose));
+    return *products.front();
+  }
+
+  id<MTLDevice> device;
+  id<MTLCommandQueue> queue;
+  MetalMatrix left;
+  std::list<std::unique_ptr<Product>> products;
+  std::mutex mutex;
+};
+
+MetalFloatOperator::MetalFloatOperator(const arma::fmat& A) {
+  @autoreleasepool {
+    impl_.reset(new Impl(A));
+  }
+}
+
+MetalFloatOperator::~MetalFloatOperator() = default;
+
+void MetalFloatOperator::update(const arma::fmat& A) {
+  std::lock_guard<std::mutex> lock(impl_->mutex);
+  if (A.n_rows != impl_->left.rows || A.n_cols != impl_->left.cols) {
+    throw std::runtime_error("Metal float32 operator update changed matrix dimensions");
+  }
+  copy_fmat_to_mps_buffer(A, impl_->left.buffer, impl_->left.row_bytes);
+}
+
+arma::fmat MetalFloatOperator::multiply(const arma::fmat& B, bool transpose_left) {
+  std::lock_guard<std::mutex> lock(impl_->mutex);
+  const NSUInteger inner = transpose_left ? impl_->left.rows : impl_->left.cols;
+  const NSUInteger rows = transpose_left ? impl_->left.cols : impl_->left.rows;
+  if (B.n_rows != inner) {
+    throw std::runtime_error("Metal float32 operator: non-conformable matrices");
+  }
+  if (B.n_cols == 0) return arma::fmat(rows, 0);
+  @autoreleasepool {
+    Impl::Product& workspace = impl_->product(B.n_cols, transpose_left);
+    copy_fmat_to_mps_buffer(B, workspace.right.buffer, workspace.right.row_bytes);
+    run_metal_products(impl_->queue, {&workspace.operation});
+    return copy_mps_buffer_to_fmat(workspace.result.buffer, rows, B.n_cols,
+                                  workspace.result.row_bytes);
+  }
+}
+
+struct MetalFloatCrossproduct::Impl {
+  struct Deflation {
+    Deflation(id<MTLDevice> device, const MetalMatrix& X)
+        : weight(make_matrix(device, X.cols, 1)),
+          row(make_matrix(device, 1, X.cols)),
+          score(make_matrix(device, X.rows, 1)),
+          product(device, X, weight, score, false, false) {}
+    MetalMatrix weight, row, score;
+    MetalProduct product;
+  };
+  struct Product {
+    Product(id<MTLDevice> device, const MetalMatrix& X, const MetalMatrix& Y,
+            NSUInteger width, bool transposed)
+        : input(make_matrix(device, transposed ? X.cols : Y.cols, width)),
+          intermediate(make_matrix(device, X.rows, width)),
+          result(make_matrix(device, transposed ? Y.cols : X.cols, width)),
+          first(device, transposed ? X : Y, input, intermediate, false, false),
+          second(device, transposed ? Y : X, intermediate, result, true, false),
+          transpose(transposed) {}
+    MetalMatrix input, intermediate, result;
+    MetalProduct first, second;
+    bool transpose;
+  };
+
+  template<typename T>
+  Impl(const arma::Mat<T>& x, const arma::Mat<T>& y) {
+    device = default_device();
+    queue = default_command_queue();
+    if (device == nil || queue == nil) {
+      throw std::runtime_error("Metal cross-product unavailable; no CPU fallback is performed");
+    }
+    if (x.n_rows != y.n_rows || x.n_elem == 0 || y.n_elem == 0) {
+      throw std::runtime_error("Metal cross-product requires nonempty X and Y with matching rows");
+    }
+    X = make_matrix(device, x.n_rows, x.n_cols);
+    Y = make_matrix(device, y.n_rows, y.n_cols);
+    if constexpr (std::is_same<T, float>::value) {
+      copy_fmat_to_mps_buffer(x, X.buffer, X.row_bytes);
+      copy_fmat_to_mps_buffer(y, Y.buffer, Y.row_bytes);
+    } else {
+      copy_arma_to_mps_buffer(x, X.buffer, X.row_bytes);
+      copy_arma_to_mps_buffer(y, Y.buffer, Y.row_bytes);
+    }
+  }
+
+  Product& product(NSUInteger width, bool transpose) {
+    for (auto item = products.begin(); item != products.end(); ++item) {
+      if ((*item)->input.cols == width && (*item)->transpose == transpose) {
+        products.splice(products.begin(), products, item);
+        return *products.front();
+      }
+    }
+    if (products.size() == 2) products.pop_back();
+    products.emplace_front(new Product(device, X, Y, width, transpose));
+    return *products.front();
+  }
+  id<MTLDevice> device;
+  id<MTLCommandQueue> queue;
+  MetalMatrix X, Y;
+  std::list<std::unique_ptr<Product>> products;
+  std::unique_ptr<Deflation> deflation;
+  std::mutex mutex;
+};
+
+MetalFloatCrossproduct::MetalFloatCrossproduct(const arma::fmat& X, const arma::fmat& Y) {
+  @autoreleasepool { impl_.reset(new Impl(X, Y)); }
+}
+MetalFloatCrossproduct::MetalFloatCrossproduct(const arma::mat& X, const arma::mat& Y) {
+  @autoreleasepool { impl_.reset(new Impl(X, Y)); }
+}
+MetalFloatCrossproduct::~MetalFloatCrossproduct() = default;
+arma::fmat MetalFloatCrossproduct::multiply(const arma::fmat& B, bool transpose) {
+  std::lock_guard<std::mutex> lock(impl_->mutex);
+  const NSUInteger inner = transpose ? impl_->X.cols : impl_->Y.cols;
+  const NSUInteger rows = transpose ? impl_->Y.cols : impl_->X.cols;
+  if (B.n_rows != inner) {
+    throw std::runtime_error("Metal float32 cross-product: non-conformable matrices");
+  }
+  if (B.n_cols == 0) return arma::fmat(rows, 0);
+  @autoreleasepool {
+    auto& workspace = impl_->product(B.n_cols, transpose);
+    copy_fmat_to_mps_buffer(B, workspace.input.buffer, workspace.input.row_bytes);
+    run_metal_products(impl_->queue, {&workspace.first, &workspace.second});
+    return copy_mps_buffer_to_fmat(workspace.result.buffer, rows, B.n_cols,
+                                  workspace.result.row_bytes);
+  }
+}
+
+arma::mat MetalFloatCrossproduct::multiply(const arma::mat& B, bool transpose) {
+  std::lock_guard<std::mutex> lock(impl_->mutex);
+  const NSUInteger inner = transpose ? impl_->X.cols : impl_->Y.cols;
+  const NSUInteger rows = transpose ? impl_->Y.cols : impl_->X.cols;
+  if (B.n_rows != inner) {
+    throw std::runtime_error("Metal cross-product: non-conformable matrices");
+  }
+  if (B.n_cols == 0) return arma::mat(rows, 0);
+  @autoreleasepool {
+    auto& workspace = impl_->product(B.n_cols, transpose);
+    copy_arma_to_mps_buffer(B, workspace.input.buffer, workspace.input.row_bytes);
+    run_metal_products(impl_->queue, {&workspace.first, &workspace.second});
+    return copy_mps_buffer_to_arma(workspace.result.buffer, rows, B.n_cols,
+                                  workspace.result.row_bytes);
+  }
+}
+
+void MetalFloatCrossproduct::deflate(const arma::fvec& v) {
+  std::lock_guard<std::mutex> lock(impl_->mutex);
+  if (v.n_elem != impl_->X.cols) {
+    throw std::runtime_error("Metal float32 factor deflation: invalid direction size");
+  }
+  @autoreleasepool {
+    if (!impl_->deflation) {
+      impl_->deflation.reset(new Impl::Deflation(impl_->device, impl_->X));
+    }
+    auto& workspace = *impl_->deflation;
+    copy_fmat_to_mps_buffer(v, workspace.weight.buffer, workspace.weight.row_bytes);
+    copy_fmat_to_mps_buffer(arma::fmat(v.t()), workspace.row.buffer, workspace.row.row_bytes);
+    run_metal_products(impl_->queue, {&workspace.product});
+    metal_rank1_sub(impl_->device, impl_->queue, impl_->X, workspace.score, workspace.row);
+  }
+}
+
+arma::fmat MetalFloatCrossproduct::left_factor() {
+  std::lock_guard<std::mutex> lock(impl_->mutex);
+  return copy_mps_buffer_to_fmat(impl_->X.buffer, impl_->X.rows, impl_->X.cols,
+                                impl_->X.row_bytes);
+}
 
 bool has_metal_backend() {
   @autoreleasepool {
@@ -358,61 +680,19 @@ arma::mat metal_matrix_multiply(const arma::mat& A,
       throw std::runtime_error("metal_matrix_multiply: failed to create Metal command queue");
     }
 
-    const NSUInteger m = static_cast<NSUInteger>(a_rows);
-    const NSUInteger k = static_cast<NSUInteger>(a_cols);
-    const NSUInteger n = static_cast<NSUInteger>(b_cols);
-
-    const NSUInteger a_row_bytes = [MPSMatrixDescriptor rowBytesFromColumns:static_cast<NSUInteger>(A.n_cols) dataType:MPSDataTypeFloat32];
-    const NSUInteger b_row_bytes = [MPSMatrixDescriptor rowBytesFromColumns:static_cast<NSUInteger>(B.n_cols) dataType:MPSDataTypeFloat32];
-    const NSUInteger c_row_bytes = [MPSMatrixDescriptor rowBytesFromColumns:n dataType:MPSDataTypeFloat32];
-
-    id<MTLBuffer> a_buffer = [device newBufferWithLength:(a_row_bytes * static_cast<NSUInteger>(A.n_rows)) options:MTLResourceStorageModeShared];
-    id<MTLBuffer> b_buffer = [device newBufferWithLength:(b_row_bytes * static_cast<NSUInteger>(B.n_rows)) options:MTLResourceStorageModeShared];
-    id<MTLBuffer> c_buffer = [device newBufferWithLength:(c_row_bytes * m) options:MTLResourceStorageModeShared];
-
-    if (a_buffer == nil || b_buffer == nil || c_buffer == nil) {
-      throw std::runtime_error("metal_matrix_multiply: failed to allocate Metal buffers");
+    if (a_rows == 0 || b_cols == 0 || a_cols == 0) {
+      return arma::mat(a_rows, b_cols, arma::fill::zeros);
     }
-
-    copy_arma_to_mps_buffer(A, a_buffer, a_row_bytes);
-    copy_arma_to_mps_buffer(B, b_buffer, b_row_bytes);
-    std::fill_n(static_cast<char*>([c_buffer contents]), static_cast<std::size_t>(c_row_bytes * m), 0);
-
-    MPSMatrixDescriptor* a_desc = [MPSMatrixDescriptor matrixDescriptorWithRows:static_cast<NSUInteger>(A.n_rows) columns:static_cast<NSUInteger>(A.n_cols) rowBytes:a_row_bytes dataType:MPSDataTypeFloat32];
-    MPSMatrixDescriptor* b_desc = [MPSMatrixDescriptor matrixDescriptorWithRows:static_cast<NSUInteger>(B.n_rows) columns:static_cast<NSUInteger>(B.n_cols) rowBytes:b_row_bytes dataType:MPSDataTypeFloat32];
-    MPSMatrixDescriptor* c_desc = [MPSMatrixDescriptor matrixDescriptorWithRows:m columns:n rowBytes:c_row_bytes dataType:MPSDataTypeFloat32];
-
-    MPSMatrix* a_matrix = [[MPSMatrix alloc] initWithBuffer:a_buffer descriptor:a_desc];
-    MPSMatrix* b_matrix = [[MPSMatrix alloc] initWithBuffer:b_buffer descriptor:b_desc];
-    MPSMatrix* c_matrix = [[MPSMatrix alloc] initWithBuffer:c_buffer descriptor:c_desc];
-
-    MPSMatrixMultiplication* mult = [[MPSMatrixMultiplication alloc]
-      initWithDevice:device
-      transposeLeft:transpose_left
-      transposeRight:transpose_right
-      resultRows:m
-      resultColumns:n
-      interiorColumns:k
-      alpha:1.0
-      beta:0.0];
-
-    id<MTLCommandBuffer> command_buffer = [queue commandBuffer];
-    if (command_buffer == nil) {
-      throw std::runtime_error("metal_matrix_multiply: failed to create Metal command buffer");
-    }
-
-    [mult encodeToCommandBuffer:command_buffer leftMatrix:a_matrix rightMatrix:b_matrix resultMatrix:c_matrix];
-    [command_buffer commit];
-    [command_buffer waitUntilCompleted];
-
-    NSError* err = [command_buffer error];
-    if (err != nil) {
-      NSString* msg = [err localizedDescription];
-      throw std::runtime_error(std::string("metal_matrix_multiply: Metal command failed: ") +
-                               std::string([msg UTF8String]));
-    }
-
-    return copy_mps_buffer_to_arma(c_buffer, a_rows, b_cols, c_row_bytes);
+    auto& cache = host_product_cache();
+    std::lock_guard<std::mutex> lock(cache.mutex);
+    std::unique_ptr<MetalHostProduct> transient;
+    auto& workspace = cache.acquire(device, A.n_rows, A.n_cols, B.n_rows,
+      B.n_cols, transpose_left, transpose_right, transient);
+    copy_arma_to_mps_buffer(A, workspace.left.buffer, workspace.left.row_bytes);
+    copy_arma_to_mps_buffer(B, workspace.right.buffer, workspace.right.row_bytes);
+    run_metal_products(queue, {&workspace.product});
+    return copy_mps_buffer_to_arma(workspace.result.buffer, a_rows, b_cols,
+      workspace.result.row_bytes);
   }
 }
 
@@ -442,10 +722,19 @@ arma::fmat metal_matrix_multiply_float(const arma::fmat& A,
       throw std::runtime_error("metal_matrix_multiply_float: failed to create Metal command queue");
     }
 
-    MetalMatrix Ag = make_matrix_from_fmat(device, A);
-    MetalMatrix Bg = make_matrix_from_fmat(device, B);
-    MetalMatrix Cg = metal_matmul(device, queue, Ag, Bg, transpose_left, transpose_right);
-    return copy_mps_buffer_to_fmat(Cg.buffer, a_rows, b_cols, Cg.row_bytes);
+    if (a_rows == 0 || b_cols == 0 || a_cols == 0) {
+      return arma::fmat(a_rows, b_cols, arma::fill::zeros);
+    }
+    auto& cache = host_product_cache();
+    std::lock_guard<std::mutex> lock(cache.mutex);
+    std::unique_ptr<MetalHostProduct> transient;
+    auto& workspace = cache.acquire(device, A.n_rows, A.n_cols, B.n_rows,
+      B.n_cols, transpose_left, transpose_right, transient);
+    copy_fmat_to_mps_buffer(A, workspace.left.buffer, workspace.left.row_bytes);
+    copy_fmat_to_mps_buffer(B, workspace.right.buffer, workspace.right.row_bytes);
+    run_metal_products(queue, {&workspace.product});
+    return copy_mps_buffer_to_fmat(workspace.result.buffer, a_rows, b_cols,
+      workspace.result.row_bytes);
   }
 }
 
@@ -504,10 +793,27 @@ Rcpp::List metal_simpls_resident(const arma::mat& X,
     std::mt19937 rng(static_cast<unsigned int>(seed));
     std::normal_distribution<float> normal(0.0f, 1.0f);
 
-    MetalMatrix vbuf = make_matrix(device, static_cast<NSUInteger>(q), 1);
     MetalMatrix rbuf = make_matrix(device, static_cast<NSUInteger>(X.n_cols), 1);
     MetalMatrix ttbuf = make_matrix(device, static_cast<NSUInteger>(X.n_rows), 1);
     MetalMatrix vvbuf = make_matrix(device, static_cast<NSUInteger>(X.n_cols), 1);
+    MetalMatrix zbuf = make_matrix(device, static_cast<NSUInteger>(q), 1);
+    MetalMatrix xybuf = make_matrix(device, static_cast<NSUInteger>(X.n_rows), 1);
+    MetalMatrix ppbuf = make_matrix(device, static_cast<NSUInteger>(X.n_cols), 1);
+    MetalMatrix qqbuf = make_matrix(device, static_cast<NSUInteger>(q), 1);
+    MetalMatrix rowbuf = make_matrix(device, 1, static_cast<NSUInteger>(q));
+    MetalProduct score_product(device, Xg, rbuf, ttbuf, false, false);
+    MetalProduct predictor_loading(device, Xg, ttbuf, ppbuf, true, false);
+    MetalProduct response_loading(device, Yg, ttbuf, qqbuf, true, false);
+    MetalProduct x_direction(device, Xg, rbuf, xybuf, false, false);
+    MetalProduct yt_direction(device, Yg, xybuf, zbuf, true, false);
+    MetalProduct y_direction(device, Yg, zbuf, xybuf, false, false);
+    MetalProduct xt_direction(device, Xg, xybuf, rbuf, true, false);
+    std::unique_ptr<MetalProduct> st_direction, s_direction, deflation_row;
+    if (!use_xprod) {
+      st_direction.reset(new MetalProduct(device, Sg, rbuf, zbuf, true, false));
+      s_direction.reset(new MetalProduct(device, Sg, zbuf, rbuf, false, false));
+      deflation_row.reset(new MetalProduct(device, vvbuf, Sg, rowbuf, true, false));
+    }
     for (int a = 0; a < max_comp; ++a) {
       arma::vec rr(X.n_cols);
       // A fresh direction avoids propagating approximation error across
@@ -525,11 +831,11 @@ Rcpp::List metal_simpls_resident(const arma::mat& X,
       write_metal_col_vector(rbuf, rr);
       for (int it = 0; it < iters; ++it) {
         if (use_xprod) {
-          MetalMatrix zbuf = metal_tcrossprod_x_y_times(device, queue, Xg, Yg, rbuf);
-          rbuf = metal_crossprod_x_y_times(device, queue, Xg, Yg, zbuf);
+          run_metal_products(queue, {
+            &x_direction, &yt_direction, &y_direction, &xt_direction
+          });
         } else {
-          MetalMatrix zbuf = metal_matmul(device, queue, Sg, rbuf, true, false);
-          rbuf = metal_matmul(device, queue, Sg, zbuf, false, false);
+          run_metal_products(queue, {st_direction.get(), s_direction.get()});
         }
         rr = copy_metal_vector(rbuf);
         project_left_inplace(rr, VV, a);
@@ -546,7 +852,7 @@ Rcpp::List metal_simpls_resident(const arma::mat& X,
 
       write_metal_col_vector(rbuf, rr);
 
-      ttbuf = metal_matmul(device, queue, Xg, rbuf, false, false);
+      run_metal_products(queue, {&score_product});
       arma::vec tt = copy_metal_vector(ttbuf);
       double tnorm = arma::norm(tt, 2);
       if (!std::isfinite(tnorm) || tnorm <= std::numeric_limits<double>::epsilon()) break;
@@ -554,8 +860,7 @@ Rcpp::List metal_simpls_resident(const arma::mat& X,
       rr /= tnorm;
       write_metal_col_vector(ttbuf, tt);
 
-      MetalMatrix ppbuf = metal_matmul(device, queue, Xg, ttbuf, true, false);
-      MetalMatrix qqbuf = metal_matmul(device, queue, Yg, ttbuf, true, false);
+      run_metal_products(queue, {&predictor_loading, &response_loading});
       arma::vec pp = copy_metal_vector(ppbuf);
       arma::vec qq = copy_metal_vector(qqbuf);
 
@@ -570,7 +875,7 @@ Rcpp::List metal_simpls_resident(const arma::mat& X,
       write_metal_col_vector(vvbuf, vv);
 
       if (!use_xprod) {
-        MetalMatrix rowbuf = metal_matmul(device, queue, vvbuf, Sg, true, false);
+        run_metal_products(queue, {deflation_row.get()});
         metal_rank1_sub(device, queue, Sg, vvbuf, rowbuf);
       }
 

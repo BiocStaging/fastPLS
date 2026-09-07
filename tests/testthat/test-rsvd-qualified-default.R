@@ -117,8 +117,8 @@ test_that("massive SIMPLS shapes retain the fast default controls", {
     Y
   )
   expect_identical(resolved$rsvd_oversample, 12L)
-  expect_identical(resolved$rsvd_power, 2L)
-  expect_identical(resolved$rsvd_profile, "massive_fast")
+  expect_identical(resolved$rsvd_power, 1L)
+  expect_identical(resolved$rsvd_profile, "massive_rank_one")
 })
 
 test_that("qualification metadata describes the executed shape profile", {
@@ -130,8 +130,8 @@ test_that("qualification metadata describes the executed shape profile", {
   )
 
   expect_identical(context$control$rsvd_oversample, 12L)
-  expect_identical(context$control$rsvd_power, 2L)
-  expect_identical(context$control$rsvd_profile, "massive_fast")
+  expect_identical(context$control$rsvd_power, 1L)
+  expect_identical(context$control$rsvd_profile, "massive_rank_one")
   expect_identical(
     context$control$rsvd_qualification$oversample,
     context$control$rsvd_oversample

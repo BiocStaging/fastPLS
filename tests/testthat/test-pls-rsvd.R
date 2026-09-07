@@ -1,3 +1,8 @@
+dense_simpls_reference <- function(X, Y, ncomp, ...) {
+  fastPLS:::pls.model2(X, Y, ncomp = ncomp, scaling = 1L,
+    fit = TRUE, svd.method = 3L, seed = 1L)
+}
+
 test_that("pls defaults to randomized SVD", {
   set.seed(42)
   X <- matrix(rnorm(70 * 18), nrow = 70, ncol = 18)
@@ -64,17 +69,17 @@ test_that("pls accepts SVD tuning through compact dots", {
   expect_equal(internal_names$R, compact$R)
 })
 
-test_that("cpu_rsvd tracks irlba on PLS outputs", {
+test_that("cpu_rsvd tracks dense-SVD SIMPLS on PLS outputs", {
   set.seed(99)
   X <- matrix(rnorm(80 * 24), nrow = 80, ncol = 24)
   Y <- matrix(rnorm(80 * 6), nrow = 80, ncol = 6)
 
-  exact <- pls(
+  exact <- dense_simpls_reference(
     X,
     Y,
     ncomp = 1:4,
     fit = TRUE,
-    svd.method = "irlba"
+    svd.method = "rsvd"
   )
 
   rsvd <- pls(
@@ -145,36 +150,21 @@ test_that("cpu_rsvd is deterministic with a fixed seed", {
   )
 })
 
-test_that("IRLBA xprod default does not trigger for medium-n synthetic reg_q shape", {
-  should_use <- get(".should_use_xprod_irlba_default", envir = asNamespace("fastPLS"))
-
-  expect_false(should_use(n = 5000, p = 1000, q = 101, ncomp = 50))
-  expect_false(should_use(n = 5000, p = 1000, q = 1000, ncomp = 50))
-  expect_false(should_use(n = 5000, p = 1000, q = 10000, ncomp = 50))
-  expect_true(should_use(n = 10000, p = 1000, q = 5000, ncomp = 50))
-})
-
 test_that("xprod default threshold matches the benchmark rule", {
   should_use_rsvd <- get(".should_use_xprod_default", envir = asNamespace("fastPLS"))
-  should_use_irlba <- get(".should_use_xprod_irlba_default", envir = asNamespace("fastPLS"))
 
   # singlecell-like shape: q is large, but ncomp is not small and X'Y is tiny.
   expect_false(should_use_rsvd(p = 50, q = 133, ncomp = 50))
-  expect_false(should_use_irlba(n = 23822, p = 50, q = 133, ncomp = 50))
 
   # A CIFAR-like cross-covariance is small enough to materialize safely.
   expect_false(should_use_rsvd(p = 2048, q = 100, ncomp = 10))
   expect_false(should_use_rsvd(p = 2048, q = 100, ncomp = 20))
-  expect_false(should_use_irlba(n = 50000, p = 2048, q = 100, ncomp = 10))
 
-  # Large cross-response products use xprod for rSVD, and only large enough
-  # n/min(p,q) cases use the IRLBA operator path.
+  # Large cross-response products use xprod for rSVD.
   expect_true(should_use_rsvd(p = 5000, q = 1000, ncomp = 50))
-  expect_false(should_use_irlba(n = 5000, p = 5000, q = 1000, ncomp = 50))
-  expect_true(should_use_irlba(n = 10000, p = 5000, q = 1000, ncomp = 50))
 })
 
-test_that("CPU FlashSVD prediction is the default for compiled PLS", {
+test_that("compact streamed prediction is the default for compiled PLS", {
   set.seed(17)
   X <- matrix(rnorm(70 * 20), nrow = 70, ncol = 20)
   Y <- matrix(rnorm(70 * 5), nrow = 70, ncol = 5)
@@ -231,21 +221,21 @@ test_that("pls validates svd.method through the compact CPU backend choices", {
   set.seed(1)
   X <- matrix(rnorm(40 * 10), nrow = 40, ncol = 10)
   Y <- matrix(rnorm(40 * 3), nrow = 40, ncol = 3)
-  expect_error(pls(X, Y, ncomp = 1:2, svd.method = "cuda_rsvd"), "should be one of")
+  expect_error(pls(X, Y, ncomp = 1:2, svd.method = "cuda_rsvd"), "arg.*should be")
 })
 
-test_that("simpls path uses the SVD backend selector", {
+test_that("simpls path agrees with a dense-SVD reference", {
   set.seed(1234)
   X <- matrix(rnorm(100 * 25), nrow = 100, ncol = 25)
   Y <- matrix(rnorm(100 * 8), nrow = 100, ncol = 8)
 
-  exact <- pls(
+  exact <- dense_simpls_reference(
     X,
     Y,
     ncomp = 1:5,
     fit = TRUE,
     method = "simpls",
-    svd.method = "irlba"
+    svd.method = "rsvd"
   )
 
   rsvd <- pls(
@@ -283,7 +273,7 @@ test_that("simpls path uses the SVD backend selector", {
       rsvd_power = 1L,
       seed = 99L
     ),
-    "should be one of"
+    "arg.*should be"
   )
 })
 
@@ -296,9 +286,9 @@ test_that("accelerated SIMPLS preserves prediction despite coefficient changes",
   Y <- latent %*% matrix(rnorm(12 * 20), 12, 20) +
     matrix(rnorm(n * 20, sd = 0.1), n, 20)
 
-  reference <- pls(
+  reference <- dense_simpls_reference(
     X, Y, ncomp = 1:8, method = "simpls", backend = "cpu",
-    svd.method = "irlba", fit = TRUE, return_variance = FALSE
+    svd.method = "rsvd", fit = TRUE, return_variance = FALSE
   )
   approximate <- pls(
     X, Y, ncomp = 1:8, method = "simpls", backend = "cpu",
@@ -317,30 +307,6 @@ test_that("accelerated SIMPLS preserves prediction despite coefficient changes",
   )
 })
 
-test_that("accelerated SIMPLS honours an explicit IRLBA request", {
-  set.seed(91)
-  X <- matrix(rnorm(120 * 30), nrow = 120, ncol = 30)
-  Y <- matrix(rnorm(120 * 8), nrow = 120, ncol = 8)
-  ncomp <- 1:5
-
-  # pls.model2 is the retained component-by-component SIMPLS reference.
-  reference <- fastPLS:::pls.model2(
-    X, Y, ncomp = ncomp, scaling = 1L, fit = TRUE,
-    svd.method = fastPLS:::.svd_method_id("irlba"), seed = 91L
-  )
-  accelerated <- pls(
-    X, Y, ncomp = ncomp, method = "simpls", backend = "cpu",
-    svd.method = "irlba", fit = TRUE, return_variance = FALSE, seed = 91L
-  )
-  signs <- sign(colSums(accelerated$R * reference$R))
-  signs[!is.finite(signs) | signs == 0] <- 1
-  aligned_R <- sweep(accelerated$R, 2L, signs, "*")
-  aligned_Q <- sweep(accelerated$Q, 2L, signs, "*")
-
-  expect_equal(accelerated$B, reference$B, tolerance = 1e-7)
-  expect_equal(aligned_Q, reference$Q, tolerance = 1e-7)
-  expect_equal(aligned_R, reference$R, tolerance = 1e-7)
-})
 
 test_that("Rcpp plssvd handles ncomp above rank by capping internally", {
   set.seed(78)

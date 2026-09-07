@@ -2,8 +2,25 @@
 #define FASTPLS_SVD_CUDA_RSVD_H
 
 #include "svd_iface.h"
+#include <memory>
 
 namespace fastpls_svd {
+
+class CudaFloatCrossproduct {
+ public:
+  CudaFloatCrossproduct(const arma::fmat& X, const arma::fmat& Y);
+  ~CudaFloatCrossproduct();
+  CudaFloatCrossproduct(const CudaFloatCrossproduct&) = delete;
+  CudaFloatCrossproduct& operator=(const CudaFloatCrossproduct&) = delete;
+  arma::fmat multiply(const arma::fmat& B, bool transpose);
+  void orthonormalize(arma::fmat& B);
+  void deflate(const arma::fvec& v);
+  arma::fmat left_factor();
+
+ private:
+  struct Impl;
+  std::unique_ptr<Impl> impl_;
+};
 
 struct PLSSVDGPUResult {
   Mat R;
@@ -204,7 +221,8 @@ void cuda_simpls_fast_begin_device_loop(
   int p,
   int m,
   int max_ncomp,
-  bool fit
+  bool fit,
+  bool store_B
 );
 void cuda_simpls_fast_refresh_block_resident(
   int p,

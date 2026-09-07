@@ -215,7 +215,8 @@ test_that("compiled CV reports the prediction backend", {
     seed = 123L
   )
   expect_identical(cuda_cv$backend, "cuda")
-  expect_identical(cuda_cv$prediction_backend, "cuda_flash")
+  expect_identical(cuda_cv$residency$fold_prediction, "resident cuda")
+  expect_identical(cuda_cv$residency$fallback, "none")
 
   cuda_opt <- pls.single.cv(
     Xdata = X,

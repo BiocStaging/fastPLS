@@ -46,8 +46,7 @@ enum class Backend {
 
 enum class Method {
   EXACT = 0,
-  RSVD = 1,
-  IRLBA = 2
+  RSVD = 1
 };
 
 struct SVDOptions {
@@ -61,7 +60,6 @@ struct SVDOptions {
 };
 
 enum SVDMethodId {
-  SVD_METHOD_IRLBA = 1,
   SVD_METHOD_CPU_EXACT = 3,
   SVD_METHOD_CPU_RSVD = 4,
   SVD_METHOD_CUDA_RSVD = 5
@@ -78,7 +76,6 @@ SVDOptions options_from_method_id(
 );
 
 Backend backend_from_method_id(int svd_method);
-bool method_is_legacy_irlba(int svd_method);
 
 SVDResult truncated_svd(const Mat& A, int k, const SVDOptions& opt, Backend backend);
 
@@ -87,7 +84,6 @@ void record_rsvd_audit_result(const SVDResult& result, bool failure = false);
 RSVDAuditSummary current_rsvd_audit_summary();
 
 SVDResult truncated_svd_cpu_exact(const Mat& A, int k, const SVDOptions& opt);
-SVDResult truncated_svd_cpu_irlba(const Mat& A, int k, const SVDOptions& opt);
 SVDResult truncated_svd_cpu_rsvd(const Mat& A, int k, const SVDOptions& opt);
 
 // Shared post-processing for randomized range finder outputs.

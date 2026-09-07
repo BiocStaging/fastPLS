@@ -1,6 +1,7 @@
 #include <cuda_runtime.h>
 #include <float.h>
 #include <math.h>
+#include "cuda_resident_api.cuh"
 
 extern "C" {
 

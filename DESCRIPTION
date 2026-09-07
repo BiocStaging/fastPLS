@@ -1,8 +1,8 @@
 Package: fastPLS
 Type: Package
 Title: Fast Partial Least Squares for High-Dimensional Data
-Version: 0.99.39
-Date: 2026-09-03
+Version: 0.99.40
+Date: 2026-09-06
 Authors@R: c(
     person(
         "Stefano", "Cacciatore", role = c("aut", "cre"),
@@ -42,7 +42,7 @@ SystemRequirements: Optional CUDA Toolkit and NVIDIA GPU driver for CUDA
     acceleration. CPU-only builds do not require GPU software.
 Depends: R (>= 4.6.0), Matrix
 Imports: Biobase, Rcpp (>= 0.12.17), methods, float
-LinkingTo: Rcpp, RcppArmadillo, RcppEigen, Matrix
+LinkingTo: Rcpp, RcppArmadillo
 Suggests: BiocStyle, knitr, RhpcBLASctl, rmarkdown, testthat (>= 3.0.0)
 VignetteBuilder: knitr
 NeedsCompilation: yes

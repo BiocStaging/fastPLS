@@ -8,15 +8,9 @@ fastsvd(
     nv = NULL,
     ncomp = NULL,
     backend = NULL,
-    method = c("rsvd", "irlba"),
+    method = "rsvd",
     oversample = 32L,
     power = 5L,
-    svds_tol = 0,
-    work = 0L,
-    maxit = 1000L,
-    tol = 1e-05,
-    eps = 1e-09,
-    svtol = 1e-05,
     seed = 1L
 )
 }
@@ -40,17 +34,17 @@ When \code{ncomp} is supplied, \code{ncomp} controls the decomposition rank and
 implied by \code{nu} and \code{nv}; the final rank is always capped at
 \code{min(nrow(x), ncol(x))}.}
 
-\item{backend}{Compute backend. \code{cpu} runs on the host CPU. \code{cuda}
-dispatches randomized SVD to a CUDA-capable backend. \code{metal} dispatches
-randomized SVD to the Apple Metal backend. When omitted, the function uses
+\item{backend}{Compute backend. \code{cpu} runs on the host CPU. Standalone
+CUDA and Metal rSVD are unavailable because their reduced QR/SVD stages are
+not fully device-native for every matrix shape; both accelerators remain
+available for supported resident PLS fits. When omitted, the function uses
 \code{options(backend = ...)}, then \code{FASTPLS_BACKEND}, then CPU. For CPU
 execution, \code{options(cores = n)} requests \code{n} BLAS/OpenMP threads.
-An unavailable CUDA or Metal selection raises an error; no CPU fallback is
-performed.}
+An unavailable or unsupported accelerator selection raises an error; no CPU
+fallback is performed.}
 
-\item{method}{SVD algorithm family. \code{irlba} uses the bundled iterative
-IRLBA-style CPU backend and is valid only with \code{backend = cpu}.
-\code{rsvd} uses the native fastPLS randomized SVD on the selected backend.}
+\item{method}{SVD algorithm. Only \code{rsvd}, the native randomized SVD,
+is supported on the selected backend.}
 
 \item{oversample}{Non-negative oversampling dimension used by randomized SVD.
 The sketch dimension is approximately \code{ncomp + oversample}, capped by the
@@ -60,29 +54,11 @@ agreement is not a guarantee for a new matrix; CPU float64 fits additionally
 apply the case-specific audit described in Details.}
 
 \item{power}{Number of randomized-SVD power iterations. The default is five on
-CPU, CUDA, and Metal. CPU float64 additionally applies case-specific auditing
+CPU. CPU float64 additionally applies case-specific auditing
 and recovery. Each additional iteration adds matrix multiplications.}
 
-\item{svds_tol}{Tolerance forwarded to iterative SVD backends. A value of
-\code{0} keeps the backend default.}
-
-\item{work}{IRLBA working subspace size. A value of \code{0} lets the bundled
-IRLBA backend choose its default workspace.}
-
-\item{maxit}{Maximum number of IRLBA iterations before the CPU IRLBA backend
-stops.}
-
-\item{tol}{IRLBA residual convergence tolerance. Smaller values can
-improve numerical convergence but may increase runtime.}
-
-\item{eps}{IRLBA orthogonality threshold used internally by the bundled
-implementation.}
-
-\item{svtol}{IRLBA singular-value convergence tolerance.}
-
-\item{seed}{Random seed used by randomized backends to generate the Gaussian
-sketch. It affects \code{rsvd} results and is ignored by deterministic
-backends.}
+\item{seed}{Random seed used to generate the Gaussian sketch. It affects
+\code{rsvd} results.}
 }
 \value{
 A list compatible with \code{base::svd()} containing \code{d}, \code{u}, and
@@ -91,13 +67,13 @@ A list compatible with \code{base::svd()} containing \code{d}, \code{u}, and
 \code{diagnostics} element reports rank and finiteness checks. For
 double-precision input it also reports singular-triplet residuals and
 left/right orthogonality errors. CPU rSVD diagnostics include the case-specific
-audit, strengthened retries, effective controls, and whether fixed-control
-IRLBA recovery was required. These fields describe the numerical checks applied
-to the current decomposition.
+audit, strengthened retries, and effective controls. Recovery after failed
+CPU sketches uses strengthened native-rSVD attempts. These fields describe the
+numerical checks applied to the current decomposition.
 }
 \description{
 Computes a truncated singular value decomposition of a dense numeric matrix
-with a selected CPU, CUDA, or Metal backend. The result contains singular
+with the CPU backend. The result contains singular
 values, requested singular vectors, decomposition rank, elapsed time, and
 backend metadata.
 }
@@ -105,13 +81,20 @@ backend metadata.
 Randomized SVD is stochastic. CPU float64 execution audits each decomposition
 using normalized left/right singular-triplet residuals and an omitted-direction
 search. An estimated omitted-to-retained boundary ratio above 0.95 is treated
-as weak separation. The routine retries with wider sketches and more power
-iterations. A weak boundary must agree across independent strengthened
-sketches; if it remains unresolved, the routine returns a fixed-control IRLBA
-recovery rather than an unresolved CPU result. Accelerator routes report their
-structural diagnostics and exact controls. Confirm coefficient or subspace
-interpretation with CPU IRLBA and compare seeds when conclusions are near a
-decision boundary.
+as weak separation, not by itself as a failed approximation. A residual above
+0.01 or an omitted-direction ratio above 1.01 triggers stronger sketches;
+independent-sketch agreement supplies an additional acceptance check.
+If the ordinary CPU attempts fail, native operator rSVD makes up to four
+further attempts with wider sketches and additional power iterations. Each
+recovery result is rechecked. If recovery exceeds its estimated 256 MiB
+major-workspace budget or still fails its checks, an error is returned.
+This budget excludes input matrices, model storage, and runtime overhead;
+it is not a bound on process RSS. Small CPU float64 inputs use a separately
+recorded dense-SVD route. A full-width sketch can also use a dense SVD as
+part of the native algorithm. Accelerator routes report their structural
+diagnostics and exact controls. Confirm coefficient or subspace
+interpretation against an independent dense decomposition when feasible,
+and compare seeds when conclusions are near a decision boundary.
 }
 \examples{
 set.seed(1)
@@ -119,6 +102,4 @@ x <- matrix(rnorm(12 * 5), 12, 5)
 s <- fastsvd(x, ncomp = 2, backend = "cpu", method = "rsvd", seed = 1)
 s$d
 
-s_irlba <- fastsvd(x, ncomp = 2, backend = "cpu", method = "irlba")
-s_irlba$svd.method
 }

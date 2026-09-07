@@ -37,7 +37,7 @@ test_that("pls independent-test Q2 uses the fitted training mean", {
   fit <- pls(
     X[train, ], y[train, , drop = FALSE],
     X[test, ], y[test, , drop = FALSE],
-    ncomp = 2, method = "simpls", svd.method = "irlba",
+    ncomp = 2, method = "simpls", svd.method = "rsvd",
     backend = "cpu", return_variance = FALSE
   )
   pred <- if (length(dim(fit$Ypred)) == 3L) {
@@ -60,7 +60,7 @@ test_that("single CV reports fold-specific Q2", {
   y <- matrix(2 + X[, 1] + rnorm(48, sd = 0.3), ncol = 1)
   cv <- pls.single.cv(
     X, y, ncomp = 1:2, kfold = 4, method = "simpls",
-    svd.method = "irlba", backend = "cpu", fit = FALSE, seed = 7
+    svd.method = "rsvd", backend = "cpu", fit = FALSE, seed = 7
   )
   expected <- fastPLS:::.fastpls_fold_q2_path(y, cv$Ypred, cv$fold)
 
@@ -75,7 +75,7 @@ test_that("double CV reports outer-fold-specific Q2", {
   y <- matrix(1.5 + 0.8 * X[, 1] - 0.3 * X[, 2] + rnorm(42, sd = 0.25), ncol = 1)
   cv <- pls.double.cv(
     X, y, ncomp = 1:2, kfold_outer = 3, kfold_inner = 3,
-    runn = 1, method = "simpls", svd.method = "irlba",
+    runn = 1, method = "simpls", svd.method = "rsvd",
     backend = "cpu", seed = 9
   )
   run <- cv$results[[1L]]

@@ -19,6 +19,43 @@ bool has_metal_backend() {
   return false;
 }
 
+struct MetalFloatOperator::Impl {};
+
+MetalFloatOperator::MetalFloatOperator(const arma::fmat&) {
+  throw_metal_unavailable();
+}
+
+MetalFloatOperator::~MetalFloatOperator() = default;
+
+void MetalFloatOperator::update(const arma::fmat&) {
+  throw_metal_unavailable();
+}
+
+arma::fmat MetalFloatOperator::multiply(const arma::fmat&, bool) {
+  throw_metal_unavailable();
+}
+
+struct MetalFloatCrossproduct::Impl {};
+MetalFloatCrossproduct::MetalFloatCrossproduct(const arma::fmat&, const arma::fmat&) {
+  throw_metal_unavailable();
+}
+MetalFloatCrossproduct::MetalFloatCrossproduct(const arma::mat&, const arma::mat&) {
+  throw_metal_unavailable();
+}
+MetalFloatCrossproduct::~MetalFloatCrossproduct() = default;
+arma::fmat MetalFloatCrossproduct::multiply(const arma::fmat&, bool) {
+  throw_metal_unavailable();
+}
+arma::mat MetalFloatCrossproduct::multiply(const arma::mat&, bool) {
+  throw_metal_unavailable();
+}
+void MetalFloatCrossproduct::deflate(const arma::fvec&) {
+  throw_metal_unavailable();
+}
+arma::fmat MetalFloatCrossproduct::left_factor() {
+  throw_metal_unavailable();
+}
+
 arma::mat metal_matrix_multiply(const arma::mat& A, const arma::mat& B) {
   (void) A;
   (void) B;

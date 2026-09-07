@@ -122,10 +122,9 @@ test_that("pls backend='cuda' for simpls returns valid structure and stays close
   )
 
   expect_s3_class(gpu_fit, "fastPLS")
-  expect_equal(dim(gpu_fit$B), dim(ref_fit$B))
+  expect_null(gpu_fit$B)
   expect_equal(dim(gpu_fit$R), dim(ref_fit$R))
   expect_equal(dim(gpu_fit$Q), dim(ref_fit$Q))
-  expect_false(any(!is.finite(gpu_fit$B)))
   expect_true(is.data.frame(gpu_fit$Ypred))
 
   ref_acc <- mean(ref_fit$Ypred[[2]] == Y[idx])

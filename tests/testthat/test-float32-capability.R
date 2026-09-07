@@ -21,7 +21,7 @@ test_that("float32 capability assessment is shape based", {
     classification = FALSE,
     os_type = "unix"
   )
-  expect_identical(risky$status, "failed")
+  expect_identical(risky$status, "experimental")
   expect_identical(risky$action, "warn")
   expect_match(risky$warnings, "numerical-risk")
 
@@ -38,7 +38,7 @@ test_that("float32 capability assessment is shape based", {
   expect_match(plssvd$warnings, "performance-risk")
 })
 
-test_that("float32 classification and nonlinear kernels are flagged", {
+test_that("validated float32 classification is quiet and nonlinear kernels are flagged", {
   classification <- fastPLS:::.float32_capability_assessment(
     method = "simpls",
     backend = "cpu",
@@ -48,21 +48,23 @@ test_that("float32 classification and nonlinear kernels are flagged", {
     classification = TRUE,
     os_type = "unix"
   )
-  expect_identical(classification$status, "experimental")
-  expect_match(classification$warnings, "five percentage points")
+  expect_identical(classification$status, "validated")
+  expect_identical(classification$action, "allow")
+  expect_length(classification$warnings, 0L)
 
   nonlinear <- fastPLS:::.float32_capability_assessment(
     method = "kernelpls",
     backend = "metal",
-    svd_method = "irlba",
+    svd_method = "cpu_rsvd",
     q = 1L,
     ncomp = 5L,
     classification = FALSE,
     kernel = "rbf",
     os_type = "unix"
   )
-  expect_identical(nonlinear$status, "hybrid")
-  expect_identical(nonlinear$execution, "hybrid_host_device")
+  expect_identical(nonlinear$status, "experimental")
+  expect_identical(nonlinear$action, "warn")
+  expect_length(nonlinear$errors, 0L)
   expect_true(any(grepl("n-by-n Gram matrix", nonlinear$warnings)))
 })
 
@@ -78,7 +80,7 @@ test_that("float32 unavailable and hybrid routes are explicit", {
   )
   expect_identical(cuda_irlba$status, "unavailable")
   expect_identical(cuda_irlba$action, "error")
-  expect_match(cuda_irlba$errors, "CUDA supports")
+  expect_match(cuda_irlba$errors, "supports rSVD only")
 
   metal_lda <- fastPLS:::.float32_capability_assessment(
     method = "simpls",
@@ -90,9 +92,9 @@ test_that("float32 unavailable and hybrid routes are explicit", {
     classifier = "lda",
     os_type = "unix"
   )
-  expect_identical(metal_lda$status, "hybrid")
-  expect_identical(metal_lda$execution, "hybrid_device_cpu_lda")
-  expect_true(any(grepl("LDA is hybrid", metal_lda$warnings)))
+  expect_identical(metal_lda$status, "validated")
+  expect_identical(metal_lda$execution, "device_accelerated")
+  expect_false(any(grepl("LDA is hybrid", metal_lda$warnings)))
 
   for (cfg in list(
     list(method = "opls", kernel = "linear", classifier = "argmax"),

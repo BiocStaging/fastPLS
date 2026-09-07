@@ -1,4 +1,4 @@
-test_that("CUDA PLS-SVD compact prediction agrees with stored coefficients", {
+test_that("resident CUDA PLS-SVD stays compact across storage hints", {
   skip_if_not(has_cuda(), "CUDA backend not available")
 
   old_store_b <- Sys.getenv("FASTPLS_STORE_B", unset = NA_character_)
@@ -37,7 +37,7 @@ test_that("CUDA PLS-SVD compact prediction agrees with stored coefficients", {
     return_variance = FALSE
   )
 
-  expect_true(is.array(stored$B))
+  expect_null(stored$B)
   expect_null(compact$B)
   expect_equal(
     predict(stored, Xtest)$Ypred,

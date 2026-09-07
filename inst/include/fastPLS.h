@@ -7,9 +7,8 @@
 using namespace Rcpp;
 using namespace arma;
 
-List IRLB(const arma::mat& X, int nu, int work, int maxit, double tol, double eps, double svtol);
 double RQ(arma::mat yData, arma::mat yPred);
-arma::mat variance(arma::mat x);
+arma::mat variance(const arma::mat& x);
 arma::mat transformy(arma::ivec y);
 bool has_cuda();
 
@@ -51,8 +50,8 @@ List pls_model2(
 );
 
 List pls_model2_fast(
-  arma::mat Xtrain,
-  arma::mat Ytrain,
+  SEXP XtrainSEXP,
+  SEXP YtrainSEXP,
   arma::ivec ncomp,
   int scaling,
   bool fit,

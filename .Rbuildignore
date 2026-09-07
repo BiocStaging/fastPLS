@@ -6,11 +6,13 @@
 ^\.BBSoptions$
 ^[.]Rd2pdf
 ^fastPLS\.BiocCheck$
+^\.metal-audit-lib$
 ^fastPLS\.Rcheck$
 ^\.\.Rcheck$
 ^\.gitignore$
 ^\.git$
 ^benchmark(/|$)
+^core(/|$)
 ^benchmark_results(/|$)
 ^benchmark_results_.*
 ^benchmark_results_local(/|$)
@@ -49,3 +51,4 @@
 ^publication_results(/|$)
 ^[.]fastpls-openblas-lib(/|$)
 ^[.]fastpls-metal-lib.*(/|$)
+^[.]fastpls-metal-current-lib(/|$)

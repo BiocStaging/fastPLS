@@ -3,6 +3,7 @@ set -eu
 
 use_openblas="${FASTPLS_USE_OPENBLAS:-0}"
 openblas_root="${OPENBLAS_ROOT:-/opt/homebrew/opt/openblas}"
+use_accelerate="${FASTPLS_USE_ACCELERATE:-auto}"
 use_cuda="${FASTPLS_USE_CUDA:-auto}"
 require_cuda="${FASTPLS_REQUIRE_CUDA:-0}"
 cuda_root="${CUDA_ROOT:-${CUDA_PATH:-}}"
@@ -12,10 +13,18 @@ pkg_cxxflags=""
 pkg_cppflags=""
 pkg_libs='$(LAPACK_LIBS) $(BLAS_LIBS)'
 cuda_objects=""
-metal_objects=" svd_metal_backend_stub.o"
+metal_objects=" svd_metal_backend_stub.o metal_resident_backend_stub.o"
 metal_mm_rule=""
 
-if [ "${use_openblas}" = "1" ]; then
+if [ "$(uname -s)" = "Darwin" ] &&
+   [ "${use_openblas}" != "1" ] &&
+   [ "${use_accelerate}" != "0" ] &&
+   [ "${use_accelerate}" != "false" ] &&
+  [ "${use_accelerate}" != "FALSE" ]; then
+  echo "fastPLS configure: using Apple Accelerate for CPU BLAS/LAPACK"
+  pkg_cppflags="-DFASTPLS_USE_ACCELERATE"
+  pkg_libs="-framework Accelerate"
+elif [ "${use_openblas}" = "1" ]; then
   if [ ! -d "${openblas_root}/include" ] || [ ! -d "${openblas_root}/lib" ]; then
     echo "ERROR: FASTPLS_USE_OPENBLAS=1 but OPENBLAS_ROOT is incomplete: ${openblas_root}" >&2
     exit 1
@@ -119,7 +128,35 @@ if [ "${have_metal}" = "1" ]; then
     echo "fastPLS configure: Apple Metal backend enabled using system frameworks"
   fi
   cp src/svd_metal_backend.mm.in src/svd_metal_backend.mm
-  metal_objects=" svd_metal_backend.o"
+  cp src/metal_resident_backend.mm.in src/metal_resident_backend.mm
+  rm -f src/metal_resident_kernels.metal src/metal_resident_kernels.air \
+    src/metal_resident_kernels.metallib src/metal_resident_kernels_data.h
+  metal_compiler="$(xcrun -sdk macosx -f metal 2>/dev/null || true)"
+  metallib_compiler="$(xcrun -sdk macosx -f metallib 2>/dev/null || true)"
+  if [ -n "${metal_sdk}" ] && [ -n "${metal_compiler}" ] &&
+     [ -n "${metallib_compiler}" ] &&
+     [ -x /usr/bin/xxd ]; then
+    metal_cache_dir="${TMPDIR:-/tmp}/fastpls-metal-cache-$$"
+    mkdir -p "${metal_cache_dir}"
+    awk '/R"METAL\($/ {capture=1; next} /^\)METAL"\];$/ {capture=0; exit} capture {print}' \
+      src/metal_resident_backend.mm.in > src/metal_resident_kernels.metal
+    if "${metal_compiler}" -isysroot "${metal_sdk}" \
+         -fmodules-cache-path="${metal_cache_dir}" \
+         -c src/metal_resident_kernels.metal \
+         -o src/metal_resident_kernels.air >/dev/null 2>&1 &&
+       "${metallib_compiler}" src/metal_resident_kernels.air \
+         -o src/metal_resident_kernels.metallib >/dev/null 2>&1; then
+      /usr/bin/xxd -i -n fastpls_metal_library \
+        src/metal_resident_kernels.metallib > \
+        src/metal_resident_kernels_data.h
+      echo "fastPLS configure: precompiled resident Metal kernels enabled"
+    else
+      echo "fastPLS configure: Metal offline compiler unavailable; using runtime kernel compilation"
+      rm -f src/metal_resident_kernels_data.h
+    fi
+    rm -rf "${metal_cache_dir}"
+  fi
+  metal_objects=" svd_metal_backend.o metal_resident_backend.o"
   metal_flags="-DFASTPLS_HAS_METAL"
   if [ -n "${pkg_cppflags}" ]; then
     pkg_cppflags="${pkg_cppflags} ${metal_flags}"

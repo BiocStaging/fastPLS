@@ -156,7 +156,7 @@ test_that("CUDA SIMPLS-LDA retains the requested SIMPLS estimator when dense Y f
   expect_true(is.finite(tail(fit$accuracy, 1L)))
 })
 
-test_that("fused native CUDA PLS+LDA preserves standard CUDA LDA predictions", {
+test_that("resident CUDA PLS-LDA is invariant to the retired fusion hint", {
   skip_if_not(has_cuda())
   skip_if_not(exists("lda_cuda_native_available", envir = asNamespace("fastPLS"), inherits = FALSE))
   skip_if_not(fastPLS:::lda_cuda_native_available())
@@ -203,11 +203,15 @@ test_that("fused native CUDA PLS+LDA preserves standard CUDA LDA predictions", {
     seed = 123L
   )
 
-  expect_true(fit_fused$lda$train_backend %in% c("cuda_fused_ttrain", "cuda_fused_project"))
+  expect_equal(
+    attr(fit_fused, "fastPLS_internal")$predict_backend,
+    "cuda_resident"
+  )
+  expect_equal(fit_fused$diagnostics$residency$lda, "cuda")
   expect_equal(fit_fused$Ypred[[1]], pred_standard)
 })
 
-test_that("standard CUDA LDA remains the default implementation", {
+test_that("resident CUDA LDA is the default implementation", {
   skip_if_not(has_cuda())
   skip_if_not(exists("lda_cuda_native_available", envir = asNamespace("fastPLS"), inherits = FALSE))
   skip_if_not(fastPLS:::lda_cuda_native_available())
@@ -243,6 +247,9 @@ test_that("standard CUDA LDA remains the default implementation", {
     seed = 123L
   )
 
-  expect_equal(fit_default$lda$train_backend, "cuda_stream_project")
-  expect_equal(attr(fit_default, "fastPLS_internal")$predict_backend, "cuda_flash")
+  expect_equal(fit_default$diagnostics$residency$lda, "cuda")
+  expect_equal(
+    attr(fit_default, "fastPLS_internal")$predict_backend,
+    "cuda_resident"
+  )
 })

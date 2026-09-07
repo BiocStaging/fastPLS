@@ -52,14 +52,18 @@ for bundled examples are provided in the dataset help pages and in
 - `plssvd`: computes the dominant subspace of the cross-covariance
   `S = X^T Y` and reuses it for the requested component path.
 - `simpls`: accelerated sequential SIMPLS. The default rSVD route is an
-  explicitly approximate high-speed profile: ordinary CPU and Metal routes
-  generate a new oversampled sketch for each component, while CUDA can generate up to eight
-  fresh candidates together for large dummy-coded classification paths to
-  amortize GPU launches. Each candidate is accepted only after the sequential
+  explicitly approximate high-speed profile: component-wise CPU, CUDA, and
+  Metal routes generate a new randomized sketch for each component. Eligible
+  large dummy-coded classification paths can instead generate up to 64 fresh
+  CPU, CUDA, or Metal candidates together to amortize repeated matrix
+  operations and GPU launches. Each candidate is accepted only after the sequential
   SIMPLS orthogonalization and deflation update. Compact
   prediction, cached deflation products, incremental coefficient updates, and
-  automatic matrix-free `xprod` further reduce computation and storage.
-  `svd.method = "irlba"` retains a fixed-control component-wise comparator.
+  automatic matrix-free `xprod` further reduce computation and storage. When
+  the response dimension is smaller than the predictor dimension, eligible
+  rSVD fits update the response-side Gram matrix after each accepted component;
+  this replaces repeated tall cross-covariance sketches with a smaller
+  eigen-subspace calculation without changing the subsequent SIMPLS update.
 - `opls`: supervised orthogonal filtering followed by the selected PLS core.
 - `kernelpls`: linear, RBF, or polynomial kernel construction followed by the
   selected PLS core.
@@ -69,8 +73,9 @@ Set `options(cores = 4L)` to request four CPU threads. Eligible matrix
 operations can use multiple cores when linked to a multithreaded BLAS,
 for example by installing with `FASTPLS_USE_OPENBLAS=1` and a valid
 `OPENBLAS_ROOT`. SIMPLS deflation remains sequential, so multicore gains depend
-on matrix shape; on the evaluated Apple M3 tasks, two and four OpenBLAS threads
-did not improve runtime over one thread.
+on matrix shape. In the controlled one-, two-, and four-thread study, the
+four-thread speed-up ranged from 1.03- to 1.77-fold across the three tested
+matrix regimes; this is not a guarantee that additional threads help every fit.
 
 For classification, factor responses are handled as PLS-DA responses. Large
 response spaces use compact prediction where possible so the full coefficient
@@ -78,12 +83,11 @@ cube does not need to be stored.
 
 For PLS-DA with LDA classification, the recommended high-accuracy/high-speed
 configuration is `method = "plssvd", backend = "cuda", classifier = "lda"`.
-This uses the optimized standard CUDA path for latent projection, LDA training,
-and discriminant scoring. On systems without CUDA, users can explicitly select
+This uses a resident CUDA path for PLS fitting, latent projection, LDA training,
+and discriminant scoring; only returned arrays and R-object assembly are copied
+to the host. On systems without CUDA, users can explicitly select
 `method = "plssvd", backend = "cpu", classifier = "lda"` for compiled CPU
-execution. An experimental fused CUDA PLS+LDA path is available with
-`FASTPLS_FUSED_CUDA_LDA=1`, but benchmark results currently keep it opt-in
-rather than the default.
+execution.
 
 For large classification problems, such as ImageNet-scale DINOv2 feature
 matrices, `method = "plssvd", backend = "cuda"` automatically switches to a
@@ -99,42 +103,40 @@ Set the fastPLS session default with `options(backend = "cuda")`, or use
 `Sys.setenv(FASTPLS_BACKEND = "cuda")`. An explicit function argument always
 takes precedence.
 
-CPU backends:
+The public CPU solver is `rsvd`, a randomized SVD with Gaussian sketching and
+power iterations. Very small internal decompositions may use a dense numerical
+kernel when a truncated calculation is not meaningful, but no exact or IRLBA
+solver is exposed through the public API.
 
-- `irlba`: bundled internal IRLBA wrapper.
-- `rsvd`: randomized SVD with Gaussian sketching and optional power
-  iterations.
-
-`rsvd` is a stochastic approximation, not a deterministic replacement for
-IRLBA. It remains the primary starting solver. For CPU float64 fits, every
+`rsvd` is a stochastic approximation and remains the primary solver. For CPU
+float64 fits, every
 randomized decomposition is checked using normalized singular-triplet
 residuals and an omitted-direction audit. The solver strengthens the sketch
-automatically when needed. A weak spectral boundary must either agree with an
-independent strengthened sketch or recover with IRLBA; consensus and recovery
-are recorded in `diagnostics`, not hidden.
+automatically when needed. A weak spectral boundary must agree with an
+independent strengthened sketch or a further strengthened native rSVD
+calculation; the effective controls and audit outcome are recorded in
+`diagnostics`.
 CUDA, Metal, and float32 routes record their exact controls and structural
 diagnostics. The controlled validation uses matrix-shape-specific automatic
 controls and reports numerical agreement separately from successful execution.
-For confirmatory coefficient or subspace interpretation, use
-`svd.method = "irlba"` on the CPU.
-The validation suite places an rSVD fit
-outside the numerical screen relative to a matched CPU IRLBA fit if prediction
-or score relative error exceeds 0.01, the corresponding correlation is below
-0.995, a latent-subspace angle exceeds 0.1 degrees, classification-label
-agreement is below 0.995, or the predictive metric differs by more than 0.005.
+For confirmatory coefficient or subspace interpretation, repeat the rSVD fit
+across seeds and inspect the recorded diagnostics and prediction stability.
 PLS-SVD and standalone `fastsvd()` use 32 oversampling directions and five
 power iterations by default. Accelerated SIMPLS, OPLS, and kernel-PLS use
 32/5 for ordinary shapes. Numeric responses with at least 64 columns and a
 response-to-sample ratio of at least 0.2 use 48/6. Classification with at least
 32 classes and no more than 20 samples per class uses 64/7. When the explicit
 predictor-response cross-covariance would exceed 512 MiB, the massive-matrix
-profile records `oversample = 12` and `power = 2`; execution advances with one
-new rank-one randomized direction per component.
+profile requests `oversample = 12` and `power = 1`; executed controls and the
+refresh width are recorded separately in diagnostics.
 CPU, Metal, and ordinary CUDA SIMPLS-family routes use seeded sketches of the
-current deflated operator. For a massive cross-covariance, CPU, CUDA, and Metal
-use a fresh rank-one randomized direction for every component; the CUDA state
-remains device resident. Large dummy-coded
-classification can instead refresh a small candidate block. Effective
+current deflated operator. For a massive cross-covariance, CPU, Metal, and CUDA
+float64 use a fresh rank-one randomized direction for every component. CUDA
+float32 can refresh up to eight fresh candidates at a time through component
+64 before returning to component-wise calculations; its state remains device
+resident. Large dummy-coded
+  classification on CPU, CUDA, or Metal can instead refresh a small candidate
+  block. Effective
 controls are recorded in model diagnostics.
 Very small SVD inputs automatically use a full dense decomposition inside the
 selected compiled backend when the truncated route is not meaningful, but
@@ -197,8 +199,11 @@ accelerator.
 On macOS, the Metal backend is compiled automatically when the macOS SDK or
 system Metal frameworks are available. The CUDA message "building without
 CUDA" does not mean that Metal was disabled. A successful configuration prints
-`Apple Metal backend enabled`. After restarting R, verify both compilation and
-runtime device access with:
+`Apple Metal backend enabled`. When the Xcode Metal compiler is available, the
+installer also compiles and embeds the custom shader library so the first fit
+does not compile kernels at runtime. Device and pipeline initialization still
+make an isolated first call slower than repeated calls in one R session. After
+restarting R, verify both compilation and runtime device access with:
 
 ```r
 library(fastPLS)
@@ -219,16 +224,25 @@ For automated CUDA build tests, set `FASTPLS_REQUIRE_CUDA = "1"` in addition to
 `FASTPLS_USE_CUDA = "1"` if installation should fail when the CUDA Toolkit is
 not found.
 
-FlashSVD-style low-rank prediction is integrated into the standard prediction
-path. When compact latent factors are available, `predict.fastPLS()` can apply
-predictions through streamed low-rank products instead of materializing and
-multiplying by the full coefficient matrix. This primarily reduces prediction
-time and RAM pressure during prediction; fit memory is still governed by the
-fitting backend.
+Compact low-rank prediction is integrated into the standard prediction path.
+When latent factors are available, `predict.fastPLS()` applies streamed
+low-rank products instead of materializing and multiplying by a full
+coefficient matrix for every requested component count. This primarily reduces
+prediction time and RAM pressure; fitting memory remains governed by the
+selected model family and backend.
 
-Use `backend = "cuda"` for supported CUDA PLS runs, or
-`fastsvd(..., backend = "cuda", method = "rsvd")` for stand-alone GPU rSVD
-when CUDA is available.
+Use `backend = "cuda"` or `backend = "metal"` for supported resident PLS
+runs. Standalone accelerator `fastsvd()` routes are rejected because their
+reduced QR/SVD stage is not fully device-native for every matrix shape.
+Cross-validation constructs folds and assembles metric summaries in R, while
+each supported fold fit, projection, prediction, and LDA calculation uses the
+resident accelerator model state.
+
+Resident CUDA supports PLS-SVD, SIMPLS, OPLS, and linear, RBF, or polynomial
+kernel PLS in float32 and float64. Resident Metal supports the same families in
+float32. OPLS filtering and nonlinear Gram construction and centering remain on
+the requested GPU; unsafe nonlinear Gram sizes produce an error rather than a
+CPU fallback.
 
 ## Current API
 
@@ -268,7 +282,6 @@ separately for the manuscript release.
 ## References
 
 - de Jong, S. (1993). SIMPLS. *Chemometrics and Intelligent Laboratory Systems*.
-- Baglama, J. and Reichel, L. (2005). IRLBA. *SIAM Journal on Scientific Computing*.
 - Halko, N., Martinsson, P.-G. and Tropp, J. A. (2011). Randomized algorithms
   for matrix decompositions. *SIAM Review*.
 - Musco, C. and Musco, C. (2015). Randomized block Krylov methods for stronger

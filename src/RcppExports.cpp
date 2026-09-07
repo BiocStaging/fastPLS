@@ -3,7 +3,6 @@
 
 #include "../inst/include/fastPLS.h"
 #include <RcppArmadillo.h>
-#include <RcppEigen.h>
 #include <Rcpp.h>
 
 using namespace Rcpp;
@@ -13,6 +12,159 @@ Rcpp::Rostream<true>&  Rcpp::Rcout = Rcpp::Rcpp_cout_get();
 Rcpp::Rostream<false>& Rcpp::Rcerr = Rcpp::Rcpp_cerr_get();
 #endif
 
+// cuda_resident_project_cpp
+SEXP cuda_resident_project_cpp(Rcpp::List object, SEXP X, int ncomp);
+RcppExport SEXP _fastPLS_cuda_resident_project_cpp(SEXP objectSEXP, SEXP XSEXP, SEXP ncompSEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< Rcpp::List >::type object(objectSEXP);
+    Rcpp::traits::input_parameter< SEXP >::type X(XSEXP);
+    Rcpp::traits::input_parameter< int >::type ncomp(ncompSEXP);
+    rcpp_result_gen = Rcpp::wrap(cuda_resident_project_cpp(object, X, ncomp));
+    return rcpp_result_gen;
+END_RCPP
+}
+// cuda_resident_response_sums_cpp
+SEXP cuda_resident_response_sums_cpp(Rcpp::List object, SEXP X, SEXP Y, SEXP labels, int ncomp);
+RcppExport SEXP _fastPLS_cuda_resident_response_sums_cpp(SEXP objectSEXP, SEXP XSEXP, SEXP YSEXP, SEXP labelsSEXP, SEXP ncompSEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< Rcpp::List >::type object(objectSEXP);
+    Rcpp::traits::input_parameter< SEXP >::type X(XSEXP);
+    Rcpp::traits::input_parameter< SEXP >::type Y(YSEXP);
+    Rcpp::traits::input_parameter< SEXP >::type labels(labelsSEXP);
+    Rcpp::traits::input_parameter< int >::type ncomp(ncompSEXP);
+    rcpp_result_gen = Rcpp::wrap(cuda_resident_response_sums_cpp(object, X, Y, labels, ncomp));
+    return rcpp_result_gen;
+END_RCPP
+}
+// cuda_resident_simpls_fit_cpp
+Rcpp::List cuda_resident_simpls_fit_cpp(SEXP X, SEXP Y, SEXP labels, int classes, int precision, int ncomp, int scaling, int oversample, int power, int seed, bool retain_scores, int method, int north, int kernel, double gamma, int degree, double coef0);
+RcppExport SEXP _fastPLS_cuda_resident_simpls_fit_cpp(SEXP XSEXP, SEXP YSEXP, SEXP labelsSEXP, SEXP classesSEXP, SEXP precisionSEXP, SEXP ncompSEXP, SEXP scalingSEXP, SEXP oversampleSEXP, SEXP powerSEXP, SEXP seedSEXP, SEXP retain_scoresSEXP, SEXP methodSEXP, SEXP northSEXP, SEXP kernelSEXP, SEXP gammaSEXP, SEXP degreeSEXP, SEXP coef0SEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< SEXP >::type X(XSEXP);
+    Rcpp::traits::input_parameter< SEXP >::type Y(YSEXP);
+    Rcpp::traits::input_parameter< SEXP >::type labels(labelsSEXP);
+    Rcpp::traits::input_parameter< int >::type classes(classesSEXP);
+    Rcpp::traits::input_parameter< int >::type precision(precisionSEXP);
+    Rcpp::traits::input_parameter< int >::type ncomp(ncompSEXP);
+    Rcpp::traits::input_parameter< int >::type scaling(scalingSEXP);
+    Rcpp::traits::input_parameter< int >::type oversample(oversampleSEXP);
+    Rcpp::traits::input_parameter< int >::type power(powerSEXP);
+    Rcpp::traits::input_parameter< int >::type seed(seedSEXP);
+    Rcpp::traits::input_parameter< bool >::type retain_scores(retain_scoresSEXP);
+    Rcpp::traits::input_parameter< int >::type method(methodSEXP);
+    Rcpp::traits::input_parameter< int >::type north(northSEXP);
+    Rcpp::traits::input_parameter< int >::type kernel(kernelSEXP);
+    Rcpp::traits::input_parameter< double >::type gamma(gammaSEXP);
+    Rcpp::traits::input_parameter< int >::type degree(degreeSEXP);
+    Rcpp::traits::input_parameter< double >::type coef0(coef0SEXP);
+    rcpp_result_gen = Rcpp::wrap(cuda_resident_simpls_fit_cpp(X, Y, labels, classes, precision, ncomp, scaling, oversample, power, seed, retain_scores, method, north, kernel, gamma, degree, coef0));
+    return rcpp_result_gen;
+END_RCPP
+}
+// cuda_resident_export_cpp
+Rcpp::List cuda_resident_export_cpp(Rcpp::List object, bool loadings, bool variance, bool scores);
+RcppExport SEXP _fastPLS_cuda_resident_export_cpp(SEXP objectSEXP, SEXP loadingsSEXP, SEXP varianceSEXP, SEXP scoresSEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< Rcpp::List >::type object(objectSEXP);
+    Rcpp::traits::input_parameter< bool >::type loadings(loadingsSEXP);
+    Rcpp::traits::input_parameter< bool >::type variance(varianceSEXP);
+    Rcpp::traits::input_parameter< bool >::type scores(scoresSEXP);
+    rcpp_result_gen = Rcpp::wrap(cuda_resident_export_cpp(object, loadings, variance, scores));
+    return rcpp_result_gen;
+END_RCPP
+}
+// cuda_resident_compact_cpp
+void cuda_resident_compact_cpp(Rcpp::List object, bool prepare_lda);
+RcppExport SEXP _fastPLS_cuda_resident_compact_cpp(SEXP objectSEXP, SEXP prepare_ldaSEXP) {
+BEGIN_RCPP
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< Rcpp::List >::type object(objectSEXP);
+    Rcpp::traits::input_parameter< bool >::type prepare_lda(prepare_ldaSEXP);
+    cuda_resident_compact_cpp(object, prepare_lda);
+    return R_NilValue;
+END_RCPP
+}
+// cuda_resident_classify_cpp
+Rcpp::IntegerMatrix cuda_resident_classify_cpp(Rcpp::List object, SEXP X, int ncomp, int classifier, int top);
+RcppExport SEXP _fastPLS_cuda_resident_classify_cpp(SEXP objectSEXP, SEXP XSEXP, SEXP ncompSEXP, SEXP classifierSEXP, SEXP topSEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< Rcpp::List >::type object(objectSEXP);
+    Rcpp::traits::input_parameter< SEXP >::type X(XSEXP);
+    Rcpp::traits::input_parameter< int >::type ncomp(ncompSEXP);
+    Rcpp::traits::input_parameter< int >::type classifier(classifierSEXP);
+    Rcpp::traits::input_parameter< int >::type top(topSEXP);
+    rcpp_result_gen = Rcpp::wrap(cuda_resident_classify_cpp(object, X, ncomp, classifier, top));
+    return rcpp_result_gen;
+END_RCPP
+}
+// cuda_resident_classify_path_cpp
+Rcpp::IntegerVector cuda_resident_classify_path_cpp(Rcpp::List object, SEXP X, Rcpp::IntegerVector ncomp, int classifier, int top);
+RcppExport SEXP _fastPLS_cuda_resident_classify_path_cpp(SEXP objectSEXP, SEXP XSEXP, SEXP ncompSEXP, SEXP classifierSEXP, SEXP topSEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< Rcpp::List >::type object(objectSEXP);
+    Rcpp::traits::input_parameter< SEXP >::type X(XSEXP);
+    Rcpp::traits::input_parameter< Rcpp::IntegerVector >::type ncomp(ncompSEXP);
+    Rcpp::traits::input_parameter< int >::type classifier(classifierSEXP);
+    Rcpp::traits::input_parameter< int >::type top(topSEXP);
+    rcpp_result_gen = Rcpp::wrap(cuda_resident_classify_path_cpp(object, X, ncomp, classifier, top));
+    return rcpp_result_gen;
+END_RCPP
+}
+// cuda_resident_classify_response_path_cpp
+Rcpp::List cuda_resident_classify_response_path_cpp(Rcpp::List object, SEXP X, Rcpp::IntegerVector ncomp, int classifier, int top);
+RcppExport SEXP _fastPLS_cuda_resident_classify_response_path_cpp(SEXP objectSEXP, SEXP XSEXP, SEXP ncompSEXP, SEXP classifierSEXP, SEXP topSEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< Rcpp::List >::type object(objectSEXP);
+    Rcpp::traits::input_parameter< SEXP >::type X(XSEXP);
+    Rcpp::traits::input_parameter< Rcpp::IntegerVector >::type ncomp(ncompSEXP);
+    Rcpp::traits::input_parameter< int >::type classifier(classifierSEXP);
+    Rcpp::traits::input_parameter< int >::type top(topSEXP);
+    rcpp_result_gen = Rcpp::wrap(cuda_resident_classify_response_path_cpp(object, X, ncomp, classifier, top));
+    return rcpp_result_gen;
+END_RCPP
+}
+// cuda_resident_simpls_predict_cpp
+SEXP cuda_resident_simpls_predict_cpp(Rcpp::List object, SEXP X, int ncomp, int classifier);
+RcppExport SEXP _fastPLS_cuda_resident_simpls_predict_cpp(SEXP objectSEXP, SEXP XSEXP, SEXP ncompSEXP, SEXP classifierSEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< Rcpp::List >::type object(objectSEXP);
+    Rcpp::traits::input_parameter< SEXP >::type X(XSEXP);
+    Rcpp::traits::input_parameter< int >::type ncomp(ncompSEXP);
+    Rcpp::traits::input_parameter< int >::type classifier(classifierSEXP);
+    rcpp_result_gen = Rcpp::wrap(cuda_resident_simpls_predict_cpp(object, X, ncomp, classifier));
+    return rcpp_result_gen;
+END_RCPP
+}
+// cuda_resident_predict_path_cpp
+SEXP cuda_resident_predict_path_cpp(Rcpp::List object, SEXP X, Rcpp::IntegerVector ncomp, int classifier);
+RcppExport SEXP _fastPLS_cuda_resident_predict_path_cpp(SEXP objectSEXP, SEXP XSEXP, SEXP ncompSEXP, SEXP classifierSEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< Rcpp::List >::type object(objectSEXP);
+    Rcpp::traits::input_parameter< SEXP >::type X(XSEXP);
+    Rcpp::traits::input_parameter< Rcpp::IntegerVector >::type ncomp(ncompSEXP);
+    Rcpp::traits::input_parameter< int >::type classifier(classifierSEXP);
+    rcpp_result_gen = Rcpp::wrap(cuda_resident_predict_path_cpp(object, X, ncomp, classifier));
+    return rcpp_result_gen;
+END_RCPP
+}
 // rsvd_audit_reset_debug
 void rsvd_audit_reset_debug();
 RcppExport SEXP _fastPLS_rsvd_audit_reset_debug() {
@@ -66,6 +218,30 @@ BEGIN_RCPP
     Rcpp::RNGScope rcpp_rngScope_gen;
     Rcpp::traits::input_parameter< arma::ivec >::type y(ySEXP);
     rcpp_result_gen = Rcpp::wrap(transformy(y));
+    return rcpp_result_gen;
+END_RCPP
+}
+// float32_sweep_cols_cpp
+Rcpp::IntegerMatrix float32_sweep_cols_cpp(SEXP XSEXP, SEXP rowSEXP, int operation);
+RcppExport SEXP _fastPLS_float32_sweep_cols_cpp(SEXP XSEXPSEXP, SEXP rowSEXPSEXP, SEXP operationSEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::traits::input_parameter< SEXP >::type XSEXP(XSEXPSEXP);
+    Rcpp::traits::input_parameter< SEXP >::type rowSEXP(rowSEXPSEXP);
+    Rcpp::traits::input_parameter< int >::type operation(operationSEXP);
+    rcpp_result_gen = Rcpp::wrap(float32_sweep_cols_cpp(XSEXP, rowSEXP, operation));
+    return rcpp_result_gen;
+END_RCPP
+}
+// float32_standardize_cpp
+Rcpp::IntegerMatrix float32_standardize_cpp(SEXP XSEXP, SEXP centerSEXP, SEXP scaleSEXP);
+RcppExport SEXP _fastPLS_float32_standardize_cpp(SEXP XSEXPSEXP, SEXP centerSEXPSEXP, SEXP scaleSEXPSEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::traits::input_parameter< SEXP >::type XSEXP(XSEXPSEXP);
+    Rcpp::traits::input_parameter< SEXP >::type centerSEXP(centerSEXPSEXP);
+    Rcpp::traits::input_parameter< SEXP >::type scaleSEXP(scaleSEXPSEXP);
+    rcpp_result_gen = Rcpp::wrap(float32_standardize_cpp(XSEXP, centerSEXP, scaleSEXP));
     return rcpp_result_gen;
 END_RCPP
 }
@@ -126,6 +302,26 @@ BEGIN_RCPP
     Rcpp::traits::input_parameter< int >::type rsvd_power(rsvd_powerSEXP);
     Rcpp::traits::input_parameter< int >::type seed(seedSEXP);
     rcpp_result_gen = Rcpp::wrap(opls_filter_float32_cpp(XSEXP, YSEXP, north, scaling, backend, svd_method, rsvd_oversample, rsvd_power, seed));
+    return rcpp_result_gen;
+END_RCPP
+}
+// opls_filter_float32_labels_cpp
+Rcpp::List opls_filter_float32_labels_cpp(SEXP XSEXP, const Rcpp::IntegerVector& labels, int n_classes, int north, int scaling, int backend, int svd_method, int rsvd_oversample, int rsvd_power, int seed);
+RcppExport SEXP _fastPLS_opls_filter_float32_labels_cpp(SEXP XSEXPSEXP, SEXP labelsSEXP, SEXP n_classesSEXP, SEXP northSEXP, SEXP scalingSEXP, SEXP backendSEXP, SEXP svd_methodSEXP, SEXP rsvd_oversampleSEXP, SEXP rsvd_powerSEXP, SEXP seedSEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< SEXP >::type XSEXP(XSEXPSEXP);
+    Rcpp::traits::input_parameter< const Rcpp::IntegerVector& >::type labels(labelsSEXP);
+    Rcpp::traits::input_parameter< int >::type n_classes(n_classesSEXP);
+    Rcpp::traits::input_parameter< int >::type north(northSEXP);
+    Rcpp::traits::input_parameter< int >::type scaling(scalingSEXP);
+    Rcpp::traits::input_parameter< int >::type backend(backendSEXP);
+    Rcpp::traits::input_parameter< int >::type svd_method(svd_methodSEXP);
+    Rcpp::traits::input_parameter< int >::type rsvd_oversample(rsvd_oversampleSEXP);
+    Rcpp::traits::input_parameter< int >::type rsvd_power(rsvd_powerSEXP);
+    Rcpp::traits::input_parameter< int >::type seed(seedSEXP);
+    rcpp_result_gen = Rcpp::wrap(opls_filter_float32_labels_cpp(XSEXP, labels, n_classes, north, scaling, backend, svd_method, rsvd_oversample, rsvd_power, seed));
     return rcpp_result_gen;
 END_RCPP
 }
@@ -238,20 +434,6 @@ BEGIN_RCPP
     Rcpp::traits::input_parameter< int >::type power_iters(power_itersSEXP);
     Rcpp::traits::input_parameter< int >::type seed(seedSEXP);
     rcpp_result_gen = Rcpp::wrap(metal_float32_rsvd_sample_cpp(ASEXP, l, power_iters, seed));
-    return rcpp_result_gen;
-END_RCPP
-}
-// metal_float32_irlba_cpp
-Rcpp::List metal_float32_irlba_cpp(SEXP ASEXP, int k, int seed, bool left_only);
-RcppExport SEXP _fastPLS_metal_float32_irlba_cpp(SEXP ASEXPSEXP, SEXP kSEXP, SEXP seedSEXP, SEXP left_onlySEXP) {
-BEGIN_RCPP
-    Rcpp::RObject rcpp_result_gen;
-    Rcpp::RNGScope rcpp_rngScope_gen;
-    Rcpp::traits::input_parameter< SEXP >::type ASEXP(ASEXPSEXP);
-    Rcpp::traits::input_parameter< int >::type k(kSEXP);
-    Rcpp::traits::input_parameter< int >::type seed(seedSEXP);
-    Rcpp::traits::input_parameter< bool >::type left_only(left_onlySEXP);
-    rcpp_result_gen = Rcpp::wrap(metal_float32_irlba_cpp(ASEXP, k, seed, left_only));
     return rcpp_result_gen;
 END_RCPP
 }
@@ -586,13 +768,13 @@ BEGIN_RCPP
 END_RCPP
 }
 // pls_model2_fast
-List pls_model2_fast(arma::mat Xtrain, arma::mat Ytrain, arma::ivec ncomp, int scaling, bool fit, int svd_method, int rsvd_oversample, int rsvd_power, double svds_tol, int seed);
-RcppExport SEXP _fastPLS_pls_model2_fast(SEXP XtrainSEXP, SEXP YtrainSEXP, SEXP ncompSEXP, SEXP scalingSEXP, SEXP fitSEXP, SEXP svd_methodSEXP, SEXP rsvd_oversampleSEXP, SEXP rsvd_powerSEXP, SEXP svds_tolSEXP, SEXP seedSEXP) {
+List pls_model2_fast(SEXP XtrainSEXP, SEXP YtrainSEXP, arma::ivec ncomp, int scaling, bool fit, int svd_method, int rsvd_oversample, int rsvd_power, double svds_tol, int seed);
+RcppExport SEXP _fastPLS_pls_model2_fast(SEXP XtrainSEXPSEXP, SEXP YtrainSEXPSEXP, SEXP ncompSEXP, SEXP scalingSEXP, SEXP fitSEXP, SEXP svd_methodSEXP, SEXP rsvd_oversampleSEXP, SEXP rsvd_powerSEXP, SEXP svds_tolSEXP, SEXP seedSEXP) {
 BEGIN_RCPP
     Rcpp::RObject rcpp_result_gen;
     Rcpp::RNGScope rcpp_rngScope_gen;
-    Rcpp::traits::input_parameter< arma::mat >::type Xtrain(XtrainSEXP);
-    Rcpp::traits::input_parameter< arma::mat >::type Ytrain(YtrainSEXP);
+    Rcpp::traits::input_parameter< SEXP >::type XtrainSEXP(XtrainSEXPSEXP);
+    Rcpp::traits::input_parameter< SEXP >::type YtrainSEXP(YtrainSEXPSEXP);
     Rcpp::traits::input_parameter< arma::ivec >::type ncomp(ncompSEXP);
     Rcpp::traits::input_parameter< int >::type scaling(scalingSEXP);
     Rcpp::traits::input_parameter< bool >::type fit(fitSEXP);
@@ -601,18 +783,40 @@ BEGIN_RCPP
     Rcpp::traits::input_parameter< int >::type rsvd_power(rsvd_powerSEXP);
     Rcpp::traits::input_parameter< double >::type svds_tol(svds_tolSEXP);
     Rcpp::traits::input_parameter< int >::type seed(seedSEXP);
-    rcpp_result_gen = Rcpp::wrap(pls_model2_fast(Xtrain, Ytrain, ncomp, scaling, fit, svd_method, rsvd_oversample, rsvd_power, svds_tol, seed));
+    rcpp_result_gen = Rcpp::wrap(pls_model2_fast(XtrainSEXP, YtrainSEXP, ncomp, scaling, fit, svd_method, rsvd_oversample, rsvd_power, svds_tol, seed));
+    return rcpp_result_gen;
+END_RCPP
+}
+// pls_labels_cpp
+List pls_labels_cpp(SEXP XtrainSEXP, const Rcpp::IntegerVector& labels, int n_classes, arma::ivec ncomp, int scaling, bool fit, int method, int svd_method, int rsvd_oversample, int rsvd_power, double svds_tol, int seed);
+RcppExport SEXP _fastPLS_pls_labels_cpp(SEXP XtrainSEXPSEXP, SEXP labelsSEXP, SEXP n_classesSEXP, SEXP ncompSEXP, SEXP scalingSEXP, SEXP fitSEXP, SEXP methodSEXP, SEXP svd_methodSEXP, SEXP rsvd_oversampleSEXP, SEXP rsvd_powerSEXP, SEXP svds_tolSEXP, SEXP seedSEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< SEXP >::type XtrainSEXP(XtrainSEXPSEXP);
+    Rcpp::traits::input_parameter< const Rcpp::IntegerVector& >::type labels(labelsSEXP);
+    Rcpp::traits::input_parameter< int >::type n_classes(n_classesSEXP);
+    Rcpp::traits::input_parameter< arma::ivec >::type ncomp(ncompSEXP);
+    Rcpp::traits::input_parameter< int >::type scaling(scalingSEXP);
+    Rcpp::traits::input_parameter< bool >::type fit(fitSEXP);
+    Rcpp::traits::input_parameter< int >::type method(methodSEXP);
+    Rcpp::traits::input_parameter< int >::type svd_method(svd_methodSEXP);
+    Rcpp::traits::input_parameter< int >::type rsvd_oversample(rsvd_oversampleSEXP);
+    Rcpp::traits::input_parameter< int >::type rsvd_power(rsvd_powerSEXP);
+    Rcpp::traits::input_parameter< double >::type svds_tol(svds_tolSEXP);
+    Rcpp::traits::input_parameter< int >::type seed(seedSEXP);
+    rcpp_result_gen = Rcpp::wrap(pls_labels_cpp(XtrainSEXP, labels, n_classes, ncomp, scaling, fit, method, svd_method, rsvd_oversample, rsvd_power, svds_tol, seed));
     return rcpp_result_gen;
 END_RCPP
 }
 // pls_model2_fast_gpu
-List pls_model2_fast_gpu(arma::mat Xtrain, arma::mat Ytrain, arma::ivec ncomp, int scaling, bool fit, int svd_method, int rsvd_oversample, int rsvd_power, double svds_tol, int seed);
-RcppExport SEXP _fastPLS_pls_model2_fast_gpu(SEXP XtrainSEXP, SEXP YtrainSEXP, SEXP ncompSEXP, SEXP scalingSEXP, SEXP fitSEXP, SEXP svd_methodSEXP, SEXP rsvd_oversampleSEXP, SEXP rsvd_powerSEXP, SEXP svds_tolSEXP, SEXP seedSEXP) {
+List pls_model2_fast_gpu(SEXP XtrainSEXP, SEXP YtrainSEXP, arma::ivec ncomp, int scaling, bool fit, int svd_method, int rsvd_oversample, int rsvd_power, double svds_tol, int seed);
+RcppExport SEXP _fastPLS_pls_model2_fast_gpu(SEXP XtrainSEXPSEXP, SEXP YtrainSEXPSEXP, SEXP ncompSEXP, SEXP scalingSEXP, SEXP fitSEXP, SEXP svd_methodSEXP, SEXP rsvd_oversampleSEXP, SEXP rsvd_powerSEXP, SEXP svds_tolSEXP, SEXP seedSEXP) {
 BEGIN_RCPP
     Rcpp::RObject rcpp_result_gen;
     Rcpp::RNGScope rcpp_rngScope_gen;
-    Rcpp::traits::input_parameter< arma::mat >::type Xtrain(XtrainSEXP);
-    Rcpp::traits::input_parameter< arma::mat >::type Ytrain(YtrainSEXP);
+    Rcpp::traits::input_parameter< SEXP >::type XtrainSEXP(XtrainSEXPSEXP);
+    Rcpp::traits::input_parameter< SEXP >::type YtrainSEXP(YtrainSEXPSEXP);
     Rcpp::traits::input_parameter< arma::ivec >::type ncomp(ncompSEXP);
     Rcpp::traits::input_parameter< int >::type scaling(scalingSEXP);
     Rcpp::traits::input_parameter< bool >::type fit(fitSEXP);
@@ -621,7 +825,7 @@ BEGIN_RCPP
     Rcpp::traits::input_parameter< int >::type rsvd_power(rsvd_powerSEXP);
     Rcpp::traits::input_parameter< double >::type svds_tol(svds_tolSEXP);
     Rcpp::traits::input_parameter< int >::type seed(seedSEXP);
-    rcpp_result_gen = Rcpp::wrap(pls_model2_fast_gpu(Xtrain, Ytrain, ncomp, scaling, fit, svd_method, rsvd_oversample, rsvd_power, svds_tol, seed));
+    rcpp_result_gen = Rcpp::wrap(pls_model2_fast_gpu(XtrainSEXP, YtrainSEXP, ncomp, scaling, fit, svd_method, rsvd_oversample, rsvd_power, svds_tol, seed));
     return rcpp_result_gen;
 END_RCPP
 }
@@ -647,15 +851,15 @@ BEGIN_RCPP
 END_RCPP
 }
 // pls_predict
-List pls_predict(List& model, arma::mat Xtest, bool proj);
-RcppExport SEXP _fastPLS_pls_predict(SEXP modelSEXP, SEXP XtestSEXP, SEXP projSEXP) {
+List pls_predict(List& model, SEXP XtestSEXP, bool proj);
+RcppExport SEXP _fastPLS_pls_predict(SEXP modelSEXP, SEXP XtestSEXPSEXP, SEXP projSEXP) {
 BEGIN_RCPP
     Rcpp::RObject rcpp_result_gen;
     Rcpp::RNGScope rcpp_rngScope_gen;
     Rcpp::traits::input_parameter< List& >::type model(modelSEXP);
-    Rcpp::traits::input_parameter< arma::mat >::type Xtest(XtestSEXP);
+    Rcpp::traits::input_parameter< SEXP >::type XtestSEXP(XtestSEXPSEXP);
     Rcpp::traits::input_parameter< bool >::type proj(projSEXP);
-    rcpp_result_gen = Rcpp::wrap(pls_predict(model, Xtest, proj));
+    rcpp_result_gen = Rcpp::wrap(pls_predict(model, XtestSEXP, proj));
     return rcpp_result_gen;
 END_RCPP
 }
@@ -673,16 +877,16 @@ BEGIN_RCPP
 END_RCPP
 }
 // pls_predict_flash_cpu
-List pls_predict_flash_cpu(List& model, arma::mat Xtest, bool proj, int block_size);
-RcppExport SEXP _fastPLS_pls_predict_flash_cpu(SEXP modelSEXP, SEXP XtestSEXP, SEXP projSEXP, SEXP block_sizeSEXP) {
+List pls_predict_flash_cpu(List& model, SEXP XtestSEXP, bool proj, int block_size);
+RcppExport SEXP _fastPLS_pls_predict_flash_cpu(SEXP modelSEXP, SEXP XtestSEXPSEXP, SEXP projSEXP, SEXP block_sizeSEXP) {
 BEGIN_RCPP
     Rcpp::RObject rcpp_result_gen;
     Rcpp::RNGScope rcpp_rngScope_gen;
     Rcpp::traits::input_parameter< List& >::type model(modelSEXP);
-    Rcpp::traits::input_parameter< arma::mat >::type Xtest(XtestSEXP);
+    Rcpp::traits::input_parameter< SEXP >::type XtestSEXP(XtestSEXPSEXP);
     Rcpp::traits::input_parameter< bool >::type proj(projSEXP);
     Rcpp::traits::input_parameter< int >::type block_size(block_sizeSEXP);
-    rcpp_result_gen = Rcpp::wrap(pls_predict_flash_cpu(model, Xtest, proj, block_size));
+    rcpp_result_gen = Rcpp::wrap(pls_predict_flash_cpu(model, XtestSEXP, proj, block_size));
     return rcpp_result_gen;
 END_RCPP
 }
@@ -766,6 +970,21 @@ BEGIN_RCPP
     Rcpp::traits::input_parameter< const int >::type north(northSEXP);
     Rcpp::traits::input_parameter< const int >::type scaling(scalingSEXP);
     rcpp_result_gen = Rcpp::wrap(opls_filter_cpp(X, Y, north, scaling));
+    return rcpp_result_gen;
+END_RCPP
+}
+// opls_filter_labels_cpp
+Rcpp::List opls_filter_labels_cpp(arma::mat X, const Rcpp::IntegerVector& labels, const int n_classes, const int north, const int scaling);
+RcppExport SEXP _fastPLS_opls_filter_labels_cpp(SEXP XSEXP, SEXP labelsSEXP, SEXP n_classesSEXP, SEXP northSEXP, SEXP scalingSEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< arma::mat >::type X(XSEXP);
+    Rcpp::traits::input_parameter< const Rcpp::IntegerVector& >::type labels(labelsSEXP);
+    Rcpp::traits::input_parameter< const int >::type n_classes(n_classesSEXP);
+    Rcpp::traits::input_parameter< const int >::type north(northSEXP);
+    Rcpp::traits::input_parameter< const int >::type scaling(scalingSEXP);
+    rcpp_result_gen = Rcpp::wrap(opls_filter_labels_cpp(X, labels, n_classes, north, scaling));
     return rcpp_result_gen;
 END_RCPP
 }
@@ -931,13 +1150,13 @@ BEGIN_RCPP
 END_RCPP
 }
 // pls_cv_predict_compiled
-List pls_cv_predict_compiled(arma::mat Xdata, arma::mat Ydata, arma::ivec constrain, arma::ivec ncomp, int scaling, int kfold, int method, int backend, int svd_method, int rsvd_oversample, int rsvd_power, double svds_tol, int seed, bool classification, int n_response, bool xprod, int opls_north, bool return_scores, arma::mat class_codes, int classifier, double lda_ridge, bool store_predictions, int metric_id);
+List pls_cv_predict_compiled(SEXP Xdata, SEXP Ydata, arma::ivec constrain, arma::ivec ncomp, int scaling, int kfold, int method, int backend, int svd_method, int rsvd_oversample, int rsvd_power, double svds_tol, int seed, bool classification, int n_response, bool xprod, int opls_north, bool return_scores, arma::mat class_codes, int classifier, double lda_ridge, bool store_predictions, int metric_id);
 RcppExport SEXP _fastPLS_pls_cv_predict_compiled(SEXP XdataSEXP, SEXP YdataSEXP, SEXP constrainSEXP, SEXP ncompSEXP, SEXP scalingSEXP, SEXP kfoldSEXP, SEXP methodSEXP, SEXP backendSEXP, SEXP svd_methodSEXP, SEXP rsvd_oversampleSEXP, SEXP rsvd_powerSEXP, SEXP svds_tolSEXP, SEXP seedSEXP, SEXP classificationSEXP, SEXP n_responseSEXP, SEXP xprodSEXP, SEXP opls_northSEXP, SEXP return_scoresSEXP, SEXP class_codesSEXP, SEXP classifierSEXP, SEXP lda_ridgeSEXP, SEXP store_predictionsSEXP, SEXP metric_idSEXP) {
 BEGIN_RCPP
     Rcpp::RObject rcpp_result_gen;
     Rcpp::RNGScope rcpp_rngScope_gen;
-    Rcpp::traits::input_parameter< arma::mat >::type Xdata(XdataSEXP);
-    Rcpp::traits::input_parameter< arma::mat >::type Ydata(YdataSEXP);
+    Rcpp::traits::input_parameter< SEXP >::type Xdata(XdataSEXP);
+    Rcpp::traits::input_parameter< SEXP >::type Ydata(YdataSEXP);
     Rcpp::traits::input_parameter< arma::ivec >::type constrain(constrainSEXP);
     Rcpp::traits::input_parameter< arma::ivec >::type ncomp(ncompSEXP);
     Rcpp::traits::input_parameter< int >::type scaling(scalingSEXP);
@@ -963,53 +1182,210 @@ BEGIN_RCPP
     return rcpp_result_gen;
 END_RCPP
 }
-// fastpls_cpp_core_rsvd
-Rcpp::List fastpls_cpp_core_rsvd(SEXP A, int k, int oversample, int power, int seed, bool use_float);
-RcppExport SEXP _fastPLS_fastpls_cpp_core_rsvd(SEXP ASEXP, SEXP kSEXP, SEXP oversampleSEXP, SEXP powerSEXP, SEXP seedSEXP, SEXP use_floatSEXP) {
-BEGIN_RCPP
-    Rcpp::RObject rcpp_result_gen;
-    Rcpp::RNGScope rcpp_rngScope_gen;
-    Rcpp::traits::input_parameter< SEXP >::type A(ASEXP);
-    Rcpp::traits::input_parameter< int >::type k(kSEXP);
-    Rcpp::traits::input_parameter< int >::type oversample(oversampleSEXP);
-    Rcpp::traits::input_parameter< int >::type power(powerSEXP);
-    Rcpp::traits::input_parameter< int >::type seed(seedSEXP);
-    Rcpp::traits::input_parameter< bool >::type use_float(use_floatSEXP);
-    rcpp_result_gen = Rcpp::wrap(fastpls_cpp_core_rsvd(A, k, oversample, power, seed, use_float));
-    return rcpp_result_gen;
-END_RCPP
-}
-// fastpls_cpp_core_plssvd
-Rcpp::List fastpls_cpp_core_plssvd(SEXP X, SEXP Y, int ncomp, int oversample, int power, int seed, bool use_float);
-RcppExport SEXP _fastPLS_fastpls_cpp_core_plssvd(SEXP XSEXP, SEXP YSEXP, SEXP ncompSEXP, SEXP oversampleSEXP, SEXP powerSEXP, SEXP seedSEXP, SEXP use_floatSEXP) {
+// metal_resident_simpls_fit_cpp
+Rcpp::List metal_resident_simpls_fit_cpp(SEXP X, SEXP Y, SEXP labels, int classes, int ncomp, int scaling, int oversample, int power, int seed, int method, int north, int kernel, double gamma, int degree, double coefficient);
+RcppExport SEXP _fastPLS_metal_resident_simpls_fit_cpp(SEXP XSEXP, SEXP YSEXP, SEXP labelsSEXP, SEXP classesSEXP, SEXP ncompSEXP, SEXP scalingSEXP, SEXP oversampleSEXP, SEXP powerSEXP, SEXP seedSEXP, SEXP methodSEXP, SEXP northSEXP, SEXP kernelSEXP, SEXP gammaSEXP, SEXP degreeSEXP, SEXP coefficientSEXP) {
 BEGIN_RCPP
     Rcpp::RObject rcpp_result_gen;
     Rcpp::RNGScope rcpp_rngScope_gen;
     Rcpp::traits::input_parameter< SEXP >::type X(XSEXP);
     Rcpp::traits::input_parameter< SEXP >::type Y(YSEXP);
+    Rcpp::traits::input_parameter< SEXP >::type labels(labelsSEXP);
+    Rcpp::traits::input_parameter< int >::type classes(classesSEXP);
     Rcpp::traits::input_parameter< int >::type ncomp(ncompSEXP);
+    Rcpp::traits::input_parameter< int >::type scaling(scalingSEXP);
     Rcpp::traits::input_parameter< int >::type oversample(oversampleSEXP);
     Rcpp::traits::input_parameter< int >::type power(powerSEXP);
     Rcpp::traits::input_parameter< int >::type seed(seedSEXP);
-    Rcpp::traits::input_parameter< bool >::type use_float(use_floatSEXP);
-    rcpp_result_gen = Rcpp::wrap(fastpls_cpp_core_plssvd(X, Y, ncomp, oversample, power, seed, use_float));
+    Rcpp::traits::input_parameter< int >::type method(methodSEXP);
+    Rcpp::traits::input_parameter< int >::type north(northSEXP);
+    Rcpp::traits::input_parameter< int >::type kernel(kernelSEXP);
+    Rcpp::traits::input_parameter< double >::type gamma(gammaSEXP);
+    Rcpp::traits::input_parameter< int >::type degree(degreeSEXP);
+    Rcpp::traits::input_parameter< double >::type coefficient(coefficientSEXP);
+    rcpp_result_gen = Rcpp::wrap(metal_resident_simpls_fit_cpp(X, Y, labels, classes, ncomp, scaling, oversample, power, seed, method, north, kernel, gamma, degree, coefficient));
     return rcpp_result_gen;
 END_RCPP
 }
-// fastpls_cpp_core_simpls
-Rcpp::List fastpls_cpp_core_simpls(SEXP X, SEXP Y, int ncomp, int oversample, int power, int seed, bool use_float);
-RcppExport SEXP _fastPLS_fastpls_cpp_core_simpls(SEXP XSEXP, SEXP YSEXP, SEXP ncompSEXP, SEXP oversampleSEXP, SEXP powerSEXP, SEXP seedSEXP, SEXP use_floatSEXP) {
+// metal_resident_export_cpp
+SEXP metal_resident_export_cpp(Rcpp::List object, int field);
+RcppExport SEXP _fastPLS_metal_resident_export_cpp(SEXP objectSEXP, SEXP fieldSEXP) {
 BEGIN_RCPP
     Rcpp::RObject rcpp_result_gen;
     Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< Rcpp::List >::type object(objectSEXP);
+    Rcpp::traits::input_parameter< int >::type field(fieldSEXP);
+    rcpp_result_gen = Rcpp::wrap(metal_resident_export_cpp(object, field));
+    return rcpp_result_gen;
+END_RCPP
+}
+// metal_resident_compact_cpp
+void metal_resident_compact_cpp(Rcpp::List object, bool prepare_lda);
+RcppExport SEXP _fastPLS_metal_resident_compact_cpp(SEXP objectSEXP, SEXP prepare_ldaSEXP) {
+BEGIN_RCPP
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< Rcpp::List >::type object(objectSEXP);
+    Rcpp::traits::input_parameter< bool >::type prepare_lda(prepare_ldaSEXP);
+    metal_resident_compact_cpp(object, prepare_lda);
+    return R_NilValue;
+END_RCPP
+}
+// metal_resident_predict_cpp
+SEXP metal_resident_predict_cpp(Rcpp::List object, SEXP X, int ncomp, int classifier);
+RcppExport SEXP _fastPLS_metal_resident_predict_cpp(SEXP objectSEXP, SEXP XSEXP, SEXP ncompSEXP, SEXP classifierSEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< Rcpp::List >::type object(objectSEXP);
+    Rcpp::traits::input_parameter< SEXP >::type X(XSEXP);
+    Rcpp::traits::input_parameter< int >::type ncomp(ncompSEXP);
+    Rcpp::traits::input_parameter< int >::type classifier(classifierSEXP);
+    rcpp_result_gen = Rcpp::wrap(metal_resident_predict_cpp(object, X, ncomp, classifier));
+    return rcpp_result_gen;
+END_RCPP
+}
+// metal_resident_predict_path_cpp
+SEXP metal_resident_predict_path_cpp(Rcpp::List object, SEXP X, Rcpp::IntegerVector ncomp, int classifier);
+RcppExport SEXP _fastPLS_metal_resident_predict_path_cpp(SEXP objectSEXP, SEXP XSEXP, SEXP ncompSEXP, SEXP classifierSEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< Rcpp::List >::type object(objectSEXP);
+    Rcpp::traits::input_parameter< SEXP >::type X(XSEXP);
+    Rcpp::traits::input_parameter< Rcpp::IntegerVector >::type ncomp(ncompSEXP);
+    Rcpp::traits::input_parameter< int >::type classifier(classifierSEXP);
+    rcpp_result_gen = Rcpp::wrap(metal_resident_predict_path_cpp(object, X, ncomp, classifier));
+    return rcpp_result_gen;
+END_RCPP
+}
+// metal_resident_project_cpp
+SEXP metal_resident_project_cpp(Rcpp::List object, SEXP X, int ncomp);
+RcppExport SEXP _fastPLS_metal_resident_project_cpp(SEXP objectSEXP, SEXP XSEXP, SEXP ncompSEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< Rcpp::List >::type object(objectSEXP);
+    Rcpp::traits::input_parameter< SEXP >::type X(XSEXP);
+    Rcpp::traits::input_parameter< int >::type ncomp(ncompSEXP);
+    rcpp_result_gen = Rcpp::wrap(metal_resident_project_cpp(object, X, ncomp));
+    return rcpp_result_gen;
+END_RCPP
+}
+// metal_resident_classify_cpp
+Rcpp::IntegerMatrix metal_resident_classify_cpp(Rcpp::List object, SEXP X, int ncomp, int top, int classifier);
+RcppExport SEXP _fastPLS_metal_resident_classify_cpp(SEXP objectSEXP, SEXP XSEXP, SEXP ncompSEXP, SEXP topSEXP, SEXP classifierSEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< Rcpp::List >::type object(objectSEXP);
+    Rcpp::traits::input_parameter< SEXP >::type X(XSEXP);
+    Rcpp::traits::input_parameter< int >::type ncomp(ncompSEXP);
+    Rcpp::traits::input_parameter< int >::type top(topSEXP);
+    Rcpp::traits::input_parameter< int >::type classifier(classifierSEXP);
+    rcpp_result_gen = Rcpp::wrap(metal_resident_classify_cpp(object, X, ncomp, top, classifier));
+    return rcpp_result_gen;
+END_RCPP
+}
+// metal_resident_classify_path_cpp
+Rcpp::IntegerVector metal_resident_classify_path_cpp(Rcpp::List object, SEXP X, Rcpp::IntegerVector ncomp, int top, int classifier);
+RcppExport SEXP _fastPLS_metal_resident_classify_path_cpp(SEXP objectSEXP, SEXP XSEXP, SEXP ncompSEXP, SEXP topSEXP, SEXP classifierSEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< Rcpp::List >::type object(objectSEXP);
+    Rcpp::traits::input_parameter< SEXP >::type X(XSEXP);
+    Rcpp::traits::input_parameter< Rcpp::IntegerVector >::type ncomp(ncompSEXP);
+    Rcpp::traits::input_parameter< int >::type top(topSEXP);
+    Rcpp::traits::input_parameter< int >::type classifier(classifierSEXP);
+    rcpp_result_gen = Rcpp::wrap(metal_resident_classify_path_cpp(object, X, ncomp, top, classifier));
+    return rcpp_result_gen;
+END_RCPP
+}
+// metal_resident_classify_response_path_cpp
+Rcpp::List metal_resident_classify_response_path_cpp(Rcpp::List object, SEXP X, Rcpp::IntegerVector ncomp, int top, int classifier);
+RcppExport SEXP _fastPLS_metal_resident_classify_response_path_cpp(SEXP objectSEXP, SEXP XSEXP, SEXP ncompSEXP, SEXP topSEXP, SEXP classifierSEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< Rcpp::List >::type object(objectSEXP);
+    Rcpp::traits::input_parameter< SEXP >::type X(XSEXP);
+    Rcpp::traits::input_parameter< Rcpp::IntegerVector >::type ncomp(ncompSEXP);
+    Rcpp::traits::input_parameter< int >::type top(topSEXP);
+    Rcpp::traits::input_parameter< int >::type classifier(classifierSEXP);
+    rcpp_result_gen = Rcpp::wrap(metal_resident_classify_response_path_cpp(object, X, ncomp, top, classifier));
+    return rcpp_result_gen;
+END_RCPP
+}
+// metal_resident_response_sums_cpp
+SEXP metal_resident_response_sums_cpp(Rcpp::List object, SEXP X, SEXP Y, SEXP labels, int ncomp);
+RcppExport SEXP _fastPLS_metal_resident_response_sums_cpp(SEXP objectSEXP, SEXP XSEXP, SEXP YSEXP, SEXP labelsSEXP, SEXP ncompSEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< Rcpp::List >::type object(objectSEXP);
     Rcpp::traits::input_parameter< SEXP >::type X(XSEXP);
     Rcpp::traits::input_parameter< SEXP >::type Y(YSEXP);
+    Rcpp::traits::input_parameter< SEXP >::type labels(labelsSEXP);
     Rcpp::traits::input_parameter< int >::type ncomp(ncompSEXP);
-    Rcpp::traits::input_parameter< int >::type oversample(oversampleSEXP);
+    rcpp_result_gen = Rcpp::wrap(metal_resident_response_sums_cpp(object, X, Y, labels, ncomp));
+    return rcpp_result_gen;
+END_RCPP
+}
+// spearman_correlation_cpp
+double spearman_correlation_cpp(Rcpp::NumericVector observed, Rcpp::NumericVector predicted);
+RcppExport SEXP _fastPLS_spearman_correlation_cpp(SEXP observedSEXP, SEXP predictedSEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::traits::input_parameter< Rcpp::NumericVector >::type observed(observedSEXP);
+    Rcpp::traits::input_parameter< Rcpp::NumericVector >::type predicted(predictedSEXP);
+    rcpp_result_gen = Rcpp::wrap(spearman_correlation_cpp(observed, predicted));
+    return rcpp_result_gen;
+END_RCPP
+}
+// metal_xprod_workspace_cpp
+SEXP metal_xprod_workspace_cpp(const arma::mat& X, const arma::mat& Y);
+RcppExport SEXP _fastPLS_metal_xprod_workspace_cpp(SEXP XSEXP, SEXP YSEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::traits::input_parameter< const arma::mat& >::type X(XSEXP);
+    Rcpp::traits::input_parameter< const arma::mat& >::type Y(YSEXP);
+    rcpp_result_gen = Rcpp::wrap(metal_xprod_workspace_cpp(X, Y));
+    return rcpp_result_gen;
+END_RCPP
+}
+// metal_xprod_workspace_multiply_cpp
+arma::mat metal_xprod_workspace_multiply_cpp(SEXP workspace, const arma::mat& B, bool transpose);
+RcppExport SEXP _fastPLS_metal_xprod_workspace_multiply_cpp(SEXP workspaceSEXP, SEXP BSEXP, SEXP transposeSEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::traits::input_parameter< SEXP >::type workspace(workspaceSEXP);
+    Rcpp::traits::input_parameter< const arma::mat& >::type B(BSEXP);
+    Rcpp::traits::input_parameter< bool >::type transpose(transposeSEXP);
+    rcpp_result_gen = Rcpp::wrap(metal_xprod_workspace_multiply_cpp(workspace, B, transpose));
+    return rcpp_result_gen;
+END_RCPP
+}
+// metal_xprod_workspace_release_cpp
+void metal_xprod_workspace_release_cpp(SEXP workspace);
+RcppExport SEXP _fastPLS_metal_xprod_workspace_release_cpp(SEXP workspaceSEXP) {
+BEGIN_RCPP
+    Rcpp::traits::input_parameter< SEXP >::type workspace(workspaceSEXP);
+    metal_xprod_workspace_release_cpp(workspace);
+    return R_NilValue;
+END_RCPP
+}
+// metal_xprod_rsvd_cpp
+Rcpp::List metal_xprod_rsvd_cpp(const arma::mat& X, const arma::mat& Y, const arma::mat& omega, int target, int power, bool left_only);
+RcppExport SEXP _fastPLS_metal_xprod_rsvd_cpp(SEXP XSEXP, SEXP YSEXP, SEXP omegaSEXP, SEXP targetSEXP, SEXP powerSEXP, SEXP left_onlySEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::traits::input_parameter< const arma::mat& >::type X(XSEXP);
+    Rcpp::traits::input_parameter< const arma::mat& >::type Y(YSEXP);
+    Rcpp::traits::input_parameter< const arma::mat& >::type omega(omegaSEXP);
+    Rcpp::traits::input_parameter< int >::type target(targetSEXP);
     Rcpp::traits::input_parameter< int >::type power(powerSEXP);
-    Rcpp::traits::input_parameter< int >::type seed(seedSEXP);
-    Rcpp::traits::input_parameter< bool >::type use_float(use_floatSEXP);
-    rcpp_result_gen = Rcpp::wrap(fastpls_cpp_core_simpls(X, Y, ncomp, oversample, power, seed, use_float));
+    Rcpp::traits::input_parameter< bool >::type left_only(left_onlySEXP);
+    rcpp_result_gen = Rcpp::wrap(metal_xprod_rsvd_cpp(X, Y, omega, target, power, left_only));
     return rcpp_result_gen;
 END_RCPP
 }
@@ -1064,15 +1440,28 @@ END_RCPP
 }
 
 static const R_CallMethodDef CallEntries[] = {
+    {"_fastPLS_cuda_resident_project_cpp", (DL_FUNC) &_fastPLS_cuda_resident_project_cpp, 3},
+    {"_fastPLS_cuda_resident_response_sums_cpp", (DL_FUNC) &_fastPLS_cuda_resident_response_sums_cpp, 5},
+    {"_fastPLS_cuda_resident_simpls_fit_cpp", (DL_FUNC) &_fastPLS_cuda_resident_simpls_fit_cpp, 17},
+    {"_fastPLS_cuda_resident_export_cpp", (DL_FUNC) &_fastPLS_cuda_resident_export_cpp, 4},
+    {"_fastPLS_cuda_resident_compact_cpp", (DL_FUNC) &_fastPLS_cuda_resident_compact_cpp, 2},
+    {"_fastPLS_cuda_resident_classify_cpp", (DL_FUNC) &_fastPLS_cuda_resident_classify_cpp, 5},
+    {"_fastPLS_cuda_resident_classify_path_cpp", (DL_FUNC) &_fastPLS_cuda_resident_classify_path_cpp, 5},
+    {"_fastPLS_cuda_resident_classify_response_path_cpp", (DL_FUNC) &_fastPLS_cuda_resident_classify_response_path_cpp, 5},
+    {"_fastPLS_cuda_resident_simpls_predict_cpp", (DL_FUNC) &_fastPLS_cuda_resident_simpls_predict_cpp, 4},
+    {"_fastPLS_cuda_resident_predict_path_cpp", (DL_FUNC) &_fastPLS_cuda_resident_predict_path_cpp, 4},
     {"_fastPLS_rsvd_audit_reset_debug", (DL_FUNC) &_fastPLS_rsvd_audit_reset_debug, 0},
     {"_fastPLS_rsvd_audit_summary_debug", (DL_FUNC) &_fastPLS_rsvd_audit_summary_debug, 0},
     {"_fastPLS_label_crossprod_scaled_cpp", (DL_FUNC) &_fastPLS_label_crossprod_scaled_cpp, 4},
     {"_fastPLS_RQ", (DL_FUNC) &_fastPLS_RQ, 2},
     {"_fastPLS_transformy", (DL_FUNC) &_fastPLS_transformy, 1},
+    {"_fastPLS_float32_sweep_cols_cpp", (DL_FUNC) &_fastPLS_float32_sweep_cols_cpp, 3},
+    {"_fastPLS_float32_standardize_cpp", (DL_FUNC) &_fastPLS_float32_standardize_cpp, 3},
     {"_fastPLS_kernel_matrix_float32_cpp", (DL_FUNC) &_fastPLS_kernel_matrix_float32_cpp, 7},
     {"_fastPLS_center_kernel_train_float32_cpp", (DL_FUNC) &_fastPLS_center_kernel_train_float32_cpp, 1},
     {"_fastPLS_center_kernel_test_float32_cpp", (DL_FUNC) &_fastPLS_center_kernel_test_float32_cpp, 3},
     {"_fastPLS_opls_filter_float32_cpp", (DL_FUNC) &_fastPLS_opls_filter_float32_cpp, 9},
+    {"_fastPLS_opls_filter_float32_labels_cpp", (DL_FUNC) &_fastPLS_opls_filter_float32_labels_cpp, 10},
     {"_fastPLS_opls_apply_filter_float32_cpp", (DL_FUNC) &_fastPLS_opls_apply_filter_float32_cpp, 6},
     {"_fastPLS_lda_train_prefix_float32_cpp", (DL_FUNC) &_fastPLS_lda_train_prefix_float32_cpp, 4},
     {"_fastPLS_lda_predict_float32_cpp", (DL_FUNC) &_fastPLS_lda_predict_float32_cpp, 3},
@@ -1081,7 +1470,6 @@ static const R_CallMethodDef CallEntries[] = {
     {"_fastPLS_cuda_float32_rsvd_sample_cpp", (DL_FUNC) &_fastPLS_cuda_float32_rsvd_sample_cpp, 4},
     {"_fastPLS_metal_float32_matrix_multiply_cpp", (DL_FUNC) &_fastPLS_metal_float32_matrix_multiply_cpp, 4},
     {"_fastPLS_metal_float32_rsvd_sample_cpp", (DL_FUNC) &_fastPLS_metal_float32_rsvd_sample_cpp, 4},
-    {"_fastPLS_metal_float32_irlba_cpp", (DL_FUNC) &_fastPLS_metal_float32_irlba_cpp, 4},
     {"_fastPLS_fastsvd_float32_cpp", (DL_FUNC) &_fastPLS_fastsvd_float32_cpp, 8},
     {"_fastPLS_pls_float32_cpu_cpp", (DL_FUNC) &_fastPLS_pls_float32_cpu_cpp, 11},
     {"_fastPLS_pls_float32_labels_cpp", (DL_FUNC) &_fastPLS_pls_float32_labels_cpp, 12},
@@ -1106,6 +1494,7 @@ static const R_CallMethodDef CallEntries[] = {
     {"_fastPLS_truncated_svd_debug", (DL_FUNC) &_fastPLS_truncated_svd_debug, 8},
     {"_fastPLS_pls_model2", (DL_FUNC) &_fastPLS_pls_model2, 10},
     {"_fastPLS_pls_model2_fast", (DL_FUNC) &_fastPLS_pls_model2_fast, 10},
+    {"_fastPLS_pls_labels_cpp", (DL_FUNC) &_fastPLS_pls_labels_cpp, 12},
     {"_fastPLS_pls_model2_fast_gpu", (DL_FUNC) &_fastPLS_pls_model2_fast_gpu, 10},
     {"_fastPLS_pls_model2_fast_gpu_labels", (DL_FUNC) &_fastPLS_pls_model2_fast_gpu_labels, 11},
     {"_fastPLS_pls_predict", (DL_FUNC) &_fastPLS_pls_predict, 3},
@@ -1117,6 +1506,7 @@ static const R_CallMethodDef CallEntries[] = {
     {"_fastPLS_center_kernel_train_cpp", (DL_FUNC) &_fastPLS_center_kernel_train_cpp, 1},
     {"_fastPLS_center_kernel_test_cpp", (DL_FUNC) &_fastPLS_center_kernel_test_cpp, 3},
     {"_fastPLS_opls_filter_cpp", (DL_FUNC) &_fastPLS_opls_filter_cpp, 4},
+    {"_fastPLS_opls_filter_labels_cpp", (DL_FUNC) &_fastPLS_opls_filter_labels_cpp, 5},
     {"_fastPLS_opls_apply_filter_cpp", (DL_FUNC) &_fastPLS_opls_apply_filter_cpp, 5},
     {"_fastPLS_single_pls_cv_cpp", (DL_FUNC) &_fastPLS_single_pls_cv_cpp, 12},
     {"_fastPLS_pls_model1", (DL_FUNC) &_fastPLS_pls_model1, 10},
@@ -1126,9 +1516,21 @@ static const R_CallMethodDef CallEntries[] = {
     {"_fastPLS_pls_model1_gpu_implicit_xprod", (DL_FUNC) &_fastPLS_pls_model1_gpu_implicit_xprod, 9},
     {"_fastPLS_pls_lda_gpu_native", (DL_FUNC) &_fastPLS_pls_lda_gpu_native, 15},
     {"_fastPLS_pls_cv_predict_compiled", (DL_FUNC) &_fastPLS_pls_cv_predict_compiled, 23},
-    {"_fastPLS_fastpls_cpp_core_rsvd", (DL_FUNC) &_fastPLS_fastpls_cpp_core_rsvd, 6},
-    {"_fastPLS_fastpls_cpp_core_plssvd", (DL_FUNC) &_fastPLS_fastpls_cpp_core_plssvd, 7},
-    {"_fastPLS_fastpls_cpp_core_simpls", (DL_FUNC) &_fastPLS_fastpls_cpp_core_simpls, 7},
+    {"_fastPLS_metal_resident_simpls_fit_cpp", (DL_FUNC) &_fastPLS_metal_resident_simpls_fit_cpp, 15},
+    {"_fastPLS_metal_resident_export_cpp", (DL_FUNC) &_fastPLS_metal_resident_export_cpp, 2},
+    {"_fastPLS_metal_resident_compact_cpp", (DL_FUNC) &_fastPLS_metal_resident_compact_cpp, 2},
+    {"_fastPLS_metal_resident_predict_cpp", (DL_FUNC) &_fastPLS_metal_resident_predict_cpp, 4},
+    {"_fastPLS_metal_resident_predict_path_cpp", (DL_FUNC) &_fastPLS_metal_resident_predict_path_cpp, 4},
+    {"_fastPLS_metal_resident_project_cpp", (DL_FUNC) &_fastPLS_metal_resident_project_cpp, 3},
+    {"_fastPLS_metal_resident_classify_cpp", (DL_FUNC) &_fastPLS_metal_resident_classify_cpp, 5},
+    {"_fastPLS_metal_resident_classify_path_cpp", (DL_FUNC) &_fastPLS_metal_resident_classify_path_cpp, 5},
+    {"_fastPLS_metal_resident_classify_response_path_cpp", (DL_FUNC) &_fastPLS_metal_resident_classify_response_path_cpp, 5},
+    {"_fastPLS_metal_resident_response_sums_cpp", (DL_FUNC) &_fastPLS_metal_resident_response_sums_cpp, 5},
+    {"_fastPLS_spearman_correlation_cpp", (DL_FUNC) &_fastPLS_spearman_correlation_cpp, 2},
+    {"_fastPLS_metal_xprod_workspace_cpp", (DL_FUNC) &_fastPLS_metal_xprod_workspace_cpp, 2},
+    {"_fastPLS_metal_xprod_workspace_multiply_cpp", (DL_FUNC) &_fastPLS_metal_xprod_workspace_multiply_cpp, 3},
+    {"_fastPLS_metal_xprod_workspace_release_cpp", (DL_FUNC) &_fastPLS_metal_xprod_workspace_release_cpp, 1},
+    {"_fastPLS_metal_xprod_rsvd_cpp", (DL_FUNC) &_fastPLS_metal_xprod_rsvd_cpp, 6},
     {"_fastPLS_has_metal", (DL_FUNC) &_fastPLS_has_metal, 0},
     {"_fastPLS_metal_matrix_multiply_cpp", (DL_FUNC) &_fastPLS_metal_matrix_multiply_cpp, 2},
     {"_fastPLS_metal_crossprod_cpp", (DL_FUNC) &_fastPLS_metal_crossprod_cpp, 2},

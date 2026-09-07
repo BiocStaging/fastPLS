@@ -1,4 +1,5 @@
 #include "svd_iface.h"
+#include <fastpls/native/operator_rsvd.hpp>
 
 #include <algorithm>
 #include <cmath>
@@ -282,27 +283,38 @@ SVDResult audited_rsvd(const Mat& A, int k, const SVDOptions& requested, Backend
       record_rsvd_audit_result(accepted, true);
       throw std::runtime_error(
         "rSVD case audit did not converge across independent strengthened sketches; "
-        "no accelerator result was returned. Refit with backend='cpu' for deterministic recovery."
+        "no accelerator result was returned and no CPU fallback was performed."
       );
     }
-    SVDOptions fallback_opt = requested;
-    fallback_opt.method = Method::IRLBA;
-    fallback_opt.left_only = requested.left_only;
-    SVDResult fallback = truncated_svd_cpu_irlba(A, k, fallback_opt);
-    fallback.randomized = true;
-    fallback.case_audited = true;
-    fallback.case_certified = true;
-    fallback.deterministic_fallback = true;
-    fallback.audit_attempts = attempts;
-    fallback.effective_oversample = accepted_opt.oversample;
-    fallback.effective_power_iters = accepted_opt.power_iters;
-    fallback.effective_seed = accepted_opt.seed;
-    fallback.audit_subspace_error = subspace_error;
-    fallback.audit_singular_value_error = singular_value_error;
-    fallback.audit_triplet_residual = triplet_residual;
-    fallback.audit_omitted_direction_ratio = second_omitted_ratio;
-    record_rsvd_audit_result(fallback);
-    return fallback;
+    fastpls::native::MatrixOperator<double> op(A);
+    fastpls::native::OperatorRsvdWorkspace<double> workspace;
+    fastpls::native::RsvdControls controls;
+    controls.oversample = accepted_opt.oversample;
+    controls.power = accepted_opt.power_iters;
+    controls.seed = accepted_opt.seed;
+    auto check = [&](const fastpls::native::SingularTriplets<double>& candidate) {
+      accepted.U = candidate.U;
+      accepted.s = candidate.s;
+      accepted.Vt = candidate.Vt;
+      bool weak = false;
+      return rsvd_a_posteriori_check(
+        A, accepted, retained, controls.seed, triplet_residual,
+        second_omitted_ratio, weak
+      );
+    };
+    try {
+      const auto recovery = fastpls::native::recover_operator_rsvd<double>(
+        op, audit_rank, controls, workspace, check
+      );
+      attempts += recovery.attempts;
+      accepted_opt.oversample = recovery.effective.oversample;
+      accepted_opt.power_iters = recovery.effective.power;
+      accepted_opt.seed = recovery.effective.seed;
+      subspace_error = singular_value_error = 0.0;
+    } catch (...) {
+      record_rsvd_audit_result(accepted, true);
+      throw;
+    }
   }
 
   accepted.randomized = true;
@@ -341,16 +353,17 @@ SVDOptions options_from_method_id(
   opt.use_full_svd = use_full_svd;
 
   switch (svd_method) {
-    case SVD_METHOD_IRLBA:
-      opt.method = Method::IRLBA;
-      break;
+    case 1:
+      throw std::runtime_error("IRLBA is not part of fastPLS");
     case SVD_METHOD_CPU_RSVD:
     case SVD_METHOD_CUDA_RSVD:
       opt.method = Method::RSVD;
       break;
-    default:
+    case SVD_METHOD_CPU_EXACT:
       opt.method = Method::EXACT;
       break;
+    default:
+      throw std::runtime_error("Unsupported internal SVD method");
   }
 
   return opt;
@@ -365,13 +378,12 @@ Backend backend_from_method_id(int svd_method) {
   }
 }
 
-bool method_is_legacy_irlba(int svd_method) {
-  return (svd_method == SVD_METHOD_IRLBA);
-}
-
 SVDResult truncated_svd(const Mat& A, int k, const SVDOptions& opt, Backend backend) {
   if (k < 1) {
     throw std::runtime_error("truncated_svd: k must be >= 1");
+  }
+  if (backend != Backend::CPU && backend != Backend::CUDA) {
+    throw std::runtime_error("Unsupported SVD backend; no CPU fallback is performed");
   }
   if (backend == Backend::CUDA && !has_cuda_backend()) {
     throw std::runtime_error(
@@ -381,7 +393,7 @@ SVDResult truncated_svd(const Mat& A, int k, const SVDOptions& opt, Backend back
   }
 
   const arma::uword min_dim = std::min(A.n_rows, A.n_cols);
-  const bool force_exact = opt.use_full_svd && opt.method != Method::IRLBA;
+  const bool force_exact = opt.use_full_svd;
   if (force_exact || min_dim < 6) {
     SVDOptions full_opt = opt;
     full_opt.method = Method::EXACT;
@@ -407,11 +419,6 @@ SVDResult truncated_svd(const Mat& A, int k, const SVDOptions& opt, Backend back
 
   if (backend == Backend::CUDA) {
 #ifdef FASTPLS_HAS_CUDA
-    if (opt.method == Method::IRLBA) {
-      throw std::runtime_error(
-        "IRLBA is not available on the CUDA backend; no CPU fallback is performed"
-      );
-    }
     if (opt.method != Method::RSVD) {
       throw std::runtime_error(
         "the requested SVD method is not available on the CUDA backend; "
@@ -425,23 +432,6 @@ SVDResult truncated_svd(const Mat& A, int k, const SVDOptions& opt, Backend back
       "no CPU fallback is performed"
     );
 #endif
-  }
-
-#ifdef FASTPLS_HAS_BANDICOOT
-  if (backend == Backend::BANDICOOT) {
-    // Placeholder for optional Bandicoot backend wiring.
-    if (opt.method == Method::IRLBA) {
-      return truncated_svd_cpu_irlba(A, k, opt);
-    }
-    if (opt.method == Method::RSVD) {
-      return truncated_svd_cpu_rsvd(A, k, opt);
-    }
-    return truncated_svd_cpu_exact(A, k, opt);
-  }
-#endif
-
-  if (opt.method == Method::IRLBA) {
-    return truncated_svd_cpu_irlba(A, k, opt);
   }
 
   if (opt.method == Method::RSVD) {

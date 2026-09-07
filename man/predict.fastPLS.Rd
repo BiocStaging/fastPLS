@@ -7,26 +7,24 @@
 \title{Predict from fitted fastPLS models}
 \usage{
 \method{predict}{fastPLS}(
-    object,
-    newdata,
-    Ytest = NULL,
-    proj = FALSE,
-    backend = NULL,
-    flash.block_size = NULL,
-    top = 1L,
-    top5 = FALSE,
-    raw_scores = FALSE,
-    ...
+  object,
+  newdata,
+  Ytest = NULL,
+  proj = FALSE,
+  backend = NULL,
+  flash.block_size = NULL,
+  top = 1L,
+  top5 = FALSE,
+  raw_scores = FALSE,
+  ...
 )
 
-\method{predict}{fastPLSKernel}(object, newdata, Ytest = NULL, proj = FALSE,
-...)
+\method{predict}{fastPLSKernel}(object, newdata, Ytest = NULL, proj = FALSE, ...)
 
 \method{predict}{fastPLSOpls}(object, newdata, Ytest = NULL, proj = FALSE, ...)
 }
 \arguments{
-\item{object}{A fitted \code{fastPLS}, \code{fastPLSKernel}, or
-\code{fastPLSOpls} object.}
+\item{object}{A fitted \code{fastPLS}, \code{fastPLSKernel}, or \code{fastPLSOpls} object.}
 
 \item{newdata}{Numeric predictor matrix.}
 
@@ -35,8 +33,7 @@
 
 \item{proj}{Logical; return projected \code{Ttest} when \code{TRUE}.}
 
-\item{backend}{Prediction backend: \code{"cpu"}, \code{"cuda"}, or
-\code{"metal"}.
+\item{backend}{Prediction backend: \code{"cpu"}, \code{"cuda"}, or \code{"metal"}.
 When omitted, the session backend setting is used. \code{"auto"} retains the
 backend stored in the fitted model. An unavailable CUDA or Metal selection
 raises an error; prediction is never silently moved to CPU.}
@@ -59,8 +56,7 @@ bounded row blocks and only the requested ranks are retained.}
 }
 \value{
 A list containing \code{Ypred}, optional independent-test \code{Q2Y}, optional
-\code{Ttest}, optional \code{Ypred_top} and \code{Ypred_top_score} ranked-class
-outputs,
+\code{Ttest}, optional \code{Ypred_top} and \code{Ypred_top_score} ranked-class outputs,
 and optional raw classification scores.
 }
 \description{

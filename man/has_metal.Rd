@@ -21,7 +21,11 @@ has_metal()
 If either condition is not met, the function returns \code{FALSE}. This includes
 non-macOS builds and portable builds that use the Metal stub backend. The result
 describes backend availability for the current R session; it does not select a
-device, allocate GPU memory, or run a test computation.
+device, allocate GPU memory, or run a test computation. When the Xcode Metal
+compiler is available during installation, fastPLS compiles and embeds its
+custom shader library. Device and pipeline initialization is then incurred by
+the first Metal operation, while subsequent operations in the same R session
+reuse the initialized state.
 }
 
 \value{A length-1 logical.}

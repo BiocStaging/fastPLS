@@ -5,7 +5,7 @@ test_that("pls supports the CPU method, solver, and task grid", {
   y_cls <- factor(sample(c("A", "B", "C"), 72, replace = TRUE))
   idx <- sample(seq_len(72), 18)
 
-  back <- c("irlba", "cpu_rsvd")
+  back <- "cpu_rsvd"
 
   for (m in c("plssvd", "simpls", "opls", "kernelpls")) {
     for (s in back) {
@@ -60,7 +60,7 @@ test_that("pls.single.cv and pls.double.cv support accelerated simpls", {
   y_reg <- matrix(rnorm(54 * 2), ncol = 2)
   y_cls <- factor(sample(c("L", "M", "H"), 54, replace = TRUE))
 
-  back <- c("irlba", "cpu_rsvd")
+  back <- "cpu_rsvd"
 
   for (s in back) {
     for (m in c("plssvd", "simpls", "opls", "kernelpls")) {
@@ -126,10 +126,10 @@ test_that("unsupported backend labels are rejected", {
 })
 
 test_that("all public decomposition and PLS functions default to rsvd", {
-  expect_identical(formals(fastsvd)$method, quote(c("rsvd", "irlba")))
-  expect_identical(formals(pls)$svd.method, quote(c("rsvd", "irlba")))
-  expect_identical(formals(pls.single.cv)$svd.method, quote(c("rsvd", "irlba")))
-  expect_identical(formals(pls.double.cv)$svd.method, quote(c("rsvd", "irlba")))
+  expect_identical(formals(fastsvd)$method, "rsvd")
+  expect_identical(formals(pls)$svd.method, "rsvd")
+  expect_identical(formals(pls.single.cv)$svd.method, "rsvd")
+  expect_identical(formals(pls.double.cv)$svd.method, "rsvd")
 })
 
 test_that("omitted public SVD settings are equivalent to explicit rsvd", {

@@ -1,4 +1,4 @@
-test_that("SIMPLS execution optimizations preserve deterministic predictions", {
+test_that("SIMPLS execution optimizations preserve fixed-seed predictions", {
   set.seed(21)
   X <- matrix(rnorm(320 * 30), 320, 30)
   Y <- matrix(rnorm(320 * 4), 320, 4)
@@ -27,7 +27,7 @@ test_that("SIMPLS execution optimizations preserve deterministic predictions", {
     )
     fit <- pls(
       X, Y, ncomp = 1:12, method = "simpls", backend = "cpu",
-      svd.method = "irlba", return_variance = FALSE, seed = 123
+      svd.method = "rsvd", return_variance = FALSE, seed = 123
     )
     predict(fit, Xtest)$Ypred[[12L]]
   }

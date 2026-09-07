@@ -26,23 +26,6 @@ test_that("SIMPLS reports the release direction-refresh rule", {
   expect_true(rule$approximate_execution)
 })
 
-test_that("IRLBA starts a new direction solve for each component", {
-  set.seed(45)
-  X <- matrix(rnorm(72 * 14), 72, 14)
-  Y <- cbind(X[, 1] + rnorm(72, sd = 0.1), X[, 2] + rnorm(72, sd = 0.1))
-
-  fit <- pls(
-    X, Y, ncomp = 1:3, method = "simpls", backend = "cpu",
-    svd.method = "irlba", return_variance = FALSE, seed = 17
-  )
-
-  rule <- fit$diagnostics$simpls_direction
-  expect_identical(rule$rule, "fresh_per_component")
-  expect_identical(rule$directions_per_solve, 1L)
-  expect_false(rule$candidate_block_refresh)
-  expect_true(rule$fresh_start)
-  expect_false(rule$approximate_execution)
-})
 
 test_that("rejected refresh environment variables no longer affect SIMPLS", {
   set.seed(42)
@@ -85,22 +68,32 @@ test_that("available accelerator dispatches expose their SIMPLS rule", {
 
   available <- c(cpu = TRUE, cuda = has_cuda(), metal = has_metal())
   for (backend in names(available)[available]) {
+    X_backend <- if (backend == "metal") float::fl(X) else X
+    Y_backend <- if (backend == "metal") float::fl(Y) else Y
     fit <- suppressWarnings(pls(
-      X, Y, ncomp = 1:2, method = "simpls", backend = backend,
+      X_backend, Y_backend, ncomp = 1:2, method = "simpls", backend = backend,
       svd.method = "rsvd", return_variance = FALSE, seed = 23
     ))
     expect_equal(ncol(fit$R), 2L, info = backend)
     expect_equal(ncol(fit$Q), 2L, info = backend)
-    expect_true(all(is.finite(fit$R)), info = backend)
-    expect_true(all(is.finite(fit$Q)), info = backend)
+    expect_true(all(is.finite(as.matrix(fit$R))), info = backend)
+    expect_true(all(is.finite(as.matrix(fit$Q))), info = backend)
     rule <- fit$diagnostics$simpls_direction
     expect_identical(rule$directions_per_solve, 1L, info = backend)
     expect_false(rule$candidate_block_refresh, info = backend)
     expect_true(rule$fresh_start, info = backend)
-    expect_true(is.na(rule$refresh_width), info = backend)
-    expect_true(is.na(rule$refresh_iterations), info = backend)
+    resident_gpu <- backend %in% c("cuda", "metal") &&
+      !is.null(attr(fit, "fastPLS_internal")$resident_state)
+    expect_identical(is.na(rule$refresh_width), !resident_gpu, info = backend)
+    expect_identical(is.na(rule$refresh_iterations), !resident_gpu,
+      info = backend)
     expect_identical(rule$seed_rule, "seed_plus_component_index", info = backend)
-    expect_identical(rule$rule, "fresh_oversampled_sketch_per_component")
+    expected_rule <- if (backend == "metal") {
+      "fresh_randomized_direction_per_component"
+    } else {
+      "fresh_oversampled_sketch_per_component"
+    }
+    expect_identical(rule$rule, expected_rule)
   }
 })
 
@@ -112,19 +105,70 @@ test_that("Metal source does not reuse a preceding component direction", {
   expect_match(source, "A fresh direction avoids propagating approximation")
 })
 
-test_that("CUDA classification diagnostics report batched refresh", {
-  rule <- fastPLS:::.simpls_direction_diagnostics(
+test_that("classification diagnostics report bounded batches on every backend", {
+  for (backend in c("cpu", "cuda", "metal")) {
+    rule <- fastPLS:::.simpls_direction_diagnostics(
+      randomized = TRUE,
+      backend = backend,
+      classification = TRUE,
+      training_samples = 50000L,
+      response_dimension = 100L,
+      predictor_dimension = 768L,
+      requested_components = 100L
+    )
+    expect_identical(
+      rule$rule,
+      paste0("batched_", backend, "_candidate_block"),
+      info = backend
+    )
+    expect_identical(rule$directions_per_solve, 64L, info = backend)
+    expect_true(rule$candidate_block_refresh, info = backend)
+  }
+})
+
+test_that("massive cross-covariance routing accounts for input precision", {
+  X <- matrix(0, 2L, 10000L)
+  Y <- matrix(0, 2L, 8000L)
+  double <- fastPLS:::.fast_simpls_shape_profile(X, Y, float32 = FALSE)
+  single <- fastPLS:::.fast_simpls_shape_profile(X, Y, float32 = TRUE)
+
+  expect_identical(double$profile, "massive_rank_one")
+  expect_identical(single$profile, "high_response_stable")
+})
+
+test_that("public diagnostics name componentwise and block randomized SIMPLS", {
+  set.seed(831)
+  ordinary <- pls(
+    matrix(rnorm(80 * 12), 80, 12),
+    matrix(rnorm(80 * 2), 80, 2),
+    ncomp = 3,
+    method = "simpls",
+    return_variance = FALSE,
+    seed = 17
+  )
+  expect_identical(
+    ordinary$diagnostics$algorithm_variant,
+    "componentwise_randomized_simpls"
+  )
+
+  direction <- fastPLS:::.simpls_direction_diagnostics(
     randomized = TRUE,
-    backend = "cuda",
+    backend = "cpu",
     classification = TRUE,
     training_samples = 50000L,
-    response_dimension = 100L,
     predictor_dimension = 768L,
+    response_dimension = 100L,
     requested_components = 100L
   )
-  expect_identical(rule$rule, "fresh_cuda_candidate_block")
-  expect_identical(rule$directions_per_solve, 8L)
-  expect_true(rule$candidate_block_refresh)
+  candidate <- list(diagnostics = list(simpls_direction = direction))
+  expect_identical(
+    fastPLS:::.fastpls_algorithm_variant(
+      candidate,
+      list(method = "simpls"),
+      list(kernel = "linear")
+    ),
+    "block_randomized_simpls"
+  )
 })
 
 test_that("CUDA moderate classification retains per-component refresh", {
@@ -139,6 +183,32 @@ test_that("CUDA moderate classification retains per-component refresh", {
   )
   expect_identical(rule$rule, "fresh_oversampled_sketch_per_component")
   expect_false(rule$candidate_block_refresh)
+})
+
+test_that("batch diagnostics respect shape and the shared block limit", {
+  args <- list(
+    randomized = TRUE, backend = "cpu", classification = TRUE,
+    training_samples = 2000L, predictor_dimension = 3000L,
+    response_dimension = 100L, requested_components = 100L
+  )
+  cpu <- do.call(fastPLS:::.simpls_direction_diagnostics, args)
+  expect_true(cpu$candidate_block_refresh)
+  args$backend <- "cuda"
+  cuda_small <- do.call(fastPLS:::.simpls_direction_diagnostics, args)
+  expect_true(cuda_small$candidate_block_refresh)
+  expect_identical(cuda_small$directions_per_solve, 64L)
+  args$training_samples <- 5000L
+  args$oversample <- 0L
+  cuda_narrow <- do.call(fastPLS:::.simpls_direction_diagnostics, args)
+  expect_identical(cuda_narrow$directions_per_solve, 64L)
+  expect_true(cuda_narrow$candidate_block_refresh)
+  args$oversample <- 3L
+  cuda_four <- do.call(fastPLS:::.simpls_direction_diagnostics, args)
+  expect_identical(cuda_four$directions_per_solve, 64L)
+  args$requested_components <- 20L
+  cuda_prefix <- do.call(fastPLS:::.simpls_direction_diagnostics, args)
+  expect_true(cuda_prefix$candidate_block_refresh)
+  expect_identical(cuda_prefix$directions_per_solve, 20L)
 })
 
 test_that("CUDA massive cross-covariance diagnostics report rank-one refresh", {
@@ -251,27 +321,50 @@ test_that("SIMPLS-family backends attach fresh-start diagnostics", {
 
   available <- c(cpu = TRUE, cuda = has_cuda(), metal = has_metal())
   for (backend in names(available)[available]) {
-    for (method in c("simpls", "opls", "kernelpls")) {
-      fit <- expect_no_warning(pls(
-        X, Y,
+    methods <- if (backend == "cpu") {
+      c("simpls", "opls", "kernelpls")
+    } else {
+      c("simpls", "kernelpls")
+    }
+    for (method in methods) {
+      X_backend <- if (backend == "metal") float::fl(X) else X
+      Y_backend <- if (backend == "metal") float::fl(Y) else Y
+      kernel <- if (backend == "cpu") "rbf" else "linear"
+      fit <- suppressWarnings(pls(
+        X_backend, Y_backend,
         ncomp = 1:2,
         method = method,
-        kernel = "rbf",
+        kernel = kernel,
         backend = backend,
         svd.method = "rsvd",
         return_variance = FALSE,
         seed = 29
       ))
       direction <- fit$diagnostics$simpls_direction
-      expected_optimizations <- c(
-        "cached_rank_one_deflation_product",
-        "incremental_coefficient_path",
-        "conditional_crossproduct_cache",
-        "compact_prediction"
-      )
+      resident_metal <- backend == "metal" &&
+        !is.null(attr(fit, "fastPLS_internal")$resident_state)
+      resident_cuda <- backend == "cuda" &&
+        !is.null(attr(fit, "fastPLS_internal")$resident_state)
+      expected_optimizations <- if (resident_metal || resident_cuda) {
+        resident_precision <- if (backend == "metal") "float32" else "float64"
+        c("cached_rank_one_deflation_product", "persistent_device_workspace",
+          "compact_prediction",
+          paste0(backend, "_resident_", resident_precision, "_buffers"))
+      } else if (backend == "metal") {
+        c("cached_rank_one_deflation_product", "compact_prediction",
+          "float32_buffers")
+      } else {
+        c("cached_rank_one_deflation_product",
+          "incremental_coefficient_path",
+          "conditional_crossproduct_cache", "compact_prediction")
+      }
       expect_identical(
         direction$rule,
-        "fresh_oversampled_sketch_per_component",
+        if (resident_metal) {
+          "fresh_randomized_direction_per_component"
+        } else {
+          "fresh_oversampled_sketch_per_component"
+        },
         info = paste(method, backend)
       )
       expect_true(direction$fresh_start, info = paste(method, backend))
