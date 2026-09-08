@@ -9,6 +9,7 @@
 #include <fastpls/core/lda.hpp>
 #include <fastpls/core/linalg.hpp>
 #include <fastpls/core/matrix.hpp>
+#include <fastpls/core/rsvd.hpp>
 #include <fastpls/core/statistics.hpp>
 
 #endif

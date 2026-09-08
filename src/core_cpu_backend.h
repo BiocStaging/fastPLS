@@ -6,6 +6,7 @@
 #include <fastpls/core/matrix.hpp>
 
 #include <string>
+#include <vector>
 
 namespace fastpls {
 namespace runtime {
@@ -21,6 +22,27 @@ void cpu_gemm_f64(core::ConstMatrixView<double> left,
                   bool transpose_left,
                   bool transpose_right,
                   core::MatrixView<double> output);
+
+class CpuLinearAlgebraF64 {
+ public:
+  void gemm(core::ConstMatrixView<double> left,
+            core::ConstMatrixView<double> right,
+            bool transpose_left,
+            bool transpose_right,
+            core::MatrixView<double> output) const;
+
+  bool qr_economy(core::ConstMatrixView<double> input,
+                  core::Matrix<double>& q) const;
+
+  bool symmetric_eigen(core::Matrix<double>& matrix,
+                       std::vector<double>& eigenvalues) const;
+
+  bool svd_economy(core::ConstMatrixView<double> input,
+                   bool left_only,
+                   core::Matrix<double>& u,
+                   std::vector<double>& singular_values,
+                   core::Matrix<double>& vt) const;
+};
 
 std::string cpu_backend_description();
 

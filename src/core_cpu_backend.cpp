@@ -249,5 +249,15 @@ void cpu_gemm_f64(core::ConstMatrixView<double> left,
 #endif
 }
 
+void CpuLinearAlgebraF64::gemm(core::ConstMatrixView<double> left,
+                               core::ConstMatrixView<double> right,
+                               bool transpose_left,
+                               bool transpose_right,
+                               core::MatrixView<double> output) const {
+  cpu_gemm_f64(
+    left, right, transpose_left, transpose_right, output
+  );
+}
+
 }  // namespace runtime
 }  // namespace fastpls
