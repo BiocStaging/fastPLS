@@ -41,26 +41,6 @@ cuda_resident_predict_path_cpp <- function(object, X, ncomp, classifier = 0L) {
     .Call(`_fastPLS_cuda_resident_predict_path_cpp`, object, X, ncomp, classifier)
 }
 
-rsvd_audit_reset_debug <- function() {
-    invisible(.Call(`_fastPLS_rsvd_audit_reset_debug`))
-}
-
-rsvd_audit_summary_debug <- function() {
-    .Call(`_fastPLS_rsvd_audit_summary_debug`)
-}
-
-label_crossprod_scaled_cpp <- function(XtrainSEXP, y, n_classes, scaling) {
-    .Call(`_fastPLS_label_crossprod_scaled_cpp`, XtrainSEXP, y, n_classes, scaling)
-}
-
-float32_sweep_cols_cpp <- function(XSEXP, rowSEXP, operation) {
-    .Call(`_fastPLS_float32_sweep_cols_cpp`, XSEXP, rowSEXP, operation)
-}
-
-float32_standardize_cpp <- function(XSEXP, centerSEXP, scaleSEXP) {
-    .Call(`_fastPLS_float32_standardize_cpp`, XSEXP, centerSEXP, scaleSEXP)
-}
-
 kernel_matrix_float32_cpp <- function(X1SEXP, X2SEXP, kernel, gamma, degree, coef0, backend) {
     .Call(`_fastPLS_kernel_matrix_float32_cpp`, X1SEXP, X2SEXP, kernel, gamma, degree, coef0, backend)
 }
@@ -127,18 +107,6 @@ pls_float32_cpu_cpp <- function(XtrainSEXP, YtrainSEXP, ncomp, scaling, fit, met
 
 pls_float32_labels_cpp <- function(XtrainSEXP, labels, n_classes, ncomp, scaling, fit, method, backend, svd_method, rsvd_oversample, rsvd_power, seed) {
     .Call(`_fastPLS_pls_float32_labels_cpp`, XtrainSEXP, labels, n_classes, ncomp, scaling, fit, method, backend, svd_method, rsvd_oversample, rsvd_power, seed)
-}
-
-float32_argmax_cpp <- function(scoresSEXP) {
-    .Call(`_fastPLS_float32_argmax_cpp`, scoresSEXP)
-}
-
-float32_topk_cpp <- function(scoresSEXP, top) {
-    .Call(`_fastPLS_float32_topk_cpp`, scoresSEXP, top)
-}
-
-lda_cuda_native_available <- function() {
-    .Call(`_fastPLS_lda_cuda_native_available`)
 }
 
 cuda_matrix_multiply <- function(A, B) {

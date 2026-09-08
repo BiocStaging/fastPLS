@@ -327,80 +327,6 @@ arma::mat numeric_matrix_view(SEXP x, const char* name) {
   );
 }
 
-List label_crossprod_scaled_cpp_impl(
-  SEXP XtrainSEXP,
-  Rcpp::IntegerVector y,
-  int n_classes,
-  int scaling
-) {
-  const arma::mat X = numeric_matrix_view(XtrainSEXP, "Xtrain");
-  const arma::uword n = X.n_rows;
-  const arma::uword p = X.n_cols;
-  if (y.size() != static_cast<int>(n)) {
-    stop("label_crossprod_scaled_cpp requires one label per training row");
-  }
-  if (n_classes < 2) {
-    stop("label_crossprod_scaled_cpp requires at least two classes");
-  }
-  arma::rowvec mX(p, arma::fill::zeros);
-  arma::rowvec vX(p, arma::fill::ones);
-  arma::rowvec sums(p, arma::fill::zeros);
-  arma::rowvec sums_sq(p, arma::fill::zeros);
-  arma::vec counts(static_cast<arma::uword>(n_classes), arma::fill::zeros);
-
-  for (arma::uword j = 0; j < p; ++j) {
-    double s = 0.0;
-    double ss = 0.0;
-    const double* col = X.colptr(j);
-    for (arma::uword i = 0; i < n; ++i) {
-      const double val = col[i];
-      s += val;
-      ss += val * val;
-    }
-    sums(j) = s;
-    sums_sq(j) = ss;
-  }
-  if (scaling < 3) {
-    mX = sums / static_cast<double>(n);
-  }
-  if (scaling == 2) {
-    for (arma::uword j = 0; j < p; ++j) {
-      const double centered_ss = std::max(0.0, sums_sq(j) - static_cast<double>(n) * mX(j) * mX(j));
-      double sd = std::sqrt(centered_ss / std::max(1.0, static_cast<double>(n) - 1.0));
-      if (!std::isfinite(sd) || sd <= 0.0) sd = 1.0;
-      vX(j) = sd;
-    }
-  }
-
-  arma::mat class_sums(p, static_cast<arma::uword>(n_classes), arma::fill::zeros);
-  for (int cls : y) {
-    if (IntegerVector::is_na(cls) || cls < 1 || cls > n_classes) {
-      stop("label_crossprod_scaled_cpp requires labels encoded as 1..n_classes");
-    }
-    counts(static_cast<arma::uword>(cls - 1)) += 1.0;
-  }
-  for (arma::uword j = 0; j < p; ++j) {
-    const double* col = X.colptr(j);
-    const double center = (scaling < 3) ? mX(j) : 0.0;
-    const double scale = (scaling == 2) ? vX(j) : 1.0;
-    for (arma::uword i = 0; i < n; ++i) {
-      const int cls = y[static_cast<int>(i)] - 1;
-      class_sums(j, static_cast<arma::uword>(cls)) += (col[i] - center) / scale;
-    }
-  }
-
-  arma::rowvec mY = counts.t() / static_cast<double>(n);
-  arma::vec total_sums = arma::sum(class_sums, 1);
-  arma::mat S = class_sums - total_sums * mY;
-  return List::create(
-    Named("S") = S,
-    Named("mX") = mX,
-    Named("vX") = vX,
-    Named("mY") = mY,
-    Named("counts") = counts
-  );
-}
-
 fastpls_svd::SVDResult finalize_rsvd_from_q_b_double(
   const arma::mat& Q,
   const arma::mat& B,
@@ -970,37 +896,6 @@ struct SimplsFastRefreshWorkspace {
 
 } // namespace
 
-// [[Rcpp::export]]
-void rsvd_audit_reset_debug() {
-  fastpls_svd::reset_rsvd_audit_summary();
-}
-
-// [[Rcpp::export]]
-Rcpp::List rsvd_audit_summary_debug() {
-  const fastpls_svd::RSVDAuditSummary x = fastpls_svd::current_rsvd_audit_summary();
-  return Rcpp::List::create(
-    Rcpp::Named("solves") = x.solves,
-    Rcpp::Named("certified") = x.certified,
-    Rcpp::Named("deterministic_fallbacks") = x.deterministic_fallbacks,
-    Rcpp::Named("failures") = x.failures,
-    Rcpp::Named("max_attempts") = x.max_attempts,
-    Rcpp::Named("max_effective_oversample") = x.max_effective_oversample,
-    Rcpp::Named("max_effective_power") = x.max_effective_power_iters,
-    Rcpp::Named("max_triplet_residual") = x.max_triplet_residual,
-    Rcpp::Named("max_omitted_direction_ratio") = x.max_omitted_direction_ratio
-  );
-}
-
-// [[Rcpp::export]]
-List label_crossprod_scaled_cpp(
-  SEXP XtrainSEXP,
-  Rcpp::IntegerVector y,
-  int n_classes,
-  int scaling
-) {
-  return label_crossprod_scaled_cpp_impl(XtrainSEXP, y, n_classes, scaling);
-}
-
 double RQ(const arma::mat& yData, const arma::mat& yPred) {
   return fastpls::core::observed_mean_r2(
     fastpls::core::make_const_view(
@@ -1039,81 +934,6 @@ arma::mat variance(const arma::mat& x) {
   return out;
 }
 
-
-// [[Rcpp::export(rng = false)]]
-Rcpp::IntegerMatrix float32_sweep_cols_cpp(SEXP XSEXP, SEXP rowSEXP,
-                                            int operation) {
-  if (!Rf_isS4(XSEXP) || !Rf_inherits(XSEXP, "float32") ||
-      !Rf_isS4(rowSEXP) || !Rf_inherits(rowSEXP, "float32")) {
-    Rcpp::stop("float32 column operations require float32 inputs");
-  }
-  Rcpp::S4 X(XSEXP), row(rowSEXP);
-  Rcpp::IntegerMatrix bits = X.slot("Data");
-  Rcpp::IntegerVector row_bits = row.slot("Data");
-  if (row_bits.size() != bits.ncol()) {
-    Rcpp::stop("float32 column statistics must have length ncol(X)");
-  }
-  if (operation < 0 || operation > 2) {
-    Rcpp::stop("Unknown float32 column operation");
-  }
-  static_assert(sizeof(float) == sizeof(int), "float32 requires 32-bit float and int");
-  Rcpp::IntegerMatrix result(Rcpp::no_init(bits.nrow(), bits.ncol()));
-  const int* input = INTEGER(bits);
-  int* output = INTEGER(result);
-  const R_xlen_t n = bits.nrow();
-  // Broadcast one scalar per column directly from float32 storage. In
-  // particular, do not expand the statistics to an n-by-p double matrix.
-  for (int column = 0; column < bits.ncol(); ++column) {
-    float statistic;
-    std::memcpy(&statistic, INTEGER(row_bits) + column, sizeof(float));
-    const R_xlen_t offset = n * column;
-    for (R_xlen_t i = 0; i < n; ++i) {
-      float value;
-      std::memcpy(&value, input + offset + i, sizeof(float));
-      if (operation == 0) value -= statistic;
-      else if (operation == 1) value /= statistic;
-      else value += statistic;
-      std::memcpy(output + offset + i, &value, sizeof(float));
-    }
-  }
-  return result;
-}
-
-// [[Rcpp::export(rng = false)]]
-Rcpp::IntegerMatrix float32_standardize_cpp(SEXP XSEXP, SEXP centerSEXP,
-                                           SEXP scaleSEXP) {
-  for (SEXP input : {XSEXP, centerSEXP, scaleSEXP}) {
-    if (!Rf_isS4(input) || !Rf_inherits(input, "float32")) {
-      Rcpp::stop("float32 standardization requires float32 inputs");
-    }
-  }
-  Rcpp::S4 X(XSEXP), center(centerSEXP), scale(scaleSEXP);
-  Rcpp::IntegerMatrix bits = X.slot("Data");
-  Rcpp::IntegerVector centers = center.slot("Data"), scales = scale.slot("Data");
-  if (centers.size() != bits.ncol() || scales.size() != bits.ncol()) {
-    Rcpp::stop("float32 column statistics must have length ncol(X)");
-  }
-  static_assert(sizeof(float) == sizeof(int), "float32 requires 32-bit float and int");
-  Rcpp::IntegerMatrix result(Rcpp::no_init(bits.nrow(), bits.ncol()));
-  const R_xlen_t n = bits.nrow();
-  const int* input = INTEGER(bits);
-  int* output = INTEGER(result);
-  for (int column = 0; column < bits.ncol(); ++column) {
-    float mean, divisor;
-    std::memcpy(&mean, INTEGER(centers) + column, sizeof(float));
-    std::memcpy(&divisor, INTEGER(scales) + column, sizeof(float));
-    const R_xlen_t offset = n * column;
-    for (R_xlen_t i = 0; i < n; ++i) {
-      float value;
-      std::memcpy(&value, input + offset + i, sizeof(float));
-      // Preserve the two float32 rounding steps without an intermediate matrix.
-      value -= mean;
-      value /= divisor;
-      std::memcpy(output + offset + i, &value, sizeof(float));
-    }
-  }
-  return result;
-}
 
 namespace {
 
@@ -3467,56 +3287,6 @@ Rcpp::List pls_float32_labels_cpp(
   );
 }
 
-// [[Rcpp::export]]
-Rcpp::IntegerVector float32_argmax_cpp(SEXP scoresSEXP) {
-  const arma::fmat scores = float32_bits_to_fmat(scoresSEXP, "scores");
-  Rcpp::IntegerVector out(scores.n_rows);
-  for (arma::uword i = 0; i < scores.n_rows; ++i) {
-    out[static_cast<R_xlen_t>(i)] =
-      static_cast<int>(scores.row(i).index_max()) + 1;
-  }
-  return out;
-}
-
-// [[Rcpp::export]]
-Rcpp::List float32_topk_cpp(SEXP scoresSEXP, int top) {
-  const arma::fmat scores = float32_bits_to_fmat(scoresSEXP, "scores");
-  if (top < 1) {
-    Rcpp::stop("top must be a positive integer");
-  }
-  const arma::uword keep = std::min(
-    static_cast<arma::uword>(top),
-    scores.n_cols
-  );
-  Rcpp::IntegerMatrix index(scores.n_rows, keep);
-  Rcpp::NumericMatrix value(scores.n_rows, keep);
-  std::vector<arma::uword> order(scores.n_cols);
-
-  for (arma::uword row = 0; row < scores.n_rows; ++row) {
-    for (arma::uword col = 0; col < scores.n_cols; ++col) {
-      order[col] = col;
-    }
-    const auto before = [&scores, row](arma::uword left, arma::uword right) {
-      const float lhs = scores(row, left);
-      const float rhs = scores(row, right);
-      if (std::isnan(lhs)) return false;
-      if (std::isnan(rhs)) return true;
-      return lhs == rhs ? left < right : lhs > rhs;
-    };
-    std::partial_sort(order.begin(), order.begin() + keep, order.end(), before);
-    for (arma::uword rank = 0; rank < keep; ++rank) {
-      const arma::uword col = order[rank];
-      index(row, rank) = static_cast<int>(col) + 1;
-      value(row, rank) = static_cast<double>(scores(row, col));
-    }
-  }
-
-  return Rcpp::List::create(
-    Rcpp::Named("top_index") = index,
-    Rcpp::Named("top_score") = value
-  );
-}
-
 #else
 
 namespace {
@@ -3577,59 +3347,6 @@ Rcpp::List pls_float32_cpu_cpp(SEXP XtrainSEXP, SEXP YtrainSEXP, arma::ivec ncom
 
 Rcpp::List pls_float32_labels_cpp(SEXP XtrainSEXP, const Rcpp::IntegerVector& labels, int n_classes, arma::ivec ncomp, int scaling, bool fit, int method, int backend, int svd_method, int rsvd_oversample, int rsvd_power, int seed) {
   return windows_float32_unavailable();
-}
-
-Rcpp::IntegerVector float32_argmax_cpp(SEXP scoresSEXP) {
-  const Rcpp::IntegerMatrix scores = windows_float32_bits(scoresSEXP, "scores");
-  Rcpp::IntegerVector out(scores.nrow());
-  for (int row = 0; row < scores.nrow(); ++row) {
-    int best = 0;
-    float best_value = windows_bits_to_float(scores(row, 0));
-    for (int col = 1; col < scores.ncol(); ++col) {
-      const float value = windows_bits_to_float(scores(row, col));
-      if (value > best_value) {
-        best = col;
-        best_value = value;
-      }
-    }
-    out[row] = best + 1;
-  }
-  return out;
-}
-
-Rcpp::List float32_topk_cpp(SEXP scoresSEXP, int top) {
-  const Rcpp::IntegerMatrix scores = windows_float32_bits(scoresSEXP, "scores");
-  if (top < 1) {
-    Rcpp::stop("top must be a positive integer");
-  }
-  const int keep = std::min(top, scores.ncol());
-  Rcpp::IntegerMatrix index(scores.nrow(), keep);
-  Rcpp::NumericMatrix value(scores.nrow(), keep);
-  std::vector<int> order(static_cast<std::size_t>(scores.ncol()));
-
-  for (int row = 0; row < scores.nrow(); ++row) {
-    for (int col = 0; col < scores.ncol(); ++col) {
-      order[static_cast<std::size_t>(col)] = col;
-    }
-    const auto before = [&scores, row](int left, int right) {
-      const float lhs = windows_bits_to_float(scores(row, left));
-      const float rhs = windows_bits_to_float(scores(row, right));
-      if (std::isnan(lhs)) return false;
-      if (std::isnan(rhs)) return true;
-      return lhs == rhs ? left < right : lhs > rhs;
-    };
-    std::partial_sort(order.begin(), order.begin() + keep, order.end(), before);
-    for (int rank = 0; rank < keep; ++rank) {
-      const int col = order[static_cast<std::size_t>(rank)];
-      index(row, rank) = col + 1;
-      value(row, rank) = windows_bits_to_float(scores(row, col));
-    }
-  }
-
-  return Rcpp::List::create(
-    Rcpp::Named("top_index") = index,
-    Rcpp::Named("top_score") = value
-  );
 }
 
 Rcpp::List kernel_matrix_float32_cpp(SEXP X1SEXP, SEXP X2SEXP, int kernel, double gamma, int degree, double coef0, int backend) {
@@ -3775,11 +3492,6 @@ Rcpp::List lda_predict_float32_cuda(SEXP TtestSEXP, const Rcpp::List& lda, bool 
 }
 
 #endif
-
-// [[Rcpp::export]]
-bool lda_cuda_native_available() {
-  return fastpls_svd::cuda_lda_native_available();
-}
 
 // [[Rcpp::export]]
 arma::mat cuda_matrix_multiply(const arma::mat& A, const arma::mat& B) {

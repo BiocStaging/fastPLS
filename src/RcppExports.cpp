@@ -166,63 +166,6 @@ BEGIN_RCPP
     return rcpp_result_gen;
 END_RCPP
 }
-// rsvd_audit_reset_debug
-void rsvd_audit_reset_debug();
-RcppExport SEXP _fastPLS_rsvd_audit_reset_debug() {
-BEGIN_RCPP
-    Rcpp::RNGScope rcpp_rngScope_gen;
-    rsvd_audit_reset_debug();
-    return R_NilValue;
-END_RCPP
-}
-// rsvd_audit_summary_debug
-Rcpp::List rsvd_audit_summary_debug();
-RcppExport SEXP _fastPLS_rsvd_audit_summary_debug() {
-BEGIN_RCPP
-    Rcpp::RObject rcpp_result_gen;
-    Rcpp::RNGScope rcpp_rngScope_gen;
-    rcpp_result_gen = Rcpp::wrap(rsvd_audit_summary_debug());
-    return rcpp_result_gen;
-END_RCPP
-}
-// label_crossprod_scaled_cpp
-List label_crossprod_scaled_cpp(SEXP XtrainSEXP, Rcpp::IntegerVector y, int n_classes, int scaling);
-RcppExport SEXP _fastPLS_label_crossprod_scaled_cpp(SEXP XtrainSEXPSEXP, SEXP ySEXP, SEXP n_classesSEXP, SEXP scalingSEXP) {
-BEGIN_RCPP
-    Rcpp::RObject rcpp_result_gen;
-    Rcpp::RNGScope rcpp_rngScope_gen;
-    Rcpp::traits::input_parameter< SEXP >::type XtrainSEXP(XtrainSEXPSEXP);
-    Rcpp::traits::input_parameter< Rcpp::IntegerVector >::type y(ySEXP);
-    Rcpp::traits::input_parameter< int >::type n_classes(n_classesSEXP);
-    Rcpp::traits::input_parameter< int >::type scaling(scalingSEXP);
-    rcpp_result_gen = Rcpp::wrap(label_crossprod_scaled_cpp(XtrainSEXP, y, n_classes, scaling));
-    return rcpp_result_gen;
-END_RCPP
-}
-// float32_sweep_cols_cpp
-Rcpp::IntegerMatrix float32_sweep_cols_cpp(SEXP XSEXP, SEXP rowSEXP, int operation);
-RcppExport SEXP _fastPLS_float32_sweep_cols_cpp(SEXP XSEXPSEXP, SEXP rowSEXPSEXP, SEXP operationSEXP) {
-BEGIN_RCPP
-    Rcpp::RObject rcpp_result_gen;
-    Rcpp::traits::input_parameter< SEXP >::type XSEXP(XSEXPSEXP);
-    Rcpp::traits::input_parameter< SEXP >::type rowSEXP(rowSEXPSEXP);
-    Rcpp::traits::input_parameter< int >::type operation(operationSEXP);
-    rcpp_result_gen = Rcpp::wrap(float32_sweep_cols_cpp(XSEXP, rowSEXP, operation));
-    return rcpp_result_gen;
-END_RCPP
-}
-// float32_standardize_cpp
-Rcpp::IntegerMatrix float32_standardize_cpp(SEXP XSEXP, SEXP centerSEXP, SEXP scaleSEXP);
-RcppExport SEXP _fastPLS_float32_standardize_cpp(SEXP XSEXPSEXP, SEXP centerSEXPSEXP, SEXP scaleSEXPSEXP) {
-BEGIN_RCPP
-    Rcpp::RObject rcpp_result_gen;
-    Rcpp::traits::input_parameter< SEXP >::type XSEXP(XSEXPSEXP);
-    Rcpp::traits::input_parameter< SEXP >::type centerSEXP(centerSEXPSEXP);
-    Rcpp::traits::input_parameter< SEXP >::type scaleSEXP(scaleSEXPSEXP);
-    rcpp_result_gen = Rcpp::wrap(float32_standardize_cpp(XSEXP, centerSEXP, scaleSEXP));
-    return rcpp_result_gen;
-END_RCPP
-}
 // kernel_matrix_float32_cpp
 Rcpp::List kernel_matrix_float32_cpp(SEXP X1SEXP, SEXP X2SEXP, int kernel, double gamma, int degree, double coef0, int backend);
 RcppExport SEXP _fastPLS_kernel_matrix_float32_cpp(SEXP X1SEXPSEXP, SEXP X2SEXPSEXP, SEXP kernelSEXP, SEXP gammaSEXP, SEXP degreeSEXP, SEXP coef0SEXP, SEXP backendSEXP) {
@@ -487,39 +430,6 @@ BEGIN_RCPP
     Rcpp::traits::input_parameter< int >::type rsvd_power(rsvd_powerSEXP);
     Rcpp::traits::input_parameter< int >::type seed(seedSEXP);
     rcpp_result_gen = Rcpp::wrap(pls_float32_labels_cpp(XtrainSEXP, labels, n_classes, ncomp, scaling, fit, method, backend, svd_method, rsvd_oversample, rsvd_power, seed));
-    return rcpp_result_gen;
-END_RCPP
-}
-// float32_argmax_cpp
-Rcpp::IntegerVector float32_argmax_cpp(SEXP scoresSEXP);
-RcppExport SEXP _fastPLS_float32_argmax_cpp(SEXP scoresSEXPSEXP) {
-BEGIN_RCPP
-    Rcpp::RObject rcpp_result_gen;
-    Rcpp::RNGScope rcpp_rngScope_gen;
-    Rcpp::traits::input_parameter< SEXP >::type scoresSEXP(scoresSEXPSEXP);
-    rcpp_result_gen = Rcpp::wrap(float32_argmax_cpp(scoresSEXP));
-    return rcpp_result_gen;
-END_RCPP
-}
-// float32_topk_cpp
-Rcpp::List float32_topk_cpp(SEXP scoresSEXP, int top);
-RcppExport SEXP _fastPLS_float32_topk_cpp(SEXP scoresSEXPSEXP, SEXP topSEXP) {
-BEGIN_RCPP
-    Rcpp::RObject rcpp_result_gen;
-    Rcpp::RNGScope rcpp_rngScope_gen;
-    Rcpp::traits::input_parameter< SEXP >::type scoresSEXP(scoresSEXPSEXP);
-    Rcpp::traits::input_parameter< int >::type top(topSEXP);
-    rcpp_result_gen = Rcpp::wrap(float32_topk_cpp(scoresSEXP, top));
-    return rcpp_result_gen;
-END_RCPP
-}
-// lda_cuda_native_available
-bool lda_cuda_native_available();
-RcppExport SEXP _fastPLS_lda_cuda_native_available() {
-BEGIN_RCPP
-    Rcpp::RObject rcpp_result_gen;
-    Rcpp::RNGScope rcpp_rngScope_gen;
-    rcpp_result_gen = Rcpp::wrap(lda_cuda_native_available());
     return rcpp_result_gen;
 END_RCPP
 }

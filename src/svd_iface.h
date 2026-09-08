@@ -1,6 +1,7 @@
 #ifndef FASTPLS_SVD_IFACE_H
 #define FASTPLS_SVD_IFACE_H
 
+#include <fastpls/core/diagnostics.hpp>
 #include <RcppArmadillo.h>
 
 namespace fastpls_svd {
@@ -26,17 +27,7 @@ struct SVDResult {
   double audit_omitted_direction_ratio = 0.0;
 };
 
-struct RSVDAuditSummary {
-  int solves = 0;
-  int certified = 0;
-  int deterministic_fallbacks = 0;
-  int failures = 0;
-  int max_attempts = 0;
-  int max_effective_oversample = 0;
-  int max_effective_power_iters = 0;
-  double max_triplet_residual = 0.0;
-  double max_omitted_direction_ratio = 0.0;
-};
+using RSVDAuditSummary = fastpls::core::RSVDAuditSummary;
 
 enum class Backend {
   CPU = 0,

@@ -1,3 +1,16 @@
+# fastPLS 0.99.46
+
+* Migrated float32 argmax, top-rank selection, column operations and
+  standardization from generated Rcpp/Armadillo adapters to the dependency-free
+  C++17 core and hand-written R C-API bridge.
+
+* Moved label-aware scaled class cross-products and rSVD audit diagnostics into
+  the dependency-free core, and removed their obsolete generated wrappers and
+  duplicate implementations.
+
+* Preserved the fixed CIFAR-100 float32 SIMPLS/rSVD prediction checksum and
+  accuracy while further reducing the transitional Rcpp interface.
+
 # fastPLS 0.99.45
 
 * Moved capability detection and Spearman correlation from generated Rcpp

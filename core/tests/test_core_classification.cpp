@@ -5,6 +5,7 @@
 #include <cmath>
 #include <cstddef>
 #include <stdexcept>
+#include <vector>
 
 int main() {
   fastpls::core::Matrix<float> x(4, 3);
@@ -28,6 +29,18 @@ int main() {
     assert(std::abs(crossprod(column, 1) - (class_one - 0.5f * total)) < 1e-6f);
   }
 
+  const auto scaled = fastpls::core::scaled_label_crossprod(
+    x.view(), labels, 4, 2, fastpls::core::PredictorScaling::autoscaling
+  );
+  assert(scaled.crossprod.rows() == 3);
+  assert(scaled.crossprod.columns() == 2);
+  assert(std::abs(scaled.predictor_center[0] - 2.5f) < 1e-6f);
+  assert(std::abs(scaled.predictor_scale[0] - 1.2909944f) < 1e-6f);
+  assert(std::abs(scaled.response_mean[0] - 0.5f) < 1e-6f);
+  assert(std::abs(scaled.class_counts[1] - 2.0f) < 1e-6f);
+  assert(std::abs(scaled.crossprod(0, 0) + 0.7745967f) < 1e-6f);
+  assert(std::abs(scaled.crossprod(0, 1) - 0.7745967f) < 1e-6f);
+
   fastpls::core::Matrix<double> scores(2, 3);
   scores(0, 0) = 0.2;
   scores(0, 1) = 0.8;
@@ -37,6 +50,24 @@ int main() {
   scores(1, 2) = 0.0;
   assert(fastpls::core::row_argmax(scores.view(), 0) == 1);
   assert(fastpls::core::row_argmax(scores.view(), 1) == 0);
+
+  std::vector<std::size_t> workspace;
+  std::size_t top_indices[2] = {0, 0};
+  double top_scores[2] = {0.0, 0.0};
+  fastpls::core::row_top_k(
+    scores.view(), 0, 2, workspace, top_indices, top_scores
+  );
+  assert(top_indices[0] == 1);
+  assert(top_indices[1] == 0);
+  assert(std::abs(top_scores[0] - 0.8) < 1e-15);
+  assert(std::abs(top_scores[1] - 0.2) < 1e-15);
+
+  scores(1, 1) = 2.0;
+  fastpls::core::row_top_k(
+    scores.view(), 1, 2, workspace, top_indices, top_scores
+  );
+  assert(top_indices[0] == 0);
+  assert(top_indices[1] == 1);
 
   bool rejected = false;
   const std::size_t invalid_labels[] = {0, 1, 2, 1};
