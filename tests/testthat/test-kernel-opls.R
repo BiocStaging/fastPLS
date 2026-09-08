@@ -108,3 +108,28 @@ test_that("opls high-level wrapper dispatches to simpls", {
   expect_identical(attr(fit$inner_model, "fastPLS_internal")$pls_method, "simpls")
   expect_equal(dim(fit$Ypred), c(length(idx), ncol(Y), 2L))
 })
+
+test_that("double OPLS filtering uses the standalone matrix boundary", {
+  values <- matrix(seq_len(20), nrow = 5L, ncol = 4L) / 7
+  center <- c(0.2, -0.1, 0.4, 0.3)
+  scale <- c(1.1, 0.8, 1.4, 0.9)
+  weights <- matrix(c(0.3, -0.2, 0.4, 0.1), ncol = 1L)
+  loadings <- matrix(c(0.2, 0.3, -0.1, 0.25), ncol = 1L)
+  expected <- sweep(values, 2L, center, "-")
+  expected <- sweep(expected, 2L, scale, "/")
+  expected <- expected - (expected %*% weights) %*% t(loadings)
+
+  expect_equal(
+    fastPLS:::opls_apply_filter_cpp(
+      values, center, scale, weights, loadings
+    ),
+    expected,
+    tolerance = 1e-12
+  )
+  expect_error(
+    fastPLS:::opls_apply_filter_cpp(
+      values, center[-1L], scale, weights, loadings
+    ),
+    "stored OPLS preprocessing"
+  )
+})

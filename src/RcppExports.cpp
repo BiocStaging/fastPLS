@@ -472,21 +472,6 @@ BEGIN_RCPP
     return rcpp_result_gen;
 END_RCPP
 }
-// opls_apply_filter_cpp
-arma::mat opls_apply_filter_cpp(arma::mat X, const arma::rowvec& mX, const arma::rowvec& vX, const arma::mat& W_orth, const arma::mat& P_orth);
-RcppExport SEXP _fastPLS_opls_apply_filter_cpp(SEXP XSEXP, SEXP mXSEXP, SEXP vXSEXP, SEXP W_orthSEXP, SEXP P_orthSEXP) {
-BEGIN_RCPP
-    Rcpp::RObject rcpp_result_gen;
-    Rcpp::RNGScope rcpp_rngScope_gen;
-    Rcpp::traits::input_parameter< arma::mat >::type X(XSEXP);
-    Rcpp::traits::input_parameter< const arma::rowvec& >::type mX(mXSEXP);
-    Rcpp::traits::input_parameter< const arma::rowvec& >::type vX(vXSEXP);
-    Rcpp::traits::input_parameter< const arma::mat& >::type W_orth(W_orthSEXP);
-    Rcpp::traits::input_parameter< const arma::mat& >::type P_orth(P_orthSEXP);
-    rcpp_result_gen = Rcpp::wrap(opls_apply_filter_cpp(X, mX, vX, W_orth, P_orth));
-    return rcpp_result_gen;
-END_RCPP
-}
 // single_pls_cv_cpp
 List single_pls_cv_cpp(arma::mat Xdata, arma::mat Ydata, arma::ivec constrain, arma::ivec ncomp, int scaling, int kfold, int method, int svd_method, int rsvd_oversample, int rsvd_power, double svds_tol, int seed);
 RcppExport SEXP _fastPLS_single_pls_cv_cpp(SEXP XdataSEXP, SEXP YdataSEXP, SEXP constrainSEXP, SEXP ncompSEXP, SEXP scalingSEXP, SEXP kfoldSEXP, SEXP methodSEXP, SEXP svd_methodSEXP, SEXP rsvd_oversampleSEXP, SEXP rsvd_powerSEXP, SEXP svds_tolSEXP, SEXP seedSEXP) {

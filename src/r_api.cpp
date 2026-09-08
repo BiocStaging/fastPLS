@@ -123,8 +123,8 @@ SEXP list_element(SEXP object, const char* name) {
   return R_NilValue;
 }
 
-fastpls::core::Matrix<double> numeric_matrix_from_sexp(SEXP object,
-                                                       const char* name) {
+fastpls::core::Matrix<double> numeric_matrix_from_sexp_impl(
+    SEXP object, const char* name, const bool allow_empty_columns) {
   if (!Rf_isMatrix(object) ||
       (TYPEOF(object) != REALSXP && TYPEOF(object) != INTSXP)) {
     throw std::invalid_argument(std::string(name) + " must be a numeric matrix");
@@ -132,8 +132,11 @@ fastpls::core::Matrix<double> numeric_matrix_from_sexp(SEXP object,
   const SEXP dimensions = Rf_getAttrib(object, R_DimSymbol);
   const std::size_t rows = static_cast<std::size_t>(INTEGER(dimensions)[0]);
   const std::size_t columns = static_cast<std::size_t>(INTEGER(dimensions)[1]);
-  if (rows < 1 || columns < 1) {
-    throw std::invalid_argument(std::string(name) + " must be non-empty");
+  if (rows < 1 || (!allow_empty_columns && columns < 1)) {
+    throw std::invalid_argument(
+      std::string(name) + (allow_empty_columns ?
+        " has invalid dimensions" : " must be non-empty")
+    );
   }
   fastpls::core::Matrix<double> values(rows, columns);
   if (TYPEOF(object) == REALSXP) {
@@ -149,6 +152,16 @@ fastpls::core::Matrix<double> numeric_matrix_from_sexp(SEXP object,
     }
   }
   return values;
+}
+
+fastpls::core::Matrix<double> numeric_matrix_from_sexp(SEXP object,
+                                                       const char* name) {
+  return numeric_matrix_from_sexp_impl(object, name, false);
+}
+
+fastpls::core::Matrix<double> numeric_matrix_from_sexp_allow_empty(
+    SEXP object, const char* name) {
+  return numeric_matrix_from_sexp_impl(object, name, true);
 }
 
 fastpls::core::ConstMatrixView<double> numeric_matrix_view(
@@ -1221,6 +1234,67 @@ extern "C" SEXP _fastPLS_opls_apply_filter_float32_cpp(
     Rf_setAttrib(output, R_NamesSymbol, names);
     UNPROTECT(3);
     return output;
+  } catch (const std::exception& exception) {
+    Rf_error("%s", exception.what());
+  }
+  return R_NilValue;
+}
+
+extern "C" SEXP _fastPLS_opls_apply_filter_cpp(
+    SEXP matrix, SEXP center, SEXP scale, SEXP weights, SEXP loadings) {
+  try {
+    fastpls::core::Matrix<double> values =
+      numeric_matrix_from_sexp(matrix, "X");
+    const std::vector<double> center_values = numeric_values(center, "mX");
+    const std::vector<double> scale_values = numeric_values(scale, "vX");
+    if (center_values.size() != values.columns() ||
+        scale_values.size() != values.columns()) {
+      throw std::invalid_argument(
+        "X columns must match stored OPLS preprocessing"
+      );
+    }
+    for (std::size_t column = 0; column < values.columns(); ++column) {
+      for (std::size_t row = 0; row < values.rows(); ++row) {
+        values(row, column) =
+          (values(row, column) - center_values[column]) /
+          scale_values[column];
+      }
+    }
+
+    const fastpls::core::Matrix<double> weight_values =
+      numeric_matrix_from_sexp_allow_empty(weights, "W_orth");
+    const fastpls::core::Matrix<double> loading_values =
+      numeric_matrix_from_sexp_allow_empty(loadings, "P_orth");
+    if (weight_values.columns() != loading_values.columns() ||
+        weight_values.rows() != values.columns() ||
+        loading_values.rows() != values.columns()) {
+      throw std::invalid_argument("Invalid OPLS orthogonal filter dimensions");
+    }
+    for (std::size_t component = 0;
+         component < weight_values.columns(); ++component) {
+      const auto weight = fastpls::core::make_const_view(
+        weight_values.data() + component * weight_values.rows(),
+        weight_values.rows(), 1, weight_values.rows()
+      );
+      const auto loading = fastpls::core::make_const_view(
+        loading_values.data() + component * loading_values.rows(),
+        loading_values.rows(), 1, loading_values.rows()
+      );
+      fastpls::core::Matrix<double> score(values.rows(), 1);
+      fastpls::runtime::cpu_gemm_f64(
+        values.view(), weight, false, false, score.view()
+      );
+      fastpls::core::Matrix<double> correction(
+        values.rows(), values.columns()
+      );
+      fastpls::runtime::cpu_gemm_f64(
+        score.view(), loading, false, true, correction.view()
+      );
+      for (std::size_t index = 0; index < values.size(); ++index) {
+        values.data()[index] -= correction.data()[index];
+      }
+    }
+    return numeric_matrix(values);
   } catch (const std::exception& exception) {
     Rf_error("%s", exception.what());
   }

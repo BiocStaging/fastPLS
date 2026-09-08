@@ -5622,18 +5622,6 @@ Rcpp::List opls_filter_labels_cpp(
   );
 }
 
-// [[Rcpp::export]]
-arma::mat opls_apply_filter_cpp(
-  arma::mat X,
-  const arma::rowvec& mX,
-  const arma::rowvec& vX,
-  const arma::mat& W_orth,
-  const arma::mat& P_orth
-) {
-  return fastpls::native::apply_opls_filter(std::move(X), mX, vX, W_orth, P_orth);
-}
-
-
 // This function performs a random selection of the elements of a vector "yy".
 // The number of elements to select is defined by the variable "size".
 
@@ -7791,7 +7779,9 @@ List pls_cv_predict_compiled_impl(
       arma::rowvec vX = Rcpp::as<arma::rowvec>(filt["vX"]);
       arma::mat W_orth = Rcpp::as<arma::mat>(filt["W_orth"]);
       arma::mat P_orth = Rcpp::as<arma::mat>(filt["P_orth"]);
-      Xtest = opls_apply_filter_cpp(Xtest, mX, vX, W_orth, P_orth);
+      Xtest = fastpls::native::apply_opls_filter(
+        std::move(Xtest), mX, vX, W_orth, P_orth
+      );
       fit_method = 3;
       fit_scaling = 3;
     } else if (method == 5) {
