@@ -184,6 +184,32 @@ void ignore(Arguments&&...) {}
 
 }  // namespace
 
+extern "C" SEXP _fastPLS_cuda_matrix_multiply(SEXP left, SEXP right) {
+#ifdef FASTPLS_HAS_CUDA
+  MatrixInput left_input = matrix_input(left, 64, "A");
+  MatrixInput right_input = matrix_input(right, 64, "B");
+  if (left_input.columns != right_input.rows) {
+    Rf_error("cuda_matrix_multiply: non-conformable matrices");
+  }
+  SEXP result = PROTECT(Rf_allocMatrix(
+    REALSXP, left_input.rows, right_input.columns
+  ));
+  char error[1024] = {};
+  if (fastpls_cuda_gemm(
+      left_input.values, right_input.values, 64, left_input.rows,
+      left_input.columns, right_input.columns, REAL(result), error,
+      sizeof(error))) {
+    UNPROTECT(1);
+    Rf_error("%s", error);
+  }
+  UNPROTECT(1);
+  return result;
+#else
+  ignore(left, right);
+  unavailable("matrix multiplication");
+#endif
+}
+
 extern "C" SEXP _fastPLS_cuda_resident_project_cpp(
     SEXP object, SEXP predictors, SEXP components) {
 #ifdef FASTPLS_HAS_CUDA

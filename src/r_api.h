@@ -36,6 +36,7 @@ SEXP _fastPLS_cuda_resident_simpls_predict_cpp(
 SEXP _fastPLS_cuda_resident_predict_path_cpp(
   SEXP object, SEXP predictors, SEXP components, SEXP classifier
 );
+SEXP _fastPLS_cuda_matrix_multiply(SEXP left, SEXP right);
 SEXP _fastPLS_has_cuda();
 SEXP _fastPLS_has_metal();
 SEXP _fastPLS_lda_cuda_native_available();
@@ -47,6 +48,11 @@ SEXP _fastPLS_float32_topk_cpp(SEXP scores, SEXP top);
 SEXP _fastPLS_float32_sweep_cols_cpp(SEXP matrix, SEXP statistics,
                                      SEXP operation);
 SEXP _fastPLS_float32_standardize_cpp(SEXP matrix, SEXP center, SEXP scale);
+SEXP _fastPLS_lda_train_prefix_float32_cpp(SEXP scores, SEXP labels,
+                                            SEXP class_count,
+                                            SEXP components);
+SEXP _fastPLS_lda_predict_float32_cpp(SEXP scores, SEXP model,
+                                      SEXP return_scores);
 SEXP _fastPLS_center_kernel_train_float32_cpp(SEXP kernel);
 SEXP _fastPLS_center_kernel_test_float32_cpp(SEXP kernel,
                                              SEXP training_means,

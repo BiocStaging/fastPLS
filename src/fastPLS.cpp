@@ -1020,9 +1020,6 @@ arma::fmat integer_bits_to_fmat(SEXP xSEXP, const char* name) {
   return out;
 }
 
-using fastpls::native::LDAFloatCholeskyResult;
-using fastpls::native::lda_cholesky_solve_float;
-
 arma::frowvec float_col_sd(const arma::fmat& X) {
   arma::frowvec out(X.n_cols, arma::fill::ones);
   if (X.n_rows < 2) {
@@ -1846,118 +1843,6 @@ Rcpp::List opls_apply_filter_float32_cpp(SEXP XSEXP,
   }
   return Rcpp::List::create(
     Rcpp::Named("X") = fmat_to_float32_bits(X)
-  );
-}
-
-// [[Rcpp::export]]
-Rcpp::List lda_train_prefix_float32_cpp(SEXP TtrainSEXP,
-                                        const Rcpp::IntegerVector& y,
-                                        int n_classes,
-                                        const Rcpp::IntegerVector& ncomp) {
-  arma::fmat Ttrain = float32_bits_to_fmat(TtrainSEXP, "Ttrain");
-  if (static_cast<R_xlen_t>(Ttrain.n_rows) != y.size()) {
-    Rcpp::stop("float32 PLS-LDA requires one class label per training row");
-  }
-  if (n_classes < 2 || ncomp.size() < 1) {
-    Rcpp::stop("float32 PLS-LDA requires at least two classes and one component count");
-  }
-
-  int kmax_i = 0;
-  for (R_xlen_t i = 0; i < ncomp.size(); ++i) {
-    kmax_i = std::max(kmax_i, ncomp[i]);
-  }
-  if (kmax_i < 1 || kmax_i > static_cast<int>(Ttrain.n_cols)) {
-    Rcpp::stop("float32 PLS-LDA component counts must be in 1..ncol(Ttrain)");
-  }
-
-  const arma::uword n = Ttrain.n_rows;
-  const arma::uword kmax = static_cast<arma::uword>(kmax_i);
-  arma::fmat Tk = Ttrain.cols(0, kmax - 1);
-  arma::fvec counts(n_classes, arma::fill::zeros);
-  arma::fmat means(n_classes, kmax, arma::fill::zeros);
-  for (arma::uword i = 0; i < n; ++i) {
-    const int cls = y[static_cast<R_xlen_t>(i)] - 1;
-    if (cls < 0 || cls >= n_classes) {
-      Rcpp::stop("float32 PLS-LDA labels must be compactly encoded as 1..n_classes");
-    }
-    counts(static_cast<arma::uword>(cls)) += 1.0f;
-    means.row(static_cast<arma::uword>(cls)) += Tk.row(i);
-  }
-  for (int cls = 0; cls < n_classes; ++cls) {
-    if (counts(static_cast<arma::uword>(cls)) <= 0.0f) {
-      Rcpp::stop("float32 PLS-LDA received an empty class");
-    }
-    means.row(static_cast<arma::uword>(cls)) /= counts(static_cast<arma::uword>(cls));
-  }
-
-  arma::fmat pooled_full = arma::symmatu(Tk.t() * Tk);
-  for (int cls = 0; cls < n_classes; ++cls) {
-    const arma::frowvec mean = means.row(static_cast<arma::uword>(cls));
-    pooled_full -= counts(static_cast<arma::uword>(cls)) * (mean.t() * mean);
-  }
-  pooled_full /= static_cast<float>(std::max<int>(1, static_cast<int>(n) - n_classes));
-
-  Rcpp::List models(ncomp.size());
-  Rcpp::CharacterVector model_names(ncomp.size());
-  for (R_xlen_t idx = 0; idx < ncomp.size(); ++idx) {
-    const int kk_i = ncomp[idx];
-    if (kk_i < 1 || kk_i > kmax_i) {
-      Rcpp::stop("float32 PLS-LDA component counts must be in 1..max(ncomp)");
-    }
-    const arma::uword kk = static_cast<arma::uword>(kk_i);
-    const arma::fmat pooled = pooled_full.submat(0, 0, kk - 1, kk - 1);
-    const arma::fmat means_k = means.cols(0, kk - 1);
-    const LDAFloatCholeskyResult solved = lda_cholesky_solve_float(pooled, means_k);
-    arma::frowvec constants(n_classes, arma::fill::zeros);
-    for (int cls = 0; cls < n_classes; ++cls) {
-      const arma::uword c = static_cast<arma::uword>(cls);
-      const float prior = std::max(
-        counts(c) / static_cast<float>(n), std::numeric_limits<float>::min()
-      );
-      constants(c) = -0.5f * arma::dot(means_k.row(c), solved.linear.row(c)) +
-        std::log(prior);
-    }
-    models[idx] = Rcpp::List::create(
-      Rcpp::Named("means") = fmat_to_float32_bits(means_k),
-      Rcpp::Named("linear") = fmat_to_float32_bits(solved.linear),
-      Rcpp::Named("constants") = fmat_to_float32_bits(constants),
-      Rcpp::Named("priors") = fmat_to_float32_bits((counts / static_cast<float>(n)).t()),
-      Rcpp::Named("ridge") = solved.lambda,
-      Rcpp::Named("ridge_relative") = solved.relative_ridge,
-      Rcpp::Named("precision") = "float32",
-      Rcpp::Named("backend") = "cpp_native"
-    );
-    model_names[idx] = std::to_string(kk_i);
-  }
-  models.attr("names") = model_names;
-  return models;
-}
-
-// [[Rcpp::export]]
-Rcpp::List lda_predict_float32_cpp(SEXP TtestSEXP,
-                                   const Rcpp::List& lda,
-                                   bool return_scores = true) {
-  arma::fmat Ttest = float32_bits_to_fmat(TtestSEXP, "Ttest");
-  arma::fmat linear = integer_bits_to_fmat(lda["linear"], "lda$linear");
-  arma::fmat constants_matrix = integer_bits_to_fmat(
-    lda["constants"], "lda$constants"
-  );
-  if (Ttest.n_cols != linear.n_cols || constants_matrix.n_elem != linear.n_rows) {
-    Rcpp::stop("float32 PLS-LDA prediction dimensions do not match the fitted model");
-  }
-  const arma::frowvec constants = arma::vectorise(constants_matrix, 1);
-  arma::fmat scores = Ttest * linear.t();
-  scores.each_row() += constants;
-  Rcpp::IntegerVector pred(scores.n_rows);
-  for (arma::uword row = 0; row < scores.n_rows; ++row) {
-    pred[static_cast<R_xlen_t>(row)] =
-      static_cast<int>(scores.row(row).index_max()) + 1;
-  }
-  return Rcpp::List::create(
-    Rcpp::Named("pred") = pred,
-    Rcpp::Named("scores") = return_scores ?
-      Rcpp::RObject(fmat_to_float32_bits(scores)) :
-      Rcpp::RObject(R_NilValue)
   );
 }
 
@@ -3382,17 +3267,6 @@ Rcpp::List opls_apply_filter_float32_cpp(SEXP XSEXP, SEXP mXSEXP, SEXP vXSEXP, S
   return windows_float32_unavailable();
 }
 
-Rcpp::List lda_train_prefix_float32_cpp(SEXP TtrainSEXP,
-                                        const Rcpp::IntegerVector& y,
-                                        int n_classes,
-                                        const Rcpp::IntegerVector& ncomp) {
-  return windows_float32_unavailable();
-}
-
-Rcpp::List lda_predict_float32_cpp(SEXP TtestSEXP, const Rcpp::List& lda, bool return_scores) {
-  return windows_float32_unavailable();
-}
-
 Rcpp::List lda_train_prefix_float32_cuda(SEXP TtrainSEXP,
                                          const Rcpp::IntegerVector& y,
                                          int n_classes,
@@ -3405,11 +3279,6 @@ Rcpp::List lda_predict_float32_cuda(SEXP TtestSEXP, const Rcpp::List& lda, bool 
 }
 
 #endif
-
-// [[Rcpp::export]]
-arma::mat cuda_matrix_multiply(const arma::mat& A, const arma::mat& B) {
-  return fastpls_svd::cuda_matrix_multiply(A, B);
-}
 
 static Rcpp::IntegerVector lda_labels_from_scores(const arma::mat& scores,
                                                   const arma::rowvec& constants) {

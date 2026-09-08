@@ -5,6 +5,9 @@
 extern "C" {
 #endif
 // Precision is 32 or 64. Matrices are column-major; labels are one-based.
+int fastpls_cuda_gemm(const void* left,const void* right,int precision,
+    int rows,int inner,int columns,void* output,char* error,
+    size_t error_capacity);
 void* fastpls_resident_simpls_create(const void* x,const void* y,const int* labels,
     int precision,int n,int p,int q,int components,int scaling,int oversample,
     int power,int retain_scores,unsigned long long seed,char* error,

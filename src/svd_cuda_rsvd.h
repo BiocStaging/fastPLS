@@ -88,7 +88,6 @@ arma::imat cuda_flash_lowrank_predict_classes(
   const arma::rowvec& mY,
   const arma::ivec& ncomp
 );
-Mat cuda_matrix_multiply(const Mat& A, const Mat& B);
 arma::fmat cuda_matrix_multiply_float(
   const arma::fmat& A,
   const arma::fmat& B,

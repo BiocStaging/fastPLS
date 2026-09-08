@@ -1,3 +1,14 @@
+# fastPLS 0.99.52
+
+* Migrated the internal CUDA matrix-product bridge from RcppArmadillo to a
+  precision-aware C ABI over cuBLAS, preserving prediction behavior while
+  removing the superseded Armadillo implementation.
+
+* Added a dependency-free, templated pooled-covariance LDA implementation to
+  the MIT C++17 core and routed CPU float32 LDA through the direct R C-API.
+  This removes the former Windows-specific LDA restriction, the Armadillo
+  float32 implementation and two generated wrappers.
+
 # fastPLS 0.99.51
 
 * Replaced the resident CUDA Rcpp marshalling layer with direct R C-API

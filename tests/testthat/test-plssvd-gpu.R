@@ -45,3 +45,13 @@ test_that("pls backend='cuda' requires CUDA or returns fastPLS output", {
     expect_equal(mean(gpu_fit$Ypred[[3]] == y[idx]), mean(cpu_fit$Ypred[[3]] == y[idx]), tolerance = 0.1)
   }
 })
+
+test_that("the direct CUDA matrix-product ABI matches CPU multiplication", {
+  skip_if_not(has_cuda(), "CUDA backend is unavailable")
+  left <- matrix(as.double(seq_len(12)), 3, 4)
+  right <- matrix(as.double(seq_len(20)), 4, 5)
+  multiply <- get(
+    ".cuda_matmul", envir = asNamespace("fastPLS"), inherits = FALSE
+  )
+  expect_equal(multiply(left, right), left %*% right, tolerance = 1e-12)
+})

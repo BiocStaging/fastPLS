@@ -477,7 +477,68 @@ public:
 inline void resident_error(char* out,size_t size,const char* message) noexcept {
     if(out&&size)std::snprintf(out,size,"%s",message);
 }
+template<class T> void host_gemm(const T* left,const T* right,int rows,
+                                 int inner,int columns,T* output) {
+    cudaStream_t stream=nullptr;
+    cublasHandle_t blas=nullptr;
+    T *device_left=nullptr,*device_right=nullptr,*device_output=nullptr;
+    auto release=[&]() noexcept {
+        cudaFree(device_left);cudaFree(device_right);cudaFree(device_output);
+        if(blas)cublasDestroy(blas);
+        if(stream)cudaStreamDestroy(stream);
+    };
+    try {
+        require_cuda(cudaStreamCreate(&stream));
+        require_blas(cublasCreate(&blas));
+        require_blas(cublasSetStream(blas,stream));
+        configure_blas_math<T>(blas);
+        const size_t left_size=size_t(rows)*inner;
+        const size_t right_size=size_t(inner)*columns;
+        const size_t output_size=size_t(rows)*columns;
+        require_cuda(cudaMalloc(&device_left,left_size*sizeof(T)));
+        require_cuda(cudaMalloc(&device_right,right_size*sizeof(T)));
+        require_cuda(cudaMalloc(&device_output,output_size*sizeof(T)));
+        require_cuda(cudaMemcpyAsync(device_left,left,left_size*sizeof(T),
+            cudaMemcpyHostToDevice,stream));
+        require_cuda(cudaMemcpyAsync(device_right,right,right_size*sizeof(T),
+            cudaMemcpyHostToDevice,stream));
+        const T one=1,zero=0;
+        require_blas(Decomposition<T>::gemm(
+            blas,CUBLAS_OP_N,CUBLAS_OP_N,rows,columns,inner,&one,
+            device_left,rows,device_right,inner,&zero,device_output,rows));
+        require_cuda(cudaMemcpyAsync(output,device_output,
+            output_size*sizeof(T),cudaMemcpyDeviceToHost,stream));
+        require_cuda(cudaStreamSynchronize(stream));
+        release();
+    } catch(...) {release();throw;}
+}
 } // namespace fastpls_device
+
+extern "C" int fastpls_cuda_gemm(const void* left,const void* right,
+    int precision,int rows,int inner,int columns,void* output,char* error,
+    size_t size) {
+    using namespace fastpls_device;
+    resident_error(error,size,"");
+    try {
+        if(!left||!right||!output||(precision!=32&&precision!=64)||
+           rows<1||inner<1||columns<1)
+            throw std::invalid_argument("invalid CUDA matrix multiplication input");
+        if(precision==32)
+            host_gemm(static_cast<const float*>(left),
+                static_cast<const float*>(right),rows,inner,columns,
+                static_cast<float*>(output));
+        else
+            host_gemm(static_cast<const double*>(left),
+                static_cast<const double*>(right),rows,inner,columns,
+                static_cast<double*>(output));
+        return 0;
+    } catch(const std::exception& exception) {
+        resident_error(error,size,exception.what());return 1;
+    } catch(...) {
+        resident_error(error,size,"unknown CUDA matrix multiplication error");
+        return 1;
+    }
+}
 
 extern "C" void* fastpls_resident_simpls_create(const void* x,const void* y,const int* labels,
     int precision,int n,int p,int q,int components,int scaling,int oversample,
