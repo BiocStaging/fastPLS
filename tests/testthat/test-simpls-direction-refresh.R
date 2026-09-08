@@ -88,11 +88,7 @@ test_that("available accelerator dispatches expose their SIMPLS rule", {
     expect_identical(is.na(rule$refresh_iterations), !resident_gpu,
       info = backend)
     expect_identical(rule$seed_rule, "seed_plus_component_index", info = backend)
-    expected_rule <- if (backend == "metal") {
-      "fresh_randomized_direction_per_component"
-    } else {
-      "fresh_oversampled_sketch_per_component"
-    }
+    expected_rule <- "fresh_oversampled_sketch_per_component"
     expect_identical(rule$rule, expected_rule)
   }
 })
@@ -132,7 +128,7 @@ test_that("massive cross-covariance routing accounts for input precision", {
   double <- fastPLS:::.fast_simpls_shape_profile(X, Y, float32 = FALSE)
   single <- fastPLS:::.fast_simpls_shape_profile(X, Y, float32 = TRUE)
 
-  expect_identical(double$profile, "massive_rank_one")
+  expect_identical(double$profile, "massive_crosscovariance")
   expect_identical(single$profile, "high_response_stable")
 })
 
@@ -211,7 +207,7 @@ test_that("batch diagnostics respect shape and the shared block limit", {
   expect_identical(cuda_prefix$directions_per_solve, 20L)
 })
 
-test_that("CUDA massive cross-covariance diagnostics report rank-one refresh", {
+test_that("CUDA massive cross-covariance diagnostics report block refresh", {
   rule <- fastPLS:::.simpls_direction_diagnostics(
     randomized = TRUE,
     backend = "cuda",
@@ -222,13 +218,14 @@ test_that("CUDA massive cross-covariance diagnostics report rank-one refresh", {
     requested_components = 165L,
     power = 2L
   )
-  expect_identical(rule$rule, "fresh_cuda_rank_one_refresh")
-  expect_identical(rule$refresh_width, 1L)
+  expect_identical(rule$rule, "batched_cuda_candidate_block")
+  expect_identical(rule$refresh_width, 8L)
+  expect_identical(rule$directions_per_solve, 8L)
   expect_identical(rule$refresh_iterations, 2L)
   expect_true(rule$fresh_start)
 })
 
-test_that("CPU massive cross-covariance diagnostics report rank-one refresh", {
+test_that("CPU massive cross-covariance diagnostics report block refresh", {
   rule <- fastPLS:::.simpls_direction_diagnostics(
     randomized = TRUE,
     backend = "cpu",
@@ -239,14 +236,15 @@ test_that("CPU massive cross-covariance diagnostics report rank-one refresh", {
     requested_components = 50L,
     power = 2L
   )
-  expect_identical(rule$rule, "fresh_cpu_rank_one_refresh")
-  expect_identical(rule$refresh_width, 1L)
+  expect_identical(rule$rule, "batched_cpu_candidate_block")
+  expect_identical(rule$refresh_width, 8L)
+  expect_identical(rule$directions_per_solve, 8L)
   expect_identical(rule$refresh_iterations, 2L)
-  expect_identical(rule$seed_rule, "seed_plus_component_index")
+  expect_identical(rule$seed_rule, "seed_plus_candidate_block_start")
   expect_true(rule$fresh_start)
 })
 
-test_that("Metal resident SIMPLS diagnostics report the native rank-one route", {
+test_that("Metal massive SIMPLS diagnostics report block refresh", {
   rule <- fastPLS:::.simpls_direction_diagnostics(
     randomized = TRUE,
     backend = "metal",
@@ -258,12 +256,13 @@ test_that("Metal resident SIMPLS diagnostics report the native rank-one route", 
     route_mode = "metal_resident_rank_one_simpls",
     power = 1L
   )
-  expect_identical(rule$rule, "fresh_metal_rank_one_refresh")
-  expect_identical(rule$refresh_width, 1L)
+  expect_identical(rule$rule, "batched_metal_candidate_block")
+  expect_identical(rule$refresh_width, 8L)
+  expect_identical(rule$directions_per_solve, 8L)
   expect_identical(rule$refresh_iterations, 1L)
   expect_identical(
     rule$seed_rule,
-    "single_seed_fresh_component_sequence"
+    "seed_plus_candidate_block_start"
   )
   expect_true(rule$fresh_start)
 })
@@ -297,7 +296,7 @@ test_that("SIMPLS norm guard rejects unusable directions", {
   expect_false(fastPLS:::.is_usable_simpls_norm(Inf))
 })
 
-test_that("massive CUDA diagnostics report the executed refresh iterations", {
+test_that("massive CUDA diagnostics report the executed candidate block", {
   direction <- fastPLS:::.simpls_direction_diagnostics(
     randomized = TRUE,
     backend = "cuda",
@@ -306,10 +305,11 @@ test_that("massive CUDA diagnostics report the executed refresh iterations", {
     predictor_dimension = 13000L,
     response_dimension = 28355L,
     requested_components = 50L,
-    route_mode = "cuda_resident_rank_one_simpls",
+    route_mode = "cuda_resident_candidate_block_simpls",
     power = 6L
   )
-  expect_identical(direction$rule, "fresh_cuda_rank_one_refresh")
+  expect_identical(direction$rule, "batched_cuda_candidate_block")
+  expect_identical(direction$directions_per_solve, 8L)
   expect_true(direction$fresh_start)
   expect_identical(direction$refresh_iterations, 6L)
 })

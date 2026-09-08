@@ -1,4 +1,4 @@
-test_that("resident Metal compact factors predict every requested prefix", {
+test_that("operation-split Metal compact factors predict every prefix", {
     skip_if_not(has_metal(), "Metal backend is not available")
     set.seed(915)
     X <- float::fl(matrix(rnorm(60 * 12), 60, 12))
@@ -11,9 +11,11 @@ test_that("resident Metal compact factors predict every requested prefix", {
                 return_variance = FALSE, seed = 15))
             raw <- fastPLS:::.fastpls_restore_internal_output_fields(model)
             expect_false(is.matrix(raw$B) || length(dim(raw$B)) == 3L)
-            expect_false("W_latent" %in% names(raw))
-            expect_false(is.null(raw$resident_state))
-            expect_identical(raw$resident_backend, "metal")
+            expect_null(raw$resident_state)
+            expect_identical(
+                raw$execution_route,
+                "CPU/Metal hybrid (operation split)"
+            )
             repeated <- predict(model, X)
             repeated_again <- predict(model, X)
             expect_equal(repeated$Ypred, repeated_again$Ypred, tolerance = 0)
@@ -25,7 +27,7 @@ test_that("resident Metal compact factors predict every requested prefix", {
     }
 })
 
-test_that("resident Metal class paths match independent prefix prediction", {
+test_that("operation-split Metal class paths match independent fits", {
     skip_if_not(has_metal(), "Metal backend is not available")
     set.seed(919)
     X <- float::fl(matrix(rnorm(90 * 14), 90, 14))
@@ -39,18 +41,17 @@ test_that("resident Metal class paths match independent prefix prediction", {
             backend = "metal", classifier = classifier,
             return_variance = FALSE, seed = 19
         )
-        raw <- fastPLS:::.fastpls_restore_internal_output_fields(model)
-        bits <- fastPLS:::.resident_metal_input(Xtest, "Xtest")
-        lda <- as.integer(identical(classifier, "lda"))
-        path <- fastPLS:::metal_resident_classify_path_cpp(
-            raw$resident_state, bits, components, 3L, lda
-        )
-        expect_identical(dim(path), c(21L, 3L, length(components)))
         for (index in seq_along(components)) {
-            independent <- fastPLS:::metal_resident_classify_cpp(
-                raw$resident_state, bits, components[[index]], 3L, lda
+            independent <- pls(
+                X, labels, Xtest, ncomp = components[[index]],
+                method = "simpls", backend = "metal",
+                classifier = classifier, return_variance = FALSE, seed = 19
             )
-            expect_equal(path[, , index], independent, tolerance = 0)
+            expected <- predict(model, Xtest)$Ypred[[index]]
+            expect_identical(
+                as.character(independent$Ypred[[1L]]),
+                as.character(expected)
+            )
         }
     }
 })

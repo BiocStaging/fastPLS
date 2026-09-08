@@ -93,8 +93,10 @@ test_that("float32 unavailable and hybrid routes are explicit", {
     os_type = "unix"
   )
   expect_identical(metal_lda$status, "validated")
-  expect_identical(metal_lda$execution, "device_accelerated")
-  expect_false(any(grepl("LDA is hybrid", metal_lda$warnings)))
+  expect_identical(
+    metal_lda$execution,
+    "fixed_cpu_metal_operation_split"
+  )
 
   for (cfg in list(
     list(method = "opls", kernel = "linear", classifier = "argmax"),

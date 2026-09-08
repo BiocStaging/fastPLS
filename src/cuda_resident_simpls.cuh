@@ -9,7 +9,6 @@
 namespace fastpls_device {
 constexpr int kResidentSimplsMaximumBlock = 64;
 constexpr int kResidentSimplsFloatRegressionBlock = 8;
-constexpr int kResidentSimplsFloatRegressionBlockLimit = 64;
 
 template<class T> __global__ void add_response_mean(T* pred,size_t size,int n,const T* mean) {
     for(size_t i=blockIdx.x*size_t(blockDim.x)+threadIdx.x;i<size;i+=size_t(blockDim.x)*gridDim.x)
@@ -111,19 +110,10 @@ template<class T> class ResidentSimpls {
         solver.reset(new RsvdWorkspace<T>(
             p,q,refresh_block,effective_oversample,effective_power,stream,
             implicit_crosscov?n:0,components,blas,solver_handle,rng_handle));
-        if(block_massive_regression&&
-           components>kResidentSimplsFloatRegressionBlockLimit) {
-            rank_one_solver.reset(new RsvdWorkspace<T>(
-                p,q,1,effective_oversample,effective_power,stream,
-                implicit_crosscov?n:0,components,blas,solver_handle,rng_handle));
-        }
         if(right_gram)product(
             CUBLAS_OP_T,CUBLAS_OP_N,q,q,p,S,p,S,p,right_gram,q);
         for(int a=0;a<components;) {
-            const bool use_rank_one=rank_one_solver&&
-                a>=kResidentSimplsFloatRegressionBlockLimit;
-            RsvdWorkspace<T>* active_solver=
-                use_rank_one?rank_one_solver.get():solver.get();
+            RsvdWorkspace<T>* active_solver=solver.get();
             if(implicit_crosscov) {
                 active_solver->solve_implicit_crosscov(
                     X,Y,V,a,seed+a,candidate,invalid);
@@ -133,7 +123,7 @@ template<class T> class ResidentSimpls {
             } else {
                 active_solver->solve(S,seed+a,candidate,nullptr,nullptr,invalid);
             }
-            const int use=use_rank_one?1:std::min(refresh_block,components-a);
+            const int use=std::min(refresh_block,components-a);
             for(int j=0;j<use;++j) {
                 if(cached_predictor_crossprod) {
                     update->step_crossprod(
@@ -280,9 +270,7 @@ public:
     int solver_oversample()const{return effective_oversample;}
     int solver_power()const{return effective_power;}
     int solver_block()const{return refresh_block;}
-    int solver_block_limit()const{
-        return rank_one_solver?kResidentSimplsFloatRegressionBlockLimit:0;
-    }
+    int solver_block_limit()const{return 0;}
     bool implicit_operator()const{return implicit_crosscov;}
     bool predictor_crossprod_cache()const{return cached_predictor_crossprod;}
     bool has_lda_moments()const{return cached_predictor_crossprod;}

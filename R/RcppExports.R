@@ -113,6 +113,10 @@ cuda_float32_rsvd_sample_cpp <- function(ASEXP, l, power_iters, seed) {
     .Call(`_fastPLS_cuda_float32_rsvd_sample_cpp`, ASEXP, l, power_iters, seed)
 }
 
+cpu_float32_matrix_multiply_cpp <- function(ASEXP, BSEXP, transpose_left = FALSE, transpose_right = FALSE) {
+    .Call(`_fastPLS_cpu_float32_matrix_multiply_cpp`, ASEXP, BSEXP, transpose_left, transpose_right)
+}
+
 metal_float32_matrix_multiply_cpp <- function(ASEXP, BSEXP, transpose_left = FALSE, transpose_right = FALSE) {
     .Call(`_fastPLS_metal_float32_matrix_multiply_cpp`, ASEXP, BSEXP, transpose_left, transpose_right)
 }

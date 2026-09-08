@@ -18,6 +18,9 @@ class MetalFloatOperator {
   MetalFloatOperator& operator=(const MetalFloatOperator&) = delete;
   void update(const arma::fmat& A);
   arma::fmat multiply(const arma::fmat& B, bool transpose_left);
+  void geometry(const arma::fmat& directions,
+                arma::fmat& scores,
+                arma::fmat& loadings);
 
  private:
   struct Impl;

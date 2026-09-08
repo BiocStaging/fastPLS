@@ -1,4 +1,4 @@
-test_that("Metal float32 deflation updates the resident operator", {
+test_that("Metal float32 deflation updates the operation-split operator", {
     skip_if_not(has_metal())
     set.seed(421)
     X <- float::fl(matrix(rnorm(120 * 47), 120, 47))
@@ -15,7 +15,7 @@ test_that("Metal float32 deflation updates the resident operator", {
         if (solver == "rsvd") {
             expect_identical(original$diagnostics$rsvd$backend, "metal")
             expect_identical(original$diagnostics$simpls_direction$rule,
-                "fresh_randomized_direction_per_component")
+                "fresh_oversampled_sketch_per_component")
         }
         changed <- call_fit(X * float::fl(2), 4L)
         repeated <- call_fit(X, c(2L, 4L))
@@ -29,7 +29,7 @@ test_that("Metal float32 deflation updates the resident operator", {
     }
 })
 
-test_that("float32 diagnostics report the massive implicit route", {
+test_that("float32 diagnostics report the batched massive route", {
     for (backend in c("cpu", "cuda", "metal")) {
         actual <- fastPLS:::.simpls_direction_diagnostics(
             TRUE, backend, training_samples = 1200L,
@@ -37,14 +37,13 @@ test_that("float32 diagnostics report the massive implicit route", {
             requested_components = 165L, power = 2L, oversample = 12L,
             precision = "float32"
         )
-        expected_rank_one <- backend %in% c("cpu", "cuda", "metal")
-        expect_identical(actual$rule, if (expected_rank_one) {
-            paste0("fresh_", backend, "_rank_one_refresh")
-        } else {
-            "fresh_oversampled_sketch_per_component"
-        })
-        expect_false(actual$candidate_block_refresh)
-        expect_identical(is.na(actual$refresh_width), !expected_rank_one)
+        expect_identical(
+            actual$rule,
+            paste0("batched_", backend, "_candidate_block")
+        )
+        expect_true(actual$candidate_block_refresh)
+        expect_identical(actual$refresh_width, 8L)
+        expect_true(actual$fresh_start)
         expect_false("conditional_crossproduct_cache" %in% actual$active_optimizations)
     }
 })

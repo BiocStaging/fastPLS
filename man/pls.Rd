@@ -90,9 +90,9 @@ fits with \code{Q2Y} at least as large as observed and \code{B} is the number of
 successful null fits. Failed fits are excluded from \code{B} and reported.}
 
 \item{backend}{Implementation backend: \code{cpu} for compiled CPU,
-\code{cuda}
-for CUDA-native fitting, or \code{metal} for Apple Metal
-randomized-SVD/GEMM acceleration. When omitted, \code{options(backend = ...)}
+\code{cuda} for CUDA-native fitting, or \code{metal} for operation-split
+float32 CPU/Metal fitting on Apple silicon. When omitted,
+\code{options(backend = ...)}
 defines the session default. For CPU execution, \code{options(cores = n)}
 requests \code{n} BLAS/OpenMP threads. Selecting unavailable CUDA or Metal
 support raises an error without a CPU fallback.}
@@ -127,11 +127,12 @@ per requested component count. Common fields are:
 \item \code{Q}: response loadings or response-side latent coefficients.
 \item \code{R}: predictor weights/rotations used to project new samples into the PLS
 latent space.
-\item \code{Ttrain}: training latent scores. Resident CUDA and Metal fits materialize
-this host-side matrix only when \code{fit = TRUE}; with \code{fit = FALSE}, scores
-remain on the device only as long as required to prepare the compact
-prediction or LDA state. Compiled cross-validation continues to return
-its documented score outputs.
+\item \code{Ttrain}: training latent scores. Resident CUDA fits materialize this
+host-side matrix only when \code{fit = TRUE}; with \code{fit = FALSE}, CUDA scores
+remain on the device only as long as required to prepare compact
+prediction or LDA state. Operation-split Metal fits use host-accessible
+scores for the CPU component of the calculation. Compiled
+cross-validation continues to return its documented score outputs.
 \item \code{C_latent}, \code{W_latent}: low-rank latent prediction factors used by
 PLS-SVD-style compact prediction when a full coefficient array is
 avoided.
@@ -207,13 +208,17 @@ plotting but are not shown as public output fields.
 }
 \description{
 Fits PLS-SVD, SIMPLS, OPLS, or kernel PLS models for regression or
-classification using a selected CPU, CUDA, or Metal backend. The fitted
+classification using a selected CPU, CUDA, or operation-split Apple Metal
+backend. The fitted
 model can include predictions for held-out samples, latent scores, fitted
 values, variance summaries, and optional classification heads.
 }
 \details{
 The compiled CPU backend uses the BLAS/LAPACK implementation selected at
-package build time. A multithreaded BLAS can execute eligible matrix products
+package build time. macOS builds use Apple Accelerate by default. On Linux and
+other Unix-like systems, configuration automatically selects OpenBLAS when it
+is found through \code{OPENBLAS_ROOT} or \code{pkg-config}; otherwise the package
+uses the BLAS selected by R. A multithreaded BLAS can execute eligible matrix products
 on several CPU cores, but the SIMPLS deflation sequence remains serial and
 additional threads are not guaranteed to reduce runtime.
 
@@ -222,11 +227,19 @@ execution without silent promotion to double. Float32 is route-specific,
 however, rather than a package-wide speed or memory guarantee. CPU, CUDA,
 and Metal rSVD PLS-SVD and SIMPLS have current route-level validation.
 CUDA provides fully device-resident float32 and float64 routes for all four
-PLS families. Metal provides fully device-resident float32 routes; Apple
-GPUs do not provide the native float64 arithmetic required here. For OPLS,
-orthogonal filtering and prediction remain on device. For nonlinear kernel
-PLS, Gram-matrix construction, centering, fitting, prediction, and LDA remain
-on device, subject to an explicit device-memory guard.
+PLS families. \code{backend = "metal"} is a float32 Apple-silicon route. It
+uses one operation-split implementation rather than selecting a complete
+CPU or Metal estimator from dataset dimensions. CPU code handles
+preprocessing, QR and reduced decompositions, sequential orthogonalization,
+deflation bookkeeping, LDA, and coefficient assembly. Persistent Metal
+workspaces handle fitting products involving the training sample matrix,
+including
+explicit cross-covariance formation, fused score/loading products, and
+randomized range-finder products for an implicit cross-covariance operator.
+CPU code retains the smaller cross-covariance and component-state products.
+Prediction uses the compact host
+factors. Its CPU/Metal assignment is independent of dataset shape. Apple
+GPUs do not provide the native float64 arithmetic required here.
 
 Float64 remains the baseline precision. Raw float32 matrices require about
 half the input storage, but paired tests show route-dependent runtime,

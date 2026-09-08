@@ -612,8 +612,11 @@ test_that("pls supports float32 Metal backend when available", {
   )
   expect_s3_class(fit, "fastPLS")
   expect_equal(attr(fit, "fastPLS_internal")$precision, "float32")
-  expect_equal(attr(fit, "fastPLS_internal")$predict_backend, "metal_resident")
-  expect_equal(attr(fit, "fastPLS_internal")$execution_route, "resident Metal")
+  expect_equal(attr(fit, "fastPLS_internal")$predict_backend, "float32_cpp")
+  expect_equal(
+    attr(fit, "fastPLS_internal")$execution_route,
+    "CPU/Metal hybrid (operation split)"
+  )
   expect_true(inherits(fit$Ypred[[1L]], "float32"))
   expect_named(fit$Q2Y, c("ncomp=1", "ncomp=2"))
 })
@@ -796,7 +799,7 @@ test_that("float32 kernel PLS-LDA supports linear, RBF, and polynomial kernels",
   }
 })
 
-test_that("Metal runs native OPLS and nonlinear kernel PLS routes", {
+test_that("Metal operation split supports OPLS and nonlinear kernel PLS", {
   skip_if_not_installed("float")
   skip_native_float32_on_windows()
   skip_if_not(has_metal(), "Metal backend not available")
@@ -811,7 +814,10 @@ test_that("Metal runs native OPLS and nonlinear kernel PLS routes", {
       X, y, ncomp = 2,
       backend = "metal", return_variance = FALSE
     ), arguments))
-    expect_identical(fit$diagnostics$residency$route, "resident metal")
+    expect_identical(
+      fit$diagnostics$residency$route,
+      "CPU/Metal hybrid (operation split)"
+    )
   }
 })
 

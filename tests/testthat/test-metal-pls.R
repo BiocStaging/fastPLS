@@ -29,11 +29,11 @@ test_that("Metal PLS backend fits core method families when available", {
     expect_true(inherits(fit, "fastPLS"))
     expect_identical(
       attr(fit, "fastPLS_internal")$predict_backend,
-      "metal_resident"
+      "float32_cpp"
     )
     expect_identical(
       attr(fit, "fastPLS_internal")$execution_route,
-      "resident Metal"
+      "CPU/Metal hybrid (operation split)"
     )
     expect_true(all(is.finite(fit$Q2Y)))
   }
@@ -46,8 +46,14 @@ test_that("Metal PLS backend fits core method families when available", {
     X32, y32, ncomp = 1, method = "kernelpls", kernel = "rbf",
     backend = "metal", return_variance = FALSE
   )
-  expect_identical(fit_opls$diagnostics$residency$route, "resident metal")
-  expect_identical(fit_kernel$diagnostics$residency$route, "resident metal")
+  expect_identical(
+    fit_opls$diagnostics$residency$route,
+    "CPU/Metal hybrid (operation split)"
+  )
+  expect_identical(
+    fit_kernel$diagnostics$residency$route,
+    "CPU/Metal hybrid (operation split)"
+  )
 
   fit_cls <- fastPLS::pls(
     X32[-test, , drop = FALSE],
@@ -63,9 +69,9 @@ test_that("Metal PLS backend fits core method families when available", {
   expect_true(inherits(fit_cls, "fastPLS"))
   expect_identical(
     attr(fit_cls, "fastPLS_internal")$execution_route,
-    "resident Metal"
+    "CPU/Metal hybrid (operation split)"
   )
-  expect_identical(fit_cls$diagnostics$residency$lda, "not_requested")
+  expect_identical(fit_cls$diagnostics$residency$prediction, "cpu")
   expect_true(is.data.frame(fit_cls$Ypred))
 })
 

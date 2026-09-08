@@ -1,4 +1,4 @@
-test_that("standalone Metal rSVD rejects a hybrid execution path", {
+test_that("standalone Metal rSVD rejects operation-split execution", {
   skip_if_not(fastPLS::has_metal(), "Metal backend is not available")
 
   set.seed(42)

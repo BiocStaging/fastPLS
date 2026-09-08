@@ -193,15 +193,20 @@
         gamma,
         as.integer(config$degree %||% 3L),
         as.numeric(config$coef0 %||% 1))
-    fields <- cuda_resident_export_cpp(
-        state,
-        config$return_loadings,
-        config$return_variance,
-        config$fit
-    )
+    cv_internal <- isTRUE(config$cv_internal)
+    fields <- if (cv_internal) list() else {
+        cuda_resident_export_cpp(
+            state,
+            config$return_loadings,
+            config$return_variance,
+            config$fit
+        )
+    }
     ss <- fields$predictor_ss
     fields$predictor_ss <- NULL
-    if (context$float32) fields <- lapply(fields, .float32_from_bits)
+    if (context$float32 && length(fields)) {
+        fields <- lapply(fields, .float32_from_bits)
+    }
     model <- c(fields, list(resident_state = state, ncomp = ncomp,
         p = ncol(x), m = q, lev = levels, precision = precision,
         resident_backend = "cuda", gpu_resident = TRUE,
@@ -231,8 +236,11 @@
         implicit_crosscovariance = isTRUE(state$implicit_crosscovariance),
         predictor_crossprod_cache = isTRUE(state$predictor_crossprod_cache)
     )
+    if (cv_internal) model$cv_internal <- TRUE
     model$execution_route <- "resident CUDA"
-    if (!config$return_loadings) model$P <- matrix(numeric(), 0L, 0L)
+    if (!config$return_loadings && !cv_internal) {
+        model$P <- matrix(numeric(), 0L, 0L)
+    }
     if (!is.null(ss)) {
         ss <- as.vector(.resident_cuda_summary(ss, precision))
         total <- tail(ss, 1L)

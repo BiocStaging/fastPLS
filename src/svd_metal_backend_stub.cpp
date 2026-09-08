@@ -35,6 +35,10 @@ arma::fmat MetalFloatOperator::multiply(const arma::fmat&, bool) {
   throw_metal_unavailable();
 }
 
+void MetalFloatOperator::geometry(const arma::fmat&, arma::fmat&, arma::fmat&) {
+  throw_metal_unavailable();
+}
+
 struct MetalFloatCrossproduct::Impl {};
 MetalFloatCrossproduct::MetalFloatCrossproduct(const arma::fmat&, const arma::fmat&) {
   throw_metal_unavailable();

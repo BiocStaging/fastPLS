@@ -69,10 +69,14 @@ for bundled examples are provided in the dataset help pages and in
   selected PLS core.
 
 The CPU backend uses the BLAS/LAPACK library linked when the package is built.
+macOS builds use Apple Accelerate by default. On Linux and other Unix-like
+systems, configuration automatically uses OpenBLAS when `OPENBLAS_ROOT` points
+to an installation or `pkg-config` can locate `openblas`; otherwise it uses the
+BLAS selected by R.
 Set `options(cores = 4L)` to request four CPU threads. Eligible matrix
 operations can use multiple cores when linked to a multithreaded BLAS,
-for example by installing with `FASTPLS_USE_OPENBLAS=1` and a valid
-`OPENBLAS_ROOT`. SIMPLS deflation remains sequential, so multicore gains depend
+for example OpenBLAS. Set `FASTPLS_USE_OPENBLAS=1` to require OpenBLAS and fail
+configuration when it cannot be found. SIMPLS deflation remains sequential, so multicore gains depend
 on matrix shape. In the controlled one-, two-, and four-thread study, the
 four-thread speed-up ranged from 1.03- to 1.77-fold across the three tested
 matrix regimes; this is not a guarantee that additional threads help every fit.
@@ -231,18 +235,20 @@ coefficient matrix for every requested component count. This primarily reduces
 prediction time and RAM pressure; fitting memory remains governed by the
 selected model family and backend.
 
-Use `backend = "cuda"` or `backend = "metal"` for supported resident PLS
+Use `backend = "cuda"` or `backend = "metal"` for supported accelerated PLS
 runs. Standalone accelerator `fastsvd()` routes are rejected because their
 reduced QR/SVD stage is not fully device-native for every matrix shape.
-Cross-validation constructs folds and assembles metric summaries in R, while
-each supported fold fit, projection, prediction, and LDA calculation uses the
-resident accelerator model state.
+Cross-validation constructs folds and assembles metric summaries in R. CUDA
+executes supported fold fitting and prediction on device. Metal applies the
+same fixed operation-level CPU/Metal split used by ordinary fitting.
 
-Resident CUDA supports PLS-SVD, SIMPLS, OPLS, and linear, RBF, or polynomial
-kernel PLS in float32 and float64. Resident Metal supports the same families in
-float32. OPLS filtering and nonlinear Gram construction and centering remain on
-the requested GPU; unsafe nonlinear Gram sizes produce an error rather than a
-CPU fallback.
+CUDA supports PLS-SVD, SIMPLS, OPLS, and linear, RBF, or polynomial kernel PLS
+in float32 and float64. Metal supports the same families in float32 by assigning
+fitting products involving the training sample matrix to persistent Metal
+workspaces and reduced
+factorizations, sequential PLS updates, LDA, and prediction to the CPU. This
+assignment is independent of dataset shape. Unsafe nonlinear Gram sizes produce
+an error rather than a CPU fallback.
 
 ## Current API
 

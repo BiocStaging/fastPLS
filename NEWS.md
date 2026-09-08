@@ -1,3 +1,34 @@
+# fastPLS 0.99.43
+
+* Accelerated the float32 CPU sample-matrix products used by SIMPLS and
+  PLS-SVD through an explicitly configured OpenBLAS runtime on supported
+  Linux installations. The native kernels honor `OPENBLAS_NUM_THREADS`, while
+  macOS continues to use Apple's optimized Accelerate framework.
+
+* Added shape-appropriate reuse of predictor cross-products, batched
+  score/loading geometry, deferred training-score materialization, and
+  sufficient-statistics reuse in eligible cross-validation folds. These
+  changes preserve requested component and fold semantics while reducing
+  repeated dense products and allocations.
+
+* Extended numerical route diagnostics and platform tests for the optimized
+  CPU, CUDA, and Metal paths.
+
+# fastPLS 0.99.42
+
+* Replaced the fully resident public Metal PLS route with the faster fixed
+  CPU/Metal operation split. `backend = "metal"` now retains preprocessing,
+  reduced decompositions, sequential component updates, LDA and prediction on
+  CPU while persistent Metal workspaces execute all sample-matrix products:
+  explicit cross-covariance formation, fused score/loading geometry, and
+  randomized range-finder products for implicit cross-covariance operators.
+  The public `metal_hybrid` name was removed, and the assignment never changes
+  with dataset shape.
+
+* Added route validation, grouped cross-validation coverage, and documentation
+  for hybrid PLS-SVD, SIMPLS, OPLS, and kernel-PLS fitting. Standalone
+  `fastsvd()` remains restricted to its existing backends.
+
 # fastPLS 0.99.39
 
 * Compacted fold-specific active labels before LDA fitting and mapped

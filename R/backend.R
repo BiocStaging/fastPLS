@@ -7,10 +7,22 @@
 #' For CPU execution, `options(cores = n)` requests `n` threads from the
 #' linked BLAS and OpenMP runtimes. Matrix operations can use those threads
 #' when the installed numerical library supports runtime thread control;
-#' sequential PLS deflation steps remain serial.
+#' sequential PLS deflation steps remain serial. macOS builds use Apple
+#' Accelerate by default. On other Unix-like systems, configuration
+#' automatically selects OpenBLAS when it is found through `OPENBLAS_ROOT` or
+#' `pkg-config`; otherwise fastPLS uses the BLAS selected by R.
 #'
-#' @param backend Optional backend: `"cpu"`, `"cuda"`, or
-#'   `"metal"`. Setting or retrieving the session backend rejects an
+#' @param backend Optional backend: `"cpu"`, `"cuda"`, or `"metal"`. The
+#'   Metal route is a float32 Apple-silicon PLS route
+#'   with a fixed mathematical split. CPU code performs preprocessing, reduced
+#'   decompositions and sequential component updates. Persistent Metal
+#'   workspaces perform fitting products involving the training sample matrix,
+#'   including
+#'   explicit cross-covariance formation, fused score/loading products, and
+#'   randomized range-finder products for implicit cross-covariance operators.
+#'   Smaller cross-covariance and component-state products, LDA, and prediction
+#'   remain on the CPU. This assignment does not depend on dataset shape.
+#'   Setting or retrieving the session backend rejects an
 #'   unavailable accelerator immediately; fastPLS does not silently substitute
 #'   the CPU backend.
 #' @return The configured, available backend. Setting returns the previous
@@ -44,9 +56,10 @@ fastPLS_backend <- function(backend = NULL) {
             !backend %in% c("cpu", "cuda", "metal")
     ) {
         stop(
-            "`",
-            label,
-            "` must be one of \"cpu\", \"cuda\", or \"metal\".",
+            sprintf(
+                "`%s` must be one of \"cpu\", \"cuda\", or \"metal\".",
+                label
+            ),
             call. = FALSE
         )
     }

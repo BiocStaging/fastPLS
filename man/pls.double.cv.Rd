@@ -51,7 +51,12 @@ replicate stay together in training or test data. The default
 \code{kernelpls}. Multiple values are tuned in the inner loop.}
 
 \item{backend}{Implementation backend: \code{cpu}, \code{cuda}, or
-\code{metal}. Multiple values are tuned in the inner loop. When omitted,
+\code{metal}. Multiple values are tuned in the inner loop. Metal requires
+float32 input and Apple Metal. Fold orchestration remains on the host;
+every fold uses the same fixed operation split as \code{pls()}, with
+training-sample products on Metal and reduced factorizations, sequential
+component updates, LDA, and prediction on the CPU. When
+omitted,
 \code{options(backend = ...)} defines the session default; \code{options(cores = n)}
 controls the CPU thread request. Every requested backend must be available;
 unavailable accelerator entries raise an error instead of using CPU.}

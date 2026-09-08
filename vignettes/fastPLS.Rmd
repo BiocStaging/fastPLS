@@ -174,7 +174,10 @@ The `backend` argument selects where the main numerical work is performed.
 uses native rSVD. It is usually best for small and moderate
 datasets, low-dimensional problems, and machines without GPU support.
 The CPU kernels use the BLAS/LAPACK implementation selected when fastPLS is
-built. Linking against a multithreaded BLAS, such as OpenBLAS, enables its
+built. macOS builds use Apple Accelerate by default. On Linux and other
+Unix-like systems, configuration automatically selects OpenBLAS when it can be
+located through `OPENBLAS_ROOT` or `pkg-config`; otherwise the package uses the
+BLAS selected by R. Linking against a multithreaded BLAS enables eligible
 matrix operations to use multiple CPU cores. For example,
 `options(backend = "cpu", cores = 4L)` selects CPU execution and requests four
 threads from the linked BLAS/OpenMP runtime. An explicit `backend` argument
@@ -198,17 +201,21 @@ matrix work offsets transfer and kernel-launch overhead. Nonlinear kernels are
 also subject to an explicit device-memory guard because their Gram matrix uses
 quadratic storage in the training sample count.
 
-`backend = "metal"` provides an Apple Silicon float32 backend for PLS-SVD,
-SIMPLS, OPLS, and kernel PLS. These routes use Apple Metal Performance Shaders
-and custom kernels for preprocessing, cross-products, randomized direction
-extraction, sequential component updates, OPLS filtering, nonlinear
-Gram-matrix construction and centering, prediction, and LDA. Metal is a
-portability route for Apple hardware; CPU
-can remain faster for small problems because it avoids accelerator dispatch
-overhead. After input transfer, these numerical stages are device-resident;
-only returned arrays and R model-object assembly occur on the host. Metal
-accepts float32 input only and never silently converts a
-float64 request to CPU.
+`backend = "metal"` provides a float32 route for PLS-SVD, SIMPLS, OPLS, and
+kernel PLS on Apple silicon unified-memory systems. It always enters the same
+operation-split
+algorithm rather than selecting a complete CPU or Metal estimator from the
+dataset dimensions. The CPU performs preprocessing, QR and reduced
+decompositions, sequential orthogonalization, deflation bookkeeping, model
+assembly, LDA, and prediction. Persistent Metal workspaces perform fitting
+products involving the training sample matrix. These include explicit
+cross-covariance formation,
+fused score/loading products, and randomized range-finder products when the
+cross-covariance is represented implicitly. The smaller cross-covariance and
+component-state operations remain on the CPU. This mathematical assignment is
+fixed and does not switch according to dataset dimensions.
+The route requires Metal support and float32 input and never silently converts
+a float64 request to CPU.
 
 ## Backend and CPU Configuration
 
@@ -224,7 +231,8 @@ fit <- pls(X, y, method = "simpls")    # CUDA session default
 fit.cpu <- pls(X, y, backend = "cpu")  # explicit override
 ```
 
-Batch jobs may use `FASTPLS_BACKEND=cpu|cuda|metal`. Precedence is an explicit
+Batch jobs may use
+`FASTPLS_BACKEND=cpu|cuda|metal`. Precedence is an explicit
 function argument, `options(backend = ...)`, `FASTPLS_BACKEND`, and finally
 CPU. For CPU execution, `options(cores = 4L)` requests four threads from the
 linked BLAS/OpenMP runtime. Eligible matrix operations may use these threads,
@@ -243,10 +251,10 @@ residency. `Tested` denotes a route covered by fixed-seed numerical tests.
 `Approximate` identifies rSVD execution. `Native` means that preprocessing,
 cross-products, decomposition, component updates, prediction, and an optional
 LDA head execute on the selected device after input transfer. `Unavailable`
-combinations stop rather than entering a hybrid route or silently falling back.
+combinations stop; they do not silently fall back to CPU.
 
-The table uses T for tested, A for approximate, N for device-native, and U for
-unavailable.
+The table uses T for tested, A for approximate, N for device-native, H for an
+explicit host/device hybrid, and U for unavailable.
 
 | Model or operation | CPU | CUDA | Metal |
 |---|---:|---:|---:|
@@ -255,18 +263,18 @@ unavailable.
 | OPLS, float64 | T/A | T/A/N | U |
 | Linear kernel PLS, float64 | T/A | T/A/N | U |
 | Nonlinear kernel PLS, float64 | T/A | T/A/N | U |
-| PLS-SVD, float32 | T/A | T/A/N | T/A/N |
-| SIMPLS, float32 | T/A | T/A/N | T/A/N |
-| OPLS, float32 | T/A | T/A/N | T/A/N |
-| Linear kernel PLS, float32 | T/A | T/A/N | T/A/N |
-| Nonlinear kernel PLS, float32 | T/A | T/A/N | T/A/N |
-| Argmax PLS-DA | T | T/N | T/N |
-| Latent-space LDA | T | T/N | T/N |
+| PLS-SVD, float32 | T/A | T/A/N | T/A/H |
+| SIMPLS, float32 | T/A | T/A/N | T/A/H |
+| OPLS, float32 | T/A | T/A/N | T/A/H |
+| Linear kernel PLS, float32 | T/A | T/A/N | T/A/H |
+| Nonlinear kernel PLS, float32 | T/A | T/A/N | T/A/H |
+| Argmax PLS-DA | T | T/N | T/H |
+| Latent-space LDA | T | T/N | T/H |
 
 Float32 support is route and platform dependent, as described in the Float32
-Input section. CUDA and Metal accept only routes whose complete numerical model
-path is device-native. Metal float64 requests stop because the hardware does
-not provide native double-precision arithmetic. Nonlinear kernel workloads that
+Input section. CUDA uses a device-native route, whereas Metal uses the fixed
+CPU/Metal operation split. Metal float64 requests stop because the hardware
+does not provide native double-precision arithmetic. Nonlinear kernel workloads that
 exceed the guarded device-memory budget stop before allocation and never fall
 back to another method or backend.
 
@@ -688,10 +696,11 @@ fit_reg$Q2Y
 
 `pls()` also accepts predictor and response matrices from the `float` package.
 Supplying a `float::float32` object requests single-precision execution. CUDA
-and Metal keep PLS-SVD, SIMPLS, OPLS, nonlinear kernel construction, prediction,
-and LDA on the selected GPU. Metal accepts float32 only; CUDA supports float32
-and float64. Nonlinear kernel PLS requires an explicit `n` by `n` Gram matrix,
-so the package checks the estimated live device storage before fitting.
+keeps PLS-SVD, SIMPLS, OPLS, nonlinear kernel construction, prediction, and LDA
+on the selected GPU. Metal accepts float32 only and uses the fixed CPU/Metal
+operation split described above; CUDA supports float32 and float64. Nonlinear
+kernel PLS requires an explicit `n` by `n` Gram matrix, so the package checks
+the estimated live device or unified-memory storage before fitting.
 Extreme-response and nonlinear-kernel routes should be checked against float64
 when the scientific conclusion is sensitive to small numerical differences.
 
@@ -1302,13 +1311,15 @@ if (has_cuda()) {
 
 ```{r chunk-040, eval = FALSE}
 if (has_metal()) {
+    Xtrain_metal <- float::fl(as.matrix(Xtrain))
+    Xtest_metal <- float::fl(as.matrix(Xtest))
     fit_metal <- pls(
-    Xtrain,
-    Ytrain_cls,
-    Xtest,
-    Ytest_cls,
-    ncomp = 1:2,
-    backend = "metal"
+        Xtrain_metal,
+        Ytrain_cls,
+        Xtest_metal,
+        Ytest_cls,
+        ncomp = 1:2,
+        backend = "metal"
     )
 }
 ```
@@ -1352,22 +1363,24 @@ directly through `...`; in stand-alone SVD calls they are supplied directly to
 
 Standalone accelerator `fastsvd()` routes are unavailable because their
 reduced QR and SVD stages are not fully device-native for every matrix shape.
-The function raises an error rather than returning a hybrid result. CUDA and
-Metal acceleration remain available through the resident PLS implementations
-described below.
+The function raises an error rather than returning a partial result. CUDA
+acceleration remains device resident within PLS, while Metal acceleration uses
+the fixed CPU/Metal operation split described below.
 
 The PLS Metal backend, `pls(..., backend = "metal")`, supports float32 PLS-SVD,
-SIMPLS, OPLS, and kernel PLS with Metal Performance Shaders and custom Metal
-kernels. Preprocessing, component extraction, sequential updates, OPLS
-filtering, nonlinear Gram construction and centering, compact prediction,
-response scoring, and latent-space LDA remain on the GPU. Metal does not
-provide the float64 arithmetic required by these implementations, so ordinary
-R double matrices produce an explicit error rather than silently falling back
-to the CPU; use `float::fl()` to request Metal float32 execution. On systems
-with the Xcode Metal compiler, package installation compiles and embeds the
-custom shader library. Repeated fits in one R session then reuse initialized
-device and pipeline state; an isolated first call still includes that setup
-cost and can be slower than the same calculation on the CPU.
+SIMPLS, OPLS, and kernel PLS with Metal Performance Shaders. It returns
+host-accessible model factors and always uses a
+fixed mathematical division: Metal performs fitting products involving the
+training sample matrix, including explicit cross-covariance formation, fused
+score/loading products, and implicit randomized range-finder products; CPU code performs the
+reduced decomposition, sequential PLS algebra, LDA, prediction, and model
+assembly. Dataset dimensions never select a complete CPU or Metal route. The
+executed path, storage decision, and randomized controls are reported in
+`diagnostics$metal_operation_split`. Ordinary R double matrices produce an
+explicit error rather than silently falling back to the CPU; use `float::fl()`
+to request Metal float32 execution. Repeated fits in one R session reuse
+initialized device and pipeline state, whereas an isolated first call includes
+that setup cost.
 
 For CUDA builds, GPU execution is selected with `backend = "cuda"`, so the
 numerical fitting and prediction stages are performed by resident GPU-native
@@ -1384,10 +1397,10 @@ In ordinary use, leave `xprod = NULL`; fastPLS then chooses the matrix-free
 route automatically only when the cross-product is large enough to justify it.
 
 For `pls.single.cv()` and `pls.double.cv()`, fold construction, loop control,
-and final metric assembly remain host-side. Each supported fold model,
-projection, prediction, and LDA calculation is executed through the resident
-CUDA or Metal route; unsupported accelerator combinations stop rather than
-falling back to a CPU fit.
+and final metric assembly remain host-side. Each supported fold uses the
+selected backend: CUDA executes the fold model and prediction on device,
+whereas Metal applies the same fixed CPU/Metal operation split used by `pls()`.
+Unsupported accelerator combinations stop rather than falling back to a CPU fit.
 
 ### PLS-SVD
 
@@ -1475,9 +1488,10 @@ components is controlled by `north`. The filtering step estimates orthogonal
 scores and loadings, subtracts the corresponding variation from `X`, and stores
 the orthogonal filter so the same transformation is applied at prediction time.
 With float32 input, stored OPLS matrices use single precision. CUDA performs
-OPLS in float32 or float64, while Metal performs it in float32. Orthogonal
-filtering, the predictive SIMPLS core, and application of the stored filter to
-new observations remain on the selected GPU.
+OPLS in float32 or float64, while Metal performs it in float32. CUDA keeps
+orthogonal filtering, the predictive core, and prediction on device. Metal
+uses GPU sample-matrix products and CPU orthogonal filtering, reduced
+factorizations, sequential PLS updates, and prediction.
 Users select OPLS with `method = "opls"`; the lower-level implementation details
 are handled internally.
 
@@ -1489,8 +1503,10 @@ inner PLS model. The supported kernels are `"linear"`, `"rbf"`, and `"poly"`.
 For nonlinear kernels, the training kernel matrix is centered and the PLS model
 is fitted in kernel space. For the linear kernel, fastPLS avoids unnecessary
 kernel materialization and uses the ordinary linear PLS path. For RBF and
-polynomial kernels, CUDA and Metal construct, center, and retain the Gram
-representation on device through fitting and prediction. Because this
+polynomial kernels, CUDA constructs, centers, and retains the Gram
+representation on device through fitting and prediction. Metal evaluates Gram
+and sample-matrix products through Metal and completes reduced factorizations,
+sequential updates, and prediction on the CPU. Because this
 representation requires quadratic storage in the number of training
 observations, an explicit memory guard rejects unsafe workloads before device
 allocation.
@@ -1519,10 +1535,11 @@ the implementation tries `lambda = rho * s` for `rho = 1e-8, 1e-6, 1e-5,
 1e-4, 1e-3, 1e-2`, increasing the value only when Cholesky fails. Prediction
 uses the standard discriminant
 `t^T w_c - 0.5 mu_c^T w_c + log(n_c / n)`. Float32 inputs keep LDA moments,
-factorization, coefficients, and prediction buffers in float32 on the native
-CPU, CUDA, and Metal paths. CUDA and Metal retain the score-space covariance,
-Cholesky factors, triangular-solve workspaces, coefficients, and prediction
-buffers on the selected device across component prefixes.
+factorization, coefficients, and prediction buffers in float32. CUDA retains
+the score-space covariance, Cholesky factors, triangular-solve workspaces,
+coefficients, and prediction buffers on device across component prefixes. The
+Metal operation split performs LDA on the CPU using the host-accessible latent
+scores returned by the fitting route.
 
 
 ## Method References

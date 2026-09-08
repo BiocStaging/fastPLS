@@ -34,6 +34,9 @@
 \item{proj}{Logical; return projected \code{Ttest} when \code{TRUE}.}
 
 \item{backend}{Prediction backend: \code{"cpu"}, \code{"cuda"}, or \code{"metal"}.
+Operation-split Metal models predict on CPU because their retained
+matrices are host-accessible; Metal is used for fitting sample-matrix
+products.
 When omitted, the session backend setting is used. \code{"auto"} retains the
 backend stored in the fitted model. An unavailable CUDA or Metal selection
 raises an error; prediction is never silently moved to CPU.}

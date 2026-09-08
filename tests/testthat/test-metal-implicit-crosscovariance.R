@@ -1,4 +1,4 @@
-test_that("Metal uses an implicit cross-covariance for large regression shapes", {
+test_that("Metal keeps fixed operation ownership for large regression shapes", {
     skip_if_not(has_metal(), "Metal backend is not available")
 
     set.seed(812)
@@ -15,11 +15,8 @@ test_that("Metal uses an implicit cross-covariance for large regression shapes",
             ncomp = c(2L, 5L), method = method, backend = "metal",
             fit = TRUE, proj = TRUE, return_variance = FALSE, seed = 31
         )
-        controls <- attr(fit, "fastPLS_internal")$resident_controls
-
-        expect_true(isTRUE(controls$implicit_crosscovariance), info = method)
-        expect_false(isTRUE(controls$host_assisted_components), info = method)
-        expect_identical(fit$diagnostics$residency$component_updates, "metal")
+        expect_identical(fit$diagnostics$residency$component_updates, "cpu")
+        expect_match(fit$diagnostics$residency$cross_products, "Metal")
         expect_equal(dim(fit$Ttrain), c(n, 5L), info = method)
         expect_true(all(is.finite(fit$R2Y)), info = method)
 
@@ -33,7 +30,7 @@ test_that("Metal uses an implicit cross-covariance for large regression shapes",
     }
 })
 
-test_that("Metal keeps small explicit cross-covariance fits resident", {
+test_that("Metal keeps its fixed split for small explicit cross-covariance", {
     skip_if_not(has_metal(), "Metal backend is not available")
 
     set.seed(813)
@@ -46,9 +43,11 @@ test_that("Metal keeps small explicit cross-covariance fits resident", {
     )
 
     internal <- attr(fit, "fastPLS_internal")
-    expect_false(is.null(internal$resident_state))
-    expect_false(isTRUE(internal$resident_controls$implicit_crosscovariance))
-    expect_false(isTRUE(internal$resident_controls$host_assisted_components))
-    expect_identical(internal$predict_backend, "metal_resident")
-    expect_identical(fit$diagnostics$residency$route, "resident metal")
+    expect_null(internal$resident_state)
+    expect_identical(internal$predict_backend, "float32_cpp")
+    expect_identical(
+        fit$diagnostics$residency$route,
+        "CPU/Metal hybrid (operation split)"
+    )
+    expect_match(fit$diagnostics$residency$cross_products, "Metal")
 })

@@ -1,8 +1,8 @@
 #!/usr/bin/env sh
 set -eu
 
-use_openblas="${FASTPLS_USE_OPENBLAS:-0}"
-openblas_root="${OPENBLAS_ROOT:-/opt/homebrew/opt/openblas}"
+use_openblas="${FASTPLS_USE_OPENBLAS:-auto}"
+openblas_root="${OPENBLAS_ROOT:-}"
 use_accelerate="${FASTPLS_USE_ACCELERATE:-auto}"
 use_cuda="${FASTPLS_USE_CUDA:-auto}"
 require_cuda="${FASTPLS_REQUIRE_CUDA:-0}"
@@ -15,6 +15,32 @@ pkg_libs='$(LAPACK_LIBS) $(BLAS_LIBS)'
 cuda_objects=""
 metal_objects=" svd_metal_backend_stub.o metal_resident_backend_stub.o"
 metal_mm_rule=""
+
+find_openblas_root() {
+  if [ -n "${openblas_root}" ]; then
+    printf "%s" "${openblas_root}"
+    return
+  fi
+  if command -v pkg-config >/dev/null 2>&1 && pkg-config --exists openblas; then
+    pkg-config --variable=prefix openblas
+    return
+  fi
+  if [ "$(uname -s)" = "Darwin" ] &&
+     [ -d "/opt/homebrew/opt/openblas" ]; then
+    printf "%s" "/opt/homebrew/opt/openblas"
+  fi
+}
+
+if [ "${use_openblas}" = "auto" ] && [ "$(uname -s)" != "Darwin" ]; then
+  openblas_root="$(find_openblas_root || true)"
+  if [ -n "${openblas_root}" ]; then
+    use_openblas="1"
+  else
+    use_openblas="0"
+  fi
+elif [ "${use_openblas}" = "1" ]; then
+  openblas_root="$(find_openblas_root || true)"
+fi
 
 if [ "$(uname -s)" = "Darwin" ] &&
    [ "${use_openblas}" != "1" ] &&
@@ -30,8 +56,13 @@ elif [ "${use_openblas}" = "1" ]; then
     exit 1
   fi
   echo "fastPLS configure: using OpenBLAS from ${openblas_root}; thread count is controlled by OpenBLAS"
-  pkg_cppflags="-I${openblas_root}/include"
-  pkg_libs="-L${openblas_root}/lib -lopenblas"
+  pkg_cppflags="-DFASTPLS_USE_OPENBLAS -I${openblas_root}/include"
+  if [ "$(uname -s)" = "Darwin" ]; then
+    openblas_dl_lib=""
+  else
+    openblas_dl_lib="-ldl"
+  fi
+  pkg_libs="-L${openblas_root}/lib -Wl,-rpath,${openblas_root}/lib -lopenblas ${openblas_dl_lib}"
 fi
 
 find_cuda_root() {

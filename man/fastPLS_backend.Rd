@@ -7,8 +7,17 @@
 fastPLS_backend(backend = NULL)
 }
 \arguments{
-\item{backend}{Optional backend: \code{"cpu"}, \code{"cuda"}, or
-\code{"metal"}. Setting or retrieving the session backend rejects an
+\item{backend}{Optional backend: \code{"cpu"}, \code{"cuda"}, or \code{"metal"}. The
+Metal route is a float32 Apple-silicon PLS route
+with a fixed mathematical split. CPU code performs preprocessing, reduced
+decompositions and sequential component updates. Persistent Metal
+workspaces perform fitting products involving the training sample matrix,
+including
+explicit cross-covariance formation, fused score/loading products, and
+randomized range-finder products for implicit cross-covariance operators.
+Smaller cross-covariance and component-state products, LDA, and prediction
+remain on the CPU. This assignment does not depend on dataset shape.
+Setting or retrieving the session backend rejects an
 unavailable accelerator immediately; fastPLS does not silently substitute
 the CPU backend.}
 }
@@ -25,7 +34,10 @@ default.
 For CPU execution, \code{options(cores = n)} requests \code{n} threads from the
 linked BLAS and OpenMP runtimes. Matrix operations can use those threads
 when the installed numerical library supports runtime thread control;
-sequential PLS deflation steps remain serial.
+sequential PLS deflation steps remain serial. macOS builds use Apple
+Accelerate by default. On other Unix-like systems, configuration
+automatically selects OpenBLAS when it is found through \code{OPENBLAS_ROOT} or
+\code{pkg-config}; otherwise fastPLS uses the BLAS selected by R.
 }
 \examples{
 old_options <- options(backend = NULL)

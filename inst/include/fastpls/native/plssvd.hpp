@@ -27,23 +27,57 @@ PlssvdModel<Scalar> fit_plssvd_with_solver(
     const arma::Mat<Scalar>& Xinput, const arma::Mat<Scalar>& Yinput,
     arma::ivec components, const PlssvdOptions& options, Solver&& solver,
     arma::Mat<Scalar>* owned_X = nullptr,
-    const arma::uvec* compact_labels = nullptr, int compact_classes = 0) {
+    const arma::uvec* compact_labels = nullptr, int compact_classes = 0,
+    const arma::Mat<Scalar>* precomputed_crosscov = nullptr,
+    const arma::Mat<Scalar>* precomputed_crossprod = nullptr,
+    const arma::Mat<Scalar>* precomputed_x_mean = nullptr,
+    const arma::Mat<Scalar>* precomputed_x_scale = nullptr,
+    const arma::Mat<Scalar>* precomputed_y_mean = nullptr,
+    int precomputed_training_rows = 0) {
   using namespace arma;
   const bool label_response = compact_labels != nullptr;
-  if (Xinput.n_rows < 2 || Xinput.n_cols < 1 ||
+  const bool sufficient_statistics = precomputed_training_rows > 0;
+  const int effective_rows = sufficient_statistics ?
+    precomputed_training_rows : static_cast<int>(Xinput.n_rows);
+  if (effective_rows < 2 || Xinput.n_cols < 1 ||
       (!label_response && (Yinput.n_cols < 1 || Xinput.n_rows != Yinput.n_rows)) ||
       (label_response && (compact_classes < 2 ||
                           compact_labels->n_elem != Xinput.n_rows))) {
     throw std::invalid_argument("PLS-SVD requires matching, nonempty training matrices");
   }
+  if (sufficient_statistics &&
+      (!precomputed_crosscov || !precomputed_crossprod ||
+       !precomputed_x_mean || !precomputed_x_scale || !precomputed_y_mean ||
+       options.fitted || !options.cache_score_gram)) {
+    throw std::invalid_argument(
+      "PLS-SVD sufficient-statistics fitting requires complete fold moments"
+    );
+  }
   if (owned_X && (owned_X->n_rows != Xinput.n_rows ||
                   owned_X->n_cols != Xinput.n_cols)) {
     throw std::invalid_argument("PLS-SVD owned predictor workspace has invalid dimensions");
   }
+  if (precomputed_crosscov &&
+      (precomputed_crosscov->n_rows != Xinput.n_cols ||
+       precomputed_crosscov->n_cols !=
+         static_cast<arma::uword>(label_response ? compact_classes : Yinput.n_cols))) {
+    throw std::invalid_argument("PLS-SVD precomputed cross-covariance has invalid dimensions");
+  }
+  if (sufficient_statistics &&
+      (precomputed_crossprod->n_rows != Xinput.n_cols ||
+       precomputed_crossprod->n_cols != Xinput.n_cols ||
+       precomputed_x_mean->n_rows != 1 ||
+       precomputed_x_mean->n_cols != Xinput.n_cols ||
+       precomputed_x_scale->n_rows != 1 ||
+       precomputed_x_scale->n_cols != Xinput.n_cols ||
+       precomputed_y_mean->n_rows != 1 ||
+       precomputed_y_mean->n_cols != precomputed_crosscov->n_cols)) {
+    throw std::invalid_argument("PLS-SVD sufficient statistics have invalid dimensions");
+  }
   if (components.is_empty()) {
     throw std::invalid_argument("ncomp must contain at least one value");
   }
-  const int n = Xinput.n_rows, p = Xinput.n_cols;
+  const int n = effective_rows, p = Xinput.n_cols;
   const int m = label_response ? compact_classes : Yinput.n_cols;
   const int rank_bound = std::min({n, p, m});
   for (auto& count : components) count = std::max(1, std::min(int(count), rank_bound));
@@ -56,21 +90,26 @@ PlssvdModel<Scalar> fit_plssvd_with_solver(
   arma::Mat<Scalar> Xwork;
   arma::Mat<Scalar>& scaled_X = owned_X == nullptr ? Xwork : *owned_X;
   const arma::Mat<Scalar>* Xptr = &Xinput;
-  if (options.scaling < 3) {
+  if (sufficient_statistics) {
+    model.x_mean = *precomputed_x_mean;
+    model.x_scale = *precomputed_x_scale;
+  } else if (options.scaling < 3) {
     if (owned_X == nullptr) scaled_X = Xinput;
     model.x_mean = mean(scaled_X, 0);
     scaled_X.each_row() -= model.x_mean;
     Xptr = &scaled_X;
   }
-  if (options.scaling == 2) {
+  if (!sufficient_statistics && options.scaling == 2) {
     model.x_scale = column_standard_deviation(scaled_X);
     scaled_X.each_row() /= model.x_scale;
   }
   const arma::Mat<Scalar>& X = *Xptr;
   arma::uvec one_hot_labels;
   const bool one_hot_response = label_response ||
-    extract_one_hot_labels(Yinput, one_hot_labels);
-  if (label_response) {
+    (!sufficient_statistics && extract_one_hot_labels(Yinput, one_hot_labels));
+  if (sufficient_statistics) {
+    model.y_mean = *precomputed_y_mean;
+  } else if (label_response) {
     one_hot_labels = *compact_labels;
     model.y_mean.zeros(1, m);
     for (arma::uword row = 0; row < one_hot_labels.n_elem; ++row) {
@@ -78,9 +117,6 @@ PlssvdModel<Scalar> fit_plssvd_with_solver(
         throw std::invalid_argument("PLS-SVD compact class label is out of range");
       }
       model.y_mean(one_hot_labels(row)) += Scalar(1);
-    }
-    if (arma::accu(model.y_mean <= Scalar(0)) > 0) {
-      throw std::invalid_argument("PLS-SVD compact labels contain an empty class");
     }
     model.y_mean /= static_cast<Scalar>(n);
   } else {
@@ -94,8 +130,9 @@ PlssvdModel<Scalar> fit_plssvd_with_solver(
     Y = Yinput;
     Y.each_row() -= model.y_mean;
   }
-  Mat<Scalar> S = one_hot_response ?
-    dummy_crossprod<Scalar>(X, one_hot_labels, -model.y_mean) : X.t() * Y;
+  Mat<Scalar> S = precomputed_crosscov ? *precomputed_crosscov :
+    (one_hot_response ?
+      dummy_crossprod<Scalar>(X, one_hot_labels, -model.y_mean) : X.t() * Y);
   auto svd = solver(S, retained, rank_bound);
   Mat<Scalar> U = std::move(svd.U);
   Col<Scalar> singular = std::move(svd.s);
@@ -114,14 +151,21 @@ PlssvdModel<Scalar> fit_plssvd_with_solver(
   if (V.n_cols > arma::uword(retained)) V = V.cols(0, retained - 1);
   model.R = std::move(U);
   model.Q = std::move(V);
-  model.scores = X * model.R;
+  if (!sufficient_statistics) model.scores = X * model.R;
   Mat<Scalar> full_gram;
-  if (options.cache_score_gram) full_gram = model.scores.t() * model.scores;
+  if (options.cache_score_gram) {
+    if (sufficient_statistics) {
+      full_gram = model.R.t() * (*precomputed_crossprod) * model.R;
+    } else {
+      full_gram = model.scores.t() * model.scores;
+    }
+  }
   for (int index = 0; index < requested; ++index) {
     const int count = std::min(int(components(index)), retained);
     Mat<Scalar> R = model.R.cols(0, count - 1);
     Mat<Scalar> Q = model.Q.cols(0, count - 1);
-    Mat<Scalar> scores = model.scores.cols(0, count - 1);
+    Mat<Scalar> scores;
+    if (!sufficient_statistics) scores = model.scores.cols(0, count - 1);
     Mat<Scalar> gram, rhs, coeff;
     if (options.cache_score_gram) {
       gram = full_gram.submat(0, 0, count - 1, count - 1);

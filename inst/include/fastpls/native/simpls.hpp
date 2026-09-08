@@ -4,6 +4,7 @@
 #define FASTPLS_NATIVE_SIMPLS_HPP
 #include <fastpls/native/direction.hpp>
 #include <chrono>
+#include <functional>
 #include <vector>
 
 namespace fastpls { namespace native {
@@ -51,9 +52,13 @@ inline int candidate_block_size(int remaining, int p, int q,
   if (classification && q <= 2048) {
     return std::max(1, std::min({maximum, remaining, p, q}));
   }
-  // Sequential deflation changes the operator after every regression
-  // component. Reusing a response-wide block can therefore change the model
-  // materially when q is very large; keep fresh rank-one directions there.
+  const double crosscov_elements =
+    static_cast<double>(std::max(p, 0)) * static_cast<double>(std::max(q, 0));
+  if (!classification && crosscov_elements > 64.0 * 1024.0 * 1024.0) {
+    // A bounded fresh block amortizes the response-wide range calculation;
+    // components are still accepted through sequential SIMPLS updates.
+    return std::max(1, std::min({8, maximum, remaining, p, q}));
+  }
   return 1;
 }
 
@@ -307,18 +312,66 @@ SimplsModel<Scalar> fit_simpls_with_solver(
     const arma::Mat<Scalar>& Xinput, const arma::Mat<Scalar>& Yinput,
     arma::ivec ncomp, const SimplsOptions& options,
     DirectionSolver&& direction_solver, arma::Mat<Scalar>* owned_X = nullptr,
-    const arma::uvec* compact_labels = nullptr, int compact_classes = 0) {
+    const arma::uvec* compact_labels = nullptr, int compact_classes = 0,
+    const std::function<arma::Mat<Scalar>(
+      const arma::Mat<Scalar>&, const arma::Mat<Scalar>&, bool
+    )>& sample_product = {},
+    const std::function<void(
+      const arma::Mat<Scalar>&, const arma::Mat<Scalar>&,
+      arma::Mat<Scalar>&, arma::Mat<Scalar>&
+    )>& sample_geometry = {},
+    const std::function<arma::Mat<Scalar>(
+      const arma::Mat<Scalar>&
+    )>& sample_crossprod = {},
+    const arma::Mat<Scalar>* precomputed_crossprod = nullptr,
+    const arma::Mat<Scalar>* precomputed_crosscov = nullptr,
+    const arma::Mat<Scalar>* precomputed_x_mean = nullptr,
+    const arma::Mat<Scalar>* precomputed_x_scale = nullptr,
+    const arma::Mat<Scalar>* precomputed_y_mean = nullptr,
+    int precomputed_training_rows = 0) {
   using namespace arma;
   const bool label_response = compact_labels != nullptr;
-  if (Xinput.n_rows < 2 || Xinput.n_cols < 1 ||
+  const bool sufficient_statistics = precomputed_training_rows > 0;
+  const int effective_rows = sufficient_statistics ?
+    precomputed_training_rows : static_cast<int>(Xinput.n_rows);
+  if (effective_rows < 2 || Xinput.n_cols < 1 ||
       (!label_response && (Yinput.n_cols < 1 || Xinput.n_rows != Yinput.n_rows)) ||
       (label_response && (compact_classes < 2 ||
                           compact_labels->n_elem != Xinput.n_rows))) {
     throw std::invalid_argument("SIMPLS requires matching, nonempty training matrices");
   }
+  if (sufficient_statistics &&
+      (!precomputed_crossprod || !precomputed_crosscov ||
+       !precomputed_x_mean || !precomputed_x_scale || !precomputed_y_mean ||
+       options.fitted || options.store_scores)) {
+    throw std::invalid_argument(
+      "SIMPLS sufficient-statistics fitting requires complete fold moments "
+      "and does not support fitted values or training scores"
+    );
+  }
   if (owned_X && (owned_X->n_rows != Xinput.n_rows ||
                   owned_X->n_cols != Xinput.n_cols)) {
     throw std::invalid_argument("SIMPLS owned predictor workspace has invalid dimensions");
+  }
+  if (precomputed_crossprod &&
+      (precomputed_crossprod->n_rows != Xinput.n_cols ||
+       precomputed_crossprod->n_cols != Xinput.n_cols)) {
+    throw std::invalid_argument("SIMPLS precomputed cross-product has invalid dimensions");
+  }
+  if (precomputed_crosscov &&
+      (precomputed_crosscov->n_rows != Xinput.n_cols ||
+       precomputed_crosscov->n_cols !=
+         static_cast<arma::uword>(label_response ? compact_classes : Yinput.n_cols))) {
+    throw std::invalid_argument("SIMPLS precomputed cross-covariance has invalid dimensions");
+  }
+  if (sufficient_statistics &&
+      (precomputed_x_mean->n_rows != 1 ||
+       precomputed_x_mean->n_cols != Xinput.n_cols ||
+       precomputed_x_scale->n_rows != 1 ||
+       precomputed_x_scale->n_cols != Xinput.n_cols ||
+       precomputed_y_mean->n_rows != 1 ||
+       precomputed_y_mean->n_cols != precomputed_crosscov->n_cols)) {
+    throw std::invalid_argument("SIMPLS sufficient statistics have invalid dimensions");
   }
   const int scaling = options.scaling;
   const bool fit = options.fitted;
@@ -333,7 +386,7 @@ SimplsModel<Scalar> fit_simpls_with_solver(
   double component_update_sec = 0.0;
   double coefficient_sec = 0.0;
   double fitted_sec = 0.0;
-  const int n = Xinput.n_rows;
+  const int n = effective_rows;
   const int p = Xinput.n_cols;
   const int m = label_response ? compact_classes : Yinput.n_cols;
   const bool classification_response =
@@ -361,25 +414,30 @@ SimplsModel<Scalar> fit_simpls_with_solver(
   const int fast_crossprod_min_n_to_p_ratio = options.crossprod_min_ratio;
   const bool randomized_solver = options.randomized_directions;
   const bool use_batched_candidate_geometry =
+    !sufficient_statistics &&
     randomized_solver &&
     candidate_block_size(
       max_ncomp, p, m, classification_response, n, options.maximum_block
     ) > 1;
   const bool return_ttrain = options.store_scores;
   const bool use_crossprod_cache =
-    (fast_optimized == 1) &&
-    !use_batched_candidate_geometry &&
-    (center_t == 0) &&
-    (max_ncomp >= fast_crossprod_min_ncomp) &&
-    (p <= n) &&
-    (n >= p * fast_crossprod_min_n_to_p_ratio) &&
-    (p <= fast_crossprod_max_p);
+    sufficient_statistics ||
+    ((fast_optimized == 1) &&
+     (center_t == 0) &&
+     (max_ncomp >= fast_crossprod_min_ncomp) &&
+     (p <= n) &&
+     (n >= p * fast_crossprod_min_n_to_p_ratio) &&
+     (p <= fast_crossprod_max_p));
+  const bool defer_score_materialization =
+    use_crossprod_cache && return_ttrain && !fit && reorth_v == 0;
 
   arma::Mat<Scalar> Xwork;
   const arma::Mat<Scalar>* Xptr = &Xinput;
   arma::Mat<Scalar> mX(1, p, fill::zeros);
   arma::Mat<Scalar>& scaled_X = owned_X == nullptr ? Xwork : *owned_X;
-  if (scaling < 3) {
+  if (sufficient_statistics) {
+    mX = *precomputed_x_mean;
+  } else if (scaling < 3) {
     if (owned_X == nullptr) scaled_X = Xinput;
     mX = mean(scaled_X, 0);
     scaled_X.each_row() -= mX;
@@ -387,17 +445,50 @@ SimplsModel<Scalar> fit_simpls_with_solver(
   }
 
   arma::Mat<Scalar> vX(1, p, fill::ones);
-  if (scaling == 2) {
+  if (sufficient_statistics) {
+    vX = *precomputed_x_scale;
+  } else if (scaling == 2) {
     vX = column_standard_deviation(scaled_X);
     scaled_X.each_row() /= vX;
   }
   const arma::Mat<Scalar>& Xtrain = *Xptr;
+  auto multiply_sample_matrix = [&] (
+      const arma::Mat<Scalar>& right, const bool transpose_left) {
+    if (sufficient_statistics) {
+      throw std::logic_error(
+        "SIMPLS sufficient-statistics route requested a sample-level product"
+      );
+    }
+    if (sample_product) {
+      return sample_product(Xtrain, right, transpose_left);
+    }
+    arma::Mat<Scalar> result;
+    if (transpose_left) {
+      result = Xtrain.t() * right;
+    } else {
+      result = Xtrain * right;
+    }
+    return result;
+  };
+  auto sample_score_and_loading = [&] (
+      const arma::Mat<Scalar>& directions,
+      arma::Mat<Scalar>& scores,
+      arma::Mat<Scalar>& loadings) {
+    if (sample_geometry) {
+      sample_geometry(Xtrain, directions, scores, loadings);
+      return;
+    }
+    scores = multiply_sample_matrix(directions, false);
+    loadings = multiply_sample_matrix(scores, true);
+  };
 
   arma::uvec one_hot_labels;
   const bool one_hot_response = label_response ||
     extract_one_hot_labels(Yinput, one_hot_labels);
   arma::Mat<Scalar> mY;
-  if (label_response) {
+  if (sufficient_statistics) {
+    mY = *precomputed_y_mean;
+  } else if (label_response) {
     one_hot_labels = *compact_labels;
     arma::Row<Scalar> counts(m, arma::fill::zeros);
     for (arma::uword row = 0; row < one_hot_labels.n_elem; ++row) {
@@ -406,9 +497,6 @@ SimplsModel<Scalar> fit_simpls_with_solver(
       }
       counts(one_hot_labels(row)) += Scalar(1);
     }
-    if (arma::any(counts <= Scalar(0))) {
-      throw std::invalid_argument("SIMPLS compact labels contain an empty class");
-    }
     mY = counts / static_cast<Scalar>(Xinput.n_rows);
   } else {
     mY = mean(Yinput, 0);
@@ -416,7 +504,14 @@ SimplsModel<Scalar> fit_simpls_with_solver(
   arma::Mat<Scalar> Ywork;
   const arma::Mat<Scalar>* Yptr = &Yinput;
   arma::Mat<Scalar> S;
-  if (one_hot_response) {
+  if (precomputed_crosscov) {
+    S = *precomputed_crosscov;
+    if (fit && !label_response) {
+      Ywork = Yinput;
+      Ywork.each_row() -= mY;
+      Yptr = &Ywork;
+    }
+  } else if (one_hot_response) {
     S = dummy_crossprod<Scalar>(Xtrain, one_hot_labels, -mY);
     if (fit && !label_response) {
       Ywork = Yinput;
@@ -424,7 +519,7 @@ SimplsModel<Scalar> fit_simpls_with_solver(
       Yptr = &Ywork;
     }
   } else {
-    S = Xtrain.t() * Yinput;
+    S = multiply_sample_matrix(Yinput, true);
     const Scalar y_scale = std::max(Scalar(1), arma::abs(Yinput).max());
     const bool response_precentered = arma::abs(mY).max() <= 1e-12 * y_scale;
     if (!response_precentered) {
@@ -474,7 +569,9 @@ SimplsModel<Scalar> fit_simpls_with_solver(
     TT.zeros(n, max_ncomp);
   }
   if (use_crossprod_cache) {
-    XtX_cache = symmetric_crossprod(Xtrain);
+    XtX_cache = precomputed_crossprod ?
+      *precomputed_crossprod : sample_crossprod ?
+        sample_crossprod(Xtrain) : symmetric_crossprod(Xtrain);
   }
   if (use_crossprod_cache || use_batched_candidate_geometry) {
     Sxy_cache = S;
@@ -512,13 +609,22 @@ SimplsModel<Scalar> fit_simpls_with_solver(
       rr /= tnorm;
       pp /= tnorm;
       qq = Sxy_cache.t() * rr;
-      if (fit || return_ttrain) {
-        tt = Xtrain * rr;
+      if (fit || (return_ttrain && !defer_score_materialization)) {
+        tt = multiply_sample_matrix(arma::Mat<Scalar>(rr), false).col(0);
       }
     } else {
       const bool has_candidate_geometry =
         candidate_scores != nullptr && candidate_loadings != nullptr;
-      tt = has_candidate_geometry ? *candidate_scores : Xtrain * rr;
+      arma::Mat<Scalar> direct_scores;
+      arma::Mat<Scalar> direct_loadings;
+      if (has_candidate_geometry) {
+        tt = *candidate_scores;
+      } else {
+        sample_score_and_loading(
+          arma::Mat<Scalar>(rr), direct_scores, direct_loadings
+        );
+        tt = direct_scores.col(0);
+      }
       if (center_t == 1) {
         tt -= arma::mean(tt);
       }
@@ -542,12 +648,12 @@ SimplsModel<Scalar> fit_simpls_with_solver(
       rr /= tnorm;
       if (has_candidate_geometry) {
         if (score_reorthogonalized) {
-          pp = Xtrain.t() * tt;
+          pp = multiply_sample_matrix(arma::Mat<Scalar>(tt), true).col(0);
         } else {
           pp = *candidate_loadings / tnorm;
         }
       } else {
-        pp = Xtrain.t() * tt;
+        pp = direct_loadings.col(0) / tnorm;
       }
       if (use_batched_candidate_geometry) {
         qq = Sxy_cache.t() * rr;
@@ -588,7 +694,8 @@ SimplsModel<Scalar> fit_simpls_with_solver(
     RR.col(a_idx) = rr;
     QQ.col(a_idx) = qq;
     VV.col(a_idx) = vv;
-    if (return_ttrain && tt.n_elem == static_cast<arma::uword>(n)) {
+    if (return_ttrain && !defer_score_materialization &&
+        tt.n_elem == static_cast<arma::uword>(n)) {
       TT.col(a_idx) = tt;
     }
     if (benchmark_phase_timing) {
@@ -683,12 +790,13 @@ SimplsModel<Scalar> fit_simpls_with_solver(
     const int use_cols = std::min<int>(Ublock.n_cols, k_block);
     arma::Mat<Scalar> candidate_scores;
     arma::Mat<Scalar> candidate_loadings;
-    if (use_batched_candidate_geometry) {
+    if (use_batched_candidate_geometry && !use_crossprod_cache) {
       const arma::Mat<Scalar> directions = Ublock.cols(
         0, static_cast<arma::uword>(use_cols - 1)
       );
-      candidate_scores = Xtrain * directions;
-      candidate_loadings = Xtrain.t() * candidate_scores;
+      sample_score_and_loading(
+        directions, candidate_scores, candidate_loadings
+      );
     }
     bool stop_now = false;
     for (int j = 0; j < use_cols && a < max_ncomp; ++j, ++a) {
@@ -696,7 +804,7 @@ SimplsModel<Scalar> fit_simpls_with_solver(
       arma::Col<Scalar> candidate_loading;
       const arma::Col<Scalar>* candidate_score_ptr = nullptr;
       const arma::Col<Scalar>* candidate_loading_ptr = nullptr;
-      if (use_batched_candidate_geometry) {
+      if (use_batched_candidate_geometry && !use_crossprod_cache) {
         candidate_score = candidate_scores.col(static_cast<arma::uword>(j));
         candidate_loading = candidate_loadings.col(static_cast<arma::uword>(j));
         candidate_score_ptr = &candidate_score;
@@ -710,6 +818,10 @@ SimplsModel<Scalar> fit_simpls_with_solver(
       }
     }
     if (stop_now) break;
+  }
+
+  if (defer_score_materialization && a > 0) {
+    TT = multiply_sample_matrix(RR.cols(0, a - 1), false);
   }
 
   SimplsModel<Scalar> result;

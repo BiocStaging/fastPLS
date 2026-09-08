@@ -21,7 +21,9 @@ class FloatCrosscovOperator {
       throw std::runtime_error("float32 cross-product requires nonempty X/Y with matching rows");
     }
     if (backend == 1) cuda_.reset(new CudaFloatCrossproduct(X, Y));
-    else if (backend == 2) metal_.reset(new MetalFloatCrossproduct(X, Y));
+    else if (backend == 2 || backend == 3) {
+      metal_.reset(new MetalFloatCrossproduct(X, Y));
+    }
     else if (backend == 0) cpu_.reset(new fastpls::native::CrosscovOperator<float>(
       X, Y, max_components));
     else throw std::runtime_error("Invalid float32 cross-product backend");

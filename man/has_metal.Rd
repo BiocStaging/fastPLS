@@ -3,8 +3,8 @@
 \title{Check Apple Metal Backend Availability for fastPLS}
 
 \description{
-Report whether Apple Metal-native fastPLS execution can be used in the current
-session.
+Report whether the fixed CPU/Metal operation-split fastPLS backend can be used
+in the current session.
 }
 
 \usage{
@@ -25,7 +25,9 @@ device, allocate GPU memory, or run a test computation. When the Xcode Metal
 compiler is available during installation, fastPLS compiles and embeds its
 custom shader library. Device and pipeline initialization is then incurred by
 the first Metal operation, while subsequent operations in the same R session
-reuse the initialized state.
+reuse the initialized state. A true result identifies availability of the
+operation-split backend; it does not imply that an entire PLS fit is GPU
+resident.
 }
 
 \value{A length-1 logical.}

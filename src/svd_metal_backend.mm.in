@@ -451,6 +451,18 @@ struct MetalFloatOperator::Impl {
     bool transpose_left;
   };
 
+  struct Geometry {
+    Geometry(id<MTLDevice> device, const MetalMatrix& left,
+             NSUInteger columns)
+        : directions(make_matrix(device, left.cols, columns)),
+          scores(make_matrix(device, left.rows, columns)),
+          loadings(make_matrix(device, left.cols, columns)),
+          score_product(device, left, directions, scores, false, false),
+          loading_product(device, left, scores, loadings, true, false) {}
+    MetalMatrix directions, scores, loadings;
+    MetalProduct score_product, loading_product;
+  };
+
   explicit Impl(const arma::fmat& A) {
     device = default_device();
     queue = default_command_queue();
@@ -479,10 +491,23 @@ struct MetalFloatOperator::Impl {
     return *products.front();
   }
 
+  Geometry& geometry(NSUInteger columns) {
+    for (auto item = geometries.begin(); item != geometries.end(); ++item) {
+      if ((*item)->directions.cols == columns) {
+        geometries.splice(geometries.begin(), geometries, item);
+        return *geometries.front();
+      }
+    }
+    if (geometries.size() == 2) geometries.pop_back();
+    geometries.emplace_front(new Geometry(device, left, columns));
+    return *geometries.front();
+  }
+
   id<MTLDevice> device;
   id<MTLCommandQueue> queue;
   MetalMatrix left;
   std::list<std::unique_ptr<Product>> products;
+  std::list<std::unique_ptr<Geometry>> geometries;
   std::mutex mutex;
 };
 
@@ -516,6 +541,40 @@ arma::fmat MetalFloatOperator::multiply(const arma::fmat& B, bool transpose_left
     run_metal_products(impl_->queue, {&workspace.operation});
     return copy_mps_buffer_to_fmat(workspace.result.buffer, rows, B.n_cols,
                                   workspace.result.row_bytes);
+  }
+}
+
+void MetalFloatOperator::geometry(const arma::fmat& directions,
+                                  arma::fmat& scores,
+                                  arma::fmat& loadings) {
+  std::lock_guard<std::mutex> lock(impl_->mutex);
+  if (directions.n_rows != impl_->left.cols) {
+    throw std::runtime_error(
+      "Metal float32 geometry: non-conformable direction matrix"
+    );
+  }
+  if (directions.n_cols == 0) {
+    scores.set_size(impl_->left.rows, 0);
+    loadings.set_size(impl_->left.cols, 0);
+    return;
+  }
+  @autoreleasepool {
+    Impl::Geometry& workspace = impl_->geometry(directions.n_cols);
+    copy_fmat_to_mps_buffer(
+      directions, workspace.directions.buffer, workspace.directions.row_bytes
+    );
+    run_metal_products(
+      impl_->queue,
+      {&workspace.score_product, &workspace.loading_product}
+    );
+    scores = copy_mps_buffer_to_fmat(
+      workspace.scores.buffer, impl_->left.rows, directions.n_cols,
+      workspace.scores.row_bytes
+    );
+    loadings = copy_mps_buffer_to_fmat(
+      workspace.loadings.buffer, impl_->left.cols, directions.n_cols,
+      workspace.loadings.row_bytes
+    );
   }
 }
 

@@ -48,7 +48,9 @@ each sample is treated as its own group.}
 \code{kernelpls}. Multiple values are treated as a tuning grid.}
 
 \item{backend}{Implementation backend: \code{cpu}, \code{cuda}, or
-\code{metal}. Multiple values are treated as a tuning grid. When omitted,
+\code{metal}. Multiple values are treated as a tuning grid. Metal requires
+float32 input and uses fixed CPU/Metal operation splitting with CPU fold
+orchestration and prediction. When omitted,
 \code{options(backend = ...)} defines the session default; \code{options(cores = n)}
 controls the CPU thread request. Every requested backend must be available;
 unavailable accelerator entries raise an error instead of using CPU.}

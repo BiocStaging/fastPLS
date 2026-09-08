@@ -106,7 +106,7 @@ test_that("Metal score projection and float32 LDA preserve the discriminant", {
             scores, models[[as.character(component)]], TRUE
         )
         cpu_scores <- float::dbl(fastPLS:::.float32_from_bits(cpu$scores))
-        metal_scores <- float::dbl(metal$LDA_scores[[index]])
+        metal_scores <- metal$LDA_scores[, , index]
         expect_equal(
             unname(metal_scores), unname(cpu_scores), tolerance = 2e-4
         )
@@ -161,7 +161,7 @@ test_that("Metal PLS-SVD reuses its compact prefix factors", {
     }
 })
 
-test_that("Metal never returns a hybrid PLS model", {
+test_that("Metal always returns the fixed operation-split PLS model", {
     skip_if_not(has_metal(), "Metal backend is not available")
     set.seed(832)
     X <- float::fl(matrix(rnorm(90 * 12), 90, 12))
@@ -173,12 +173,14 @@ test_that("Metal never returns a hybrid PLS model", {
             backend = "metal", return_variance = FALSE, seed = 19
         )
         residency <- fit$diagnostics$residency
-        expect_identical(residency$route, "resident metal")
-        expect_true(all(unlist(residency[c(
-            "preprocessing", "cross_products", "decomposition",
-            "component_updates", "prediction",
-            "response_sums_of_squares"
-        )]) == "metal"))
+        expect_identical(
+            residency$route,
+            "CPU/Metal hybrid (operation split)"
+        )
+        expect_identical(residency$preprocessing, "cpu")
+        expect_identical(residency$component_updates, "cpu")
+        expect_identical(residency$prediction, "cpu")
+        expect_match(residency$cross_products, "Metal")
     }
     nonlinear <- suppressWarnings(pls(
         X, Y, ncomp = 2, method = "kernelpls", kernel = "rbf",
@@ -186,7 +188,7 @@ test_that("Metal never returns a hybrid PLS model", {
     ))
     expect_identical(
         nonlinear$diagnostics$residency$route,
-        "resident metal"
+        "CPU/Metal hybrid (operation split)"
     )
 })
 
@@ -221,11 +223,14 @@ test_that("resident Metal OPLS and nonlinear kernel predictions agree with CPU",
         )
         expect_lt(relative_error, 2e-5)
         expect_gt(cor(c(cpu_prediction), c(gpu_prediction)), 0.999999)
-        expect_identical(gpu$diagnostics$residency$route, "resident metal")
+        expect_identical(
+            gpu$diagnostics$residency$route,
+            "CPU/Metal hybrid (operation split)"
+        )
     }
 })
 
-test_that("Metal rejects float64 and retains Metal as the prediction default", {
+test_that("Metal rejects float64 and uses its assigned CPU prediction", {
     skip_if_not(has_metal(), "Metal backend is not available")
 
     set.seed(63)
@@ -241,13 +246,14 @@ test_that("Metal rejects float64 and retains Metal as the prediction default", {
         backend = "metal", return_variance = FALSE
     )
     default_prediction <- predict(fit, float::fl(x))$Ypred[[1L]]
-    expect_error(
-        predict(fit, float::fl(x), backend = "cpu"),
-        "No CPU fallback"
+    expect_equal(
+        predict(fit, float::fl(x), backend = "cpu")$Ypred[[1L]],
+        default_prediction,
+        tolerance = 0
     )
 })
 
-test_that("Metal CV uses resident fold models and returns finite PLS scores", {
+test_that("Metal CV reports its operation split and finite PLS scores", {
     skip_if_not(has_metal(), "Metal backend is not available")
 
     set.seed(914)
@@ -261,7 +267,10 @@ test_that("Metal CV uses resident fold models and returns finite PLS scores", {
     expect_false(anyNA(cv$Yscore))
     expect_true(all(is.finite(cv$Q2Y)))
     expect_false(all(cv$Q2Y == 1))
-    expect_identical(cv$residency$fold_model_fit, "resident metal")
-    expect_identical(cv$residency$fold_prediction, "resident metal")
+    expect_identical(
+        cv$residency$fold_model_fit,
+        "fixed CPU/Metal operation split"
+    )
+    expect_identical(cv$residency$fold_prediction, "cpu")
     expect_identical(cv$residency$fallback, "none")
 })
