@@ -1,3 +1,15 @@
+# fastPLS 0.99.55
+
+* Prevented Linux BLAS symbol interposition from routing the standalone
+  float32/float64 CPU matrix-product adapter through a slower BLAS than the
+  OpenBLAS library selected at package configuration. The fixed CIFAR-100
+  performance gate retains identical predictions and restores the prior
+  same-host runtime.
+
+* Corrected CUDA cross-validation dispatch for linear kernel PLS so that it
+  reuses the intended direct SIMPLS route rather than entering the nonlinear
+  kernel constructor.
+
 # fastPLS 0.99.54
 
 * Replaced six generated RcppArmadillo wrappers for double-precision CPU LDA

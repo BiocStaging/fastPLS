@@ -8633,6 +8633,11 @@ stop("Could not extract regression predictions from fold fit.", call. = FALSE)
         !identical(Sys.getenv("FASTPLS_CV_MINIMAL_ACCELERATOR_FIT", "1"), "0")
     if (identical(context$backend, "cuda") &&
         use_minimal_accelerator_fit) {
+        resident_method <- context$method
+        if (identical(resident_method, "kernelpls") &&
+            identical(context$kernel, "linear")) {
+            resident_method <- "simpls"
+        }
         resident_context <- list(
             Xtrain = Xtrain,
             Ytrain = Ytrain,
@@ -8642,7 +8647,7 @@ stop("Could not extract regression predictions from fold fit.", call. = FALSE)
                 Xtrain, Ytrain
             ),
             classification = context$classification,
-            method = context$method,
+            method = resident_method,
             scal = pmatch(
                 context$scaling,
                 c("centering", "autoscaling", "none")

@@ -65,6 +65,10 @@ elif [ "${use_openblas}" = "1" ]; then
   pkg_libs="-L${openblas_root}/lib -Wl,-rpath,${openblas_root}/lib -lopenblas ${openblas_dl_lib}"
 fi
 
+if [ "$(uname -s)" != "Darwin" ] && [ "${use_openblas}" != "1" ]; then
+  pkg_libs="${pkg_libs} -ldl"
+fi
+
 find_cuda_root() {
   if [ -n "${cuda_root}" ]; then
     printf "%s" "${cuda_root}"
