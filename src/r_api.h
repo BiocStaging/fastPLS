@@ -68,6 +68,9 @@ SEXP _fastPLS_float32_standardize_cpp(SEXP matrix, SEXP center, SEXP scale);
 SEXP _fastPLS_cpu_float32_matrix_multiply_cpp(
   SEXP left, SEXP right, SEXP transpose_left, SEXP transpose_right
 );
+SEXP _fastPLS_metal_float32_matrix_multiply_cpp(
+  SEXP left, SEXP right, SEXP transpose_left, SEXP transpose_right
+);
 SEXP _fastPLS_kernel_matrix_float32_cpp(
   SEXP left, SEXP right, SEXP kernel, SEXP gamma, SEXP degree,
   SEXP offset, SEXP backend

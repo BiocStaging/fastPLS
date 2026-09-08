@@ -93,20 +93,6 @@ BEGIN_RCPP
     return rcpp_result_gen;
 END_RCPP
 }
-// metal_float32_matrix_multiply_cpp
-Rcpp::List metal_float32_matrix_multiply_cpp(SEXP ASEXP, SEXP BSEXP, bool transpose_left, bool transpose_right);
-RcppExport SEXP _fastPLS_metal_float32_matrix_multiply_cpp(SEXP ASEXPSEXP, SEXP BSEXPSEXP, SEXP transpose_leftSEXP, SEXP transpose_rightSEXP) {
-BEGIN_RCPP
-    Rcpp::RObject rcpp_result_gen;
-    Rcpp::RNGScope rcpp_rngScope_gen;
-    Rcpp::traits::input_parameter< SEXP >::type ASEXP(ASEXPSEXP);
-    Rcpp::traits::input_parameter< SEXP >::type BSEXP(BSEXPSEXP);
-    Rcpp::traits::input_parameter< bool >::type transpose_left(transpose_leftSEXP);
-    Rcpp::traits::input_parameter< bool >::type transpose_right(transpose_rightSEXP);
-    rcpp_result_gen = Rcpp::wrap(metal_float32_matrix_multiply_cpp(ASEXP, BSEXP, transpose_left, transpose_right));
-    return rcpp_result_gen;
-END_RCPP
-}
 // metal_float32_rsvd_sample_cpp
 Rcpp::List metal_float32_rsvd_sample_cpp(SEXP ASEXP, int l, int power_iters, int seed);
 RcppExport SEXP _fastPLS_metal_float32_rsvd_sample_cpp(SEXP ASEXPSEXP, SEXP lSEXP, SEXP power_itersSEXP, SEXP seedSEXP) {

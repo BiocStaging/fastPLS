@@ -1869,22 +1869,6 @@ Rcpp::List cuda_float32_rsvd_sample_cpp(SEXP ASEXP,
 }
 
 // [[Rcpp::export]]
-Rcpp::List metal_float32_matrix_multiply_cpp(SEXP ASEXP,
-                                             SEXP BSEXP,
-                                             bool transpose_left = false,
-                                             bool transpose_right = false) {
-  arma::fmat A = float32_bits_to_fmat(ASEXP, "A");
-  arma::fmat B = float32_bits_to_fmat(BSEXP, "B");
-  arma::fmat C = fastpls_svd::metal_matrix_multiply_float(
-    A,
-    B,
-    transpose_left,
-    transpose_right
-  );
-  return Rcpp::List::create(Rcpp::Named("C") = fmat_to_float32_bits(C));
-}
-
-// [[Rcpp::export]]
 Rcpp::List metal_float32_rsvd_sample_cpp(SEXP ASEXP,
                                          int l,
                                          int power_iters,
@@ -3098,10 +3082,6 @@ Rcpp::IntegerMatrix windows_float32_bits(SEXP xSEXP, const char* name) {
 }
 
 Rcpp::List cuda_float32_rsvd_sample_cpp(SEXP ASEXP, int l, int power_iters, int seed) {
-  return windows_float32_unavailable();
-}
-
-Rcpp::List metal_float32_matrix_multiply_cpp(SEXP ASEXP, SEXP BSEXP, bool transpose_left, bool transpose_right) {
   return windows_float32_unavailable();
 }
 

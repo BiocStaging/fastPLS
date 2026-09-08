@@ -215,6 +215,34 @@ SEXP numeric_matrix(const fastpls::core::Matrix<double>& values) {
   return result;
 }
 
+fastpls::core::Matrix<float> backend_gemm_f32(
+    fastpls::core::ConstMatrixView<float> left,
+    fastpls::core::ConstMatrixView<float> right,
+    const bool transpose_left,
+    const bool transpose_right,
+    const int backend) {
+  if (backend == 0) {
+    const std::size_t rows = transpose_left ? left.columns() : left.rows();
+    const std::size_t columns = transpose_right ? right.rows() : right.columns();
+    fastpls::core::Matrix<float> result(rows, columns);
+    fastpls::runtime::cpu_gemm_f32(
+      left, right, transpose_left, transpose_right, result.view()
+    );
+    return result;
+  }
+  if (backend == 1) {
+    return fastpls_svd::cuda_core_gemm_f32(
+      left, right, transpose_left, transpose_right
+    );
+  }
+  if (backend == 2) {
+    return fastpls_svd::metal_core_gemm_f32(
+      left, right, transpose_left, transpose_right
+    );
+  }
+  throw std::invalid_argument("float32 backend must be 0, 1, or 2");
+}
+
 fastpls::core::Matrix<float> row_matrix(const std::vector<float>& values) {
   fastpls::core::Matrix<float> result(1, values.size());
   std::copy(values.begin(), values.end(), result.data());
@@ -1061,14 +1089,41 @@ extern "C" SEXP _fastPLS_cpu_float32_matrix_multiply_cpp(
       float_matrix_from_s4(left, "A");
     const fastpls::core::Matrix<float> right_values =
       float_matrix_from_s4(right, "B");
-    const std::size_t rows = transpose_left_value ?
-      left_values.columns() : left_values.rows();
-    const std::size_t columns = transpose_right_value ?
-      right_values.rows() : right_values.columns();
-    fastpls::core::Matrix<float> product(rows, columns);
-    fastpls::runtime::cpu_gemm_f32(
+    const fastpls::core::Matrix<float> product = backend_gemm_f32(
       left_values.view(), right_values.view(), transpose_left_value,
-      transpose_right_value, product.view()
+      transpose_right_value, 0
+    );
+
+    SEXP output = PROTECT(Rf_allocVector(VECSXP, 1));
+    SEXP value = PROTECT(float_bits_matrix(product));
+    SET_VECTOR_ELT(output, 0, value);
+    SEXP names = PROTECT(Rf_allocVector(STRSXP, 1));
+    SET_STRING_ELT(names, 0, Rf_mkChar("C"));
+    Rf_setAttrib(output, R_NamesSymbol, names);
+    UNPROTECT(3);
+    return output;
+  } catch (const std::exception& exception) {
+    Rf_error("%s", exception.what());
+  }
+  return R_NilValue;
+}
+
+extern "C" SEXP _fastPLS_metal_float32_matrix_multiply_cpp(
+    SEXP left, SEXP right, SEXP transpose_left, SEXP transpose_right) {
+  try {
+    const int transpose_left_value = Rf_asLogical(transpose_left);
+    const int transpose_right_value = Rf_asLogical(transpose_right);
+    if (transpose_left_value == NA_LOGICAL ||
+        transpose_right_value == NA_LOGICAL) {
+      throw std::invalid_argument("transpose controls must be TRUE or FALSE");
+    }
+    const fastpls::core::Matrix<float> left_values =
+      float_matrix_from_s4(left, "A");
+    const fastpls::core::Matrix<float> right_values =
+      float_matrix_from_s4(right, "B");
+    const fastpls::core::Matrix<float> product = backend_gemm_f32(
+      left_values.view(), right_values.view(), transpose_left_value,
+      transpose_right_value, 2
     );
 
     SEXP output = PROTECT(Rf_allocVector(VECSXP, 1));
@@ -1111,21 +1166,9 @@ extern "C" SEXP _fastPLS_kernel_matrix_float32_cpp(
       throw std::invalid_argument("float32 kernel backend must be 0, 1, or 2");
     }
 
-    fastpls::core::Matrix<float> result;
-    if (backend_code == 0) {
-      result.resize(left_values.rows(), right_values.rows());
-      fastpls::runtime::cpu_gemm_f32(
-        left_values.view(), right_values.view(), false, true, result.view()
-      );
-    } else if (backend_code == 1) {
-      result = fastpls_svd::cuda_core_gemm_f32(
-        left_values.view(), right_values.view(), false, true
-      );
-    } else {
-      result = fastpls_svd::metal_core_gemm_f32(
-        left_values.view(), right_values.view(), false, true
-      );
-    }
+    fastpls::core::Matrix<float> result = backend_gemm_f32(
+      left_values.view(), right_values.view(), false, true, backend_code
+    );
     fastpls::core::kernel_from_dots(
       left_values.view(), right_values.view(), result.view(),
       static_cast<fastpls::core::KernelType>(kernel_code),
@@ -1195,32 +1238,12 @@ extern "C" SEXP _fastPLS_opls_apply_filter_float32_cpp(
         loading_values.data() + component * loading_values.rows(),
         loading_values.rows(), 1, loading_values.rows()
       );
-      fastpls::core::Matrix<float> score;
-      fastpls::core::Matrix<float> correction;
-      if (backend_code == 0) {
-        score.resize(values.rows(), 1);
-        fastpls::runtime::cpu_gemm_f32(
-          values.view(), weight, false, false, score.view()
-        );
-        correction.resize(values.rows(), values.columns());
-        fastpls::runtime::cpu_gemm_f32(
-          score.view(), loading, false, true, correction.view()
-        );
-      } else if (backend_code == 1) {
-        score = fastpls_svd::cuda_core_gemm_f32(
-          values.view(), weight, false, false
-        );
-        correction = fastpls_svd::cuda_core_gemm_f32(
-          score.view(), loading, false, true
-        );
-      } else {
-        score = fastpls_svd::metal_core_gemm_f32(
-          values.view(), weight, false, false
-        );
-        correction = fastpls_svd::metal_core_gemm_f32(
-          score.view(), loading, false, true
-        );
-      }
+      const fastpls::core::Matrix<float> score = backend_gemm_f32(
+        values.view(), weight, false, false, backend_code
+      );
+      const fastpls::core::Matrix<float> correction = backend_gemm_f32(
+        score.view(), loading, false, true, backend_code
+      );
       for (std::size_t index = 0; index < values.size(); ++index) {
         values.data()[index] -= correction.data()[index];
       }
