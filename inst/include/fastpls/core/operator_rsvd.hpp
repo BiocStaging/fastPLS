@@ -1,0 +1,210 @@
+// SPDX-License-Identifier: MIT
+// Copyright (c) 2026 Stefano Cacciatore
+#ifndef FASTPLS_CORE_OPERATOR_RSVD_HPP
+#define FASTPLS_CORE_OPERATOR_RSVD_HPP
+
+#include <fastpls/core/matrix.hpp>
+#include <fastpls/core/rsvd.hpp>
+
+#include <algorithm>
+#include <cmath>
+#include <cstddef>
+#include <limits>
+#include <random>
+#include <stdexcept>
+#include <vector>
+
+namespace fastpls {
+namespace core {
+
+template<class T>
+struct OperatorRsvdWorkspace {
+  Matrix<T> random;
+  Matrix<T> sample;
+  Matrix<T> forward_basis;
+  Matrix<T> reverse;
+  Matrix<T> reverse_basis;
+  Matrix<T> projected;
+  Matrix<T> gram;
+  Matrix<T> reduced_left;
+  Matrix<T> reduced_right;
+};
+
+namespace detail {
+
+template<class T, class Backend>
+SingularTriplets<T> finalize_operator_sample(
+    ConstMatrixView<T> basis,
+    ConstMatrixView<T> projected,
+    std::size_t retained,
+    bool left_only,
+    Backend& backend,
+    OperatorRsvdWorkspace<T>& workspace) {
+  Matrix<T> small_left;
+  std::vector<T> singular_values;
+  Matrix<T> small_vt;
+  bool completed = false;
+
+  if (projected.rows() >= 4 && projected.rows() <= projected.columns()) {
+    workspace.gram.resize(projected.rows(), projected.rows());
+    backend.gemm(
+      projected, projected, false, true, workspace.gram.view()
+    );
+    std::vector<T> eigenvalues;
+    if (backend.symmetric_eigen(workspace.gram, eigenvalues)) {
+      const T largest = eigenvalues.empty() ? T(1) :
+        std::max(eigenvalues.back(), T(1));
+      const T tolerance = std::numeric_limits<T>::epsilon() *
+        static_cast<T>(std::max(projected.rows(), projected.columns())) *
+        largest;
+      std::size_t usable = 0;
+      for (std::size_t index = eigenvalues.size(); index > 0; --index) {
+        if (eigenvalues[index - 1] <= tolerance || usable == retained) break;
+        ++usable;
+      }
+      if (usable > 0) {
+        small_left.resize(projected.rows(), usable);
+        singular_values.resize(usable);
+        for (std::size_t column = 0; column < usable; ++column) {
+          const std::size_t source = eigenvalues.size() - 1 - column;
+          singular_values[column] = std::sqrt(
+            std::max(eigenvalues[source], T(0))
+          );
+          for (std::size_t row = 0; row < projected.rows(); ++row) {
+            small_left(row, column) = workspace.gram(row, source);
+          }
+        }
+        if (!left_only) {
+          small_vt.resize(usable, projected.columns());
+          backend.gemm(
+            small_left.view(), projected, true, false, small_vt.view()
+          );
+          for (std::size_t row = 0; row < usable; ++row) {
+            const T inverse = T(1) / singular_values[row];
+            for (std::size_t column = 0;
+                 column < small_vt.columns(); ++column) {
+              small_vt(row, column) *= inverse;
+            }
+          }
+        }
+        completed = true;
+      }
+    }
+  }
+
+  if (!completed && !backend.svd_economy(
+        projected, left_only, small_left, singular_values, small_vt)) {
+    throw std::runtime_error(
+      "fastPLS operator rSVD reduced decomposition failed"
+    );
+  }
+  retained = std::min({
+    retained, small_left.columns(), singular_values.size()
+  });
+  if (retained == 0) {
+    throw std::runtime_error(
+      "fastPLS operator rSVD returned no usable directions"
+    );
+  }
+
+  SingularTriplets<T> output;
+  Matrix<T> retained_left(small_left.rows(), retained);
+  for (std::size_t column = 0; column < retained; ++column) {
+    for (std::size_t row = 0; row < small_left.rows(); ++row) {
+      retained_left(row, column) = small_left(row, column);
+    }
+  }
+  output.U.resize(basis.rows(), retained);
+  backend.gemm(
+    basis, retained_left.view(), false, false, output.U.view()
+  );
+  output.singular_values.assign(
+    singular_values.begin(), singular_values.begin() + retained
+  );
+  if (!left_only) {
+    output.Vt.resize(retained, projected.columns());
+    for (std::size_t column = 0; column < projected.columns(); ++column) {
+      for (std::size_t row = 0; row < retained; ++row) {
+        output.Vt(row, column) = small_vt(row, column);
+      }
+    }
+  }
+  return output;
+}
+
+}  // namespace detail
+
+template<class T, class Operator, class Backend>
+SingularTriplets<T> randomized_operator_svd(
+    Operator& input,
+    int retained,
+    const RsvdControls& controls,
+    Backend& backend,
+    OperatorRsvdWorkspace<T>& workspace) {
+  const std::size_t maximum = std::min(input.rows(), input.columns());
+  const std::size_t target = std::min(
+    maximum, static_cast<std::size_t>(std::max(retained, 1))
+  );
+  if (target == 0) return {};
+  const std::size_t width = std::min(
+    maximum,
+    target + static_cast<std::size_t>(std::max(controls.oversample, 0))
+  );
+
+  std::mt19937 generator(controls.seed);
+  std::normal_distribution<T> normal(T(0), T(1));
+  workspace.random.resize(input.columns(), width);
+  for (std::size_t index = 0; index < workspace.random.size(); ++index) {
+    workspace.random.data()[index] = normal(generator);
+  }
+  input.multiply(workspace.random.view(), false, workspace.sample);
+
+  for (int iteration = 0; iteration < std::max(controls.power, 0);
+       ++iteration) {
+    if (!backend.qr_economy(
+          workspace.sample.view(), workspace.forward_basis)) {
+      throw std::runtime_error(
+        "fastPLS operator rSVD forward orthogonalization failed"
+      );
+    }
+    input.multiply(
+      workspace.forward_basis.view(), true, workspace.reverse
+    );
+    if (!backend.qr_economy(
+          workspace.reverse.view(), workspace.reverse_basis)) {
+      throw std::runtime_error(
+        "fastPLS operator rSVD reverse orthogonalization failed"
+      );
+    }
+    input.multiply(
+      workspace.reverse_basis.view(), false, workspace.sample
+    );
+  }
+
+  if (!backend.qr_economy(
+        workspace.sample.view(), workspace.forward_basis)) {
+    throw std::runtime_error(
+      "fastPLS operator rSVD sketch orthogonalization failed"
+    );
+  }
+  input.multiply(workspace.forward_basis.view(), true, workspace.reverse);
+  workspace.projected.resize(
+    workspace.reverse.columns(), workspace.reverse.rows()
+  );
+  for (std::size_t column = 0;
+       column < workspace.projected.columns(); ++column) {
+    for (std::size_t row = 0; row < workspace.projected.rows(); ++row) {
+      workspace.projected(row, column) = workspace.reverse(column, row);
+    }
+  }
+  return detail::finalize_operator_sample(
+    ConstMatrixView<T>(workspace.forward_basis.view()),
+    ConstMatrixView<T>(workspace.projected.view()), target,
+    controls.left_only, backend, workspace
+  );
+}
+
+}  // namespace core
+}  // namespace fastpls
+
+#endif
