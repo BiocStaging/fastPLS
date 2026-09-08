@@ -1,4 +1,5 @@
 #include "svd_metal_backend.h"
+#include "accelerator_core_backend.h"
 
 #include <stdexcept>
 
@@ -85,6 +86,14 @@ arma::fmat metal_matrix_multiply_float(const arma::fmat& A,
   (void) B;
   (void) transpose_left;
   (void) transpose_right;
+  throw_metal_unavailable();
+}
+
+fastpls::core::Matrix<float> metal_core_gemm_f32(
+    fastpls::core::ConstMatrixView<float>,
+    fastpls::core::ConstMatrixView<float>,
+    bool,
+    bool) {
   throw_metal_unavailable();
 }
 

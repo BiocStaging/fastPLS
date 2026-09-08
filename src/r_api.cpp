@@ -1,4 +1,5 @@
 #include "r_api.h"
+#include "accelerator_core_backend.h"
 #include "core_cpu_backend.h"
 
 #include <R_ext/Error.h>
@@ -1048,6 +1049,68 @@ extern "C" SEXP _fastPLS_cpu_float32_matrix_multiply_cpp(
     SET_VECTOR_ELT(output, 0, value);
     SEXP names = PROTECT(Rf_allocVector(STRSXP, 1));
     SET_STRING_ELT(names, 0, Rf_mkChar("C"));
+    Rf_setAttrib(output, R_NamesSymbol, names);
+    UNPROTECT(3);
+    return output;
+  } catch (const std::exception& exception) {
+    Rf_error("%s", exception.what());
+  }
+  return R_NilValue;
+}
+
+extern "C" SEXP _fastPLS_kernel_matrix_float32_cpp(
+    SEXP left, SEXP right, SEXP kernel, SEXP gamma, SEXP degree,
+    SEXP offset, SEXP backend) {
+  try {
+    const fastpls::core::Matrix<float> left_values =
+      float_matrix_from_s4(left, "X1");
+    const fastpls::core::Matrix<float> right_values =
+      float_matrix_from_s4(right, "X2");
+    if (left_values.columns() != right_values.columns()) {
+      throw std::invalid_argument(
+        "X1 and X2 must have the same number of columns"
+      );
+    }
+    const int kernel_code = Rf_asInteger(kernel);
+    if (kernel_code < 1 || kernel_code > 3 || kernel_code == NA_INTEGER) {
+      throw std::invalid_argument("Unknown kernel type");
+    }
+    const int polynomial_degree = Rf_asInteger(degree);
+    if (polynomial_degree == NA_INTEGER) {
+      throw std::invalid_argument("Polynomial degree must be an integer");
+    }
+    const int backend_code = Rf_asInteger(backend);
+    if (backend_code < 0 || backend_code > 2 || backend_code == NA_INTEGER) {
+      throw std::invalid_argument("float32 kernel backend must be 0, 1, or 2");
+    }
+
+    fastpls::core::Matrix<float> result;
+    if (backend_code == 0) {
+      result.resize(left_values.rows(), right_values.rows());
+      fastpls::runtime::cpu_gemm_f32(
+        left_values.view(), right_values.view(), false, true, result.view()
+      );
+    } else if (backend_code == 1) {
+      result = fastpls_svd::cuda_core_gemm_f32(
+        left_values.view(), right_values.view(), false, true
+      );
+    } else {
+      result = fastpls_svd::metal_core_gemm_f32(
+        left_values.view(), right_values.view(), false, true
+      );
+    }
+    fastpls::core::kernel_from_dots(
+      left_values.view(), right_values.view(), result.view(),
+      static_cast<fastpls::core::KernelType>(kernel_code),
+      static_cast<float>(Rf_asReal(gamma)), polynomial_degree,
+      static_cast<float>(Rf_asReal(offset))
+    );
+
+    SEXP output = PROTECT(Rf_allocVector(VECSXP, 1));
+    SEXP value = PROTECT(float_bits_matrix(result));
+    SET_VECTOR_ELT(output, 0, value);
+    SEXP names = PROTECT(Rf_allocVector(STRSXP, 1));
+    SET_STRING_ELT(names, 0, Rf_mkChar("K"));
     Rf_setAttrib(output, R_NamesSymbol, names);
     UNPROTECT(3);
     return output;

@@ -13,23 +13,6 @@ Rcpp::Rostream<true>&  Rcpp::Rcout = Rcpp::Rcpp_cout_get();
 Rcpp::Rostream<false>& Rcpp::Rcerr = Rcpp::Rcpp_cerr_get();
 #endif
 
-// kernel_matrix_float32_cpp
-Rcpp::List kernel_matrix_float32_cpp(SEXP X1SEXP, SEXP X2SEXP, int kernel, double gamma, int degree, double coef0, int backend);
-RcppExport SEXP _fastPLS_kernel_matrix_float32_cpp(SEXP X1SEXPSEXP, SEXP X2SEXPSEXP, SEXP kernelSEXP, SEXP gammaSEXP, SEXP degreeSEXP, SEXP coef0SEXP, SEXP backendSEXP) {
-BEGIN_RCPP
-    Rcpp::RObject rcpp_result_gen;
-    Rcpp::RNGScope rcpp_rngScope_gen;
-    Rcpp::traits::input_parameter< SEXP >::type X1SEXP(X1SEXPSEXP);
-    Rcpp::traits::input_parameter< SEXP >::type X2SEXP(X2SEXPSEXP);
-    Rcpp::traits::input_parameter< int >::type kernel(kernelSEXP);
-    Rcpp::traits::input_parameter< double >::type gamma(gammaSEXP);
-    Rcpp::traits::input_parameter< int >::type degree(degreeSEXP);
-    Rcpp::traits::input_parameter< double >::type coef0(coef0SEXP);
-    Rcpp::traits::input_parameter< int >::type backend(backendSEXP);
-    rcpp_result_gen = Rcpp::wrap(kernel_matrix_float32_cpp(X1SEXP, X2SEXP, kernel, gamma, degree, coef0, backend));
-    return rcpp_result_gen;
-END_RCPP
-}
 // opls_filter_float32_cpp
 Rcpp::List opls_filter_float32_cpp(SEXP XSEXP, SEXP YSEXP, int north, int scaling, int backend, int svd_method, int rsvd_oversample, int rsvd_power, int seed);
 RcppExport SEXP _fastPLS_opls_filter_float32_cpp(SEXP XSEXPSEXP, SEXP YSEXPSEXP, SEXP northSEXP, SEXP scalingSEXP, SEXP backendSEXP, SEXP svd_methodSEXP, SEXP rsvd_oversampleSEXP, SEXP rsvd_powerSEXP, SEXP seedSEXP) {

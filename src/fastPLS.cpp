@@ -1629,26 +1629,6 @@ arma::fmat float32_bits_to_fmat_allow_empty(SEXP xSEXP, const char* name) {
 #ifndef _WIN32
 
 // [[Rcpp::export]]
-Rcpp::List kernel_matrix_float32_cpp(SEXP X1SEXP,
-                                     SEXP X2SEXP,
-                                     int kernel,
-                                     double gamma,
-                                     int degree,
-                                     double coef0,
-                                     int backend) {
-  const arma::fmat X1 = float32_bits_to_fmat(X1SEXP, "X1");
-  const arma::fmat X2 = float32_bits_to_fmat(X2SEXP, "X2");
-  if (X1.n_cols != X2.n_cols) {
-    Rcpp::stop("X1 and X2 must have the same number of columns");
-  }
-  arma::fmat dots = float32_backend_matmul(X1, X2, backend, false, true);
-  arma::fmat K = fastpls::native::kernel_from_dots(
-    X1, X2, std::move(dots), kernel, static_cast<float>(gamma), degree,
-    static_cast<float>(coef0));
-  return Rcpp::List::create(Rcpp::Named("K") = fmat_to_float32_bits(K));
-}
-
-// [[Rcpp::export]]
 Rcpp::List opls_filter_float32_cpp(SEXP XSEXP,
                                    SEXP YSEXP,
                                    int north,
@@ -3191,45 +3171,6 @@ Rcpp::List pls_float32_cpu_cpp(SEXP XtrainSEXP, SEXP YtrainSEXP, arma::ivec ncom
 
 Rcpp::List pls_float32_labels_cpp(SEXP XtrainSEXP, const Rcpp::IntegerVector& labels, int n_classes, arma::ivec ncomp, int scaling, bool fit, int method, int backend, int svd_method, int rsvd_oversample, int rsvd_power, int seed) {
   return windows_float32_unavailable();
-}
-
-Rcpp::List kernel_matrix_float32_cpp(SEXP X1SEXP, SEXP X2SEXP, int kernel, double gamma, int degree, double coef0, int backend) {
-  if (backend != 0) {
-    Rcpp::stop("Windows float32 kernel PLS supports backend = 'cpu' only");
-  }
-  const Rcpp::IntegerMatrix X1 = windows_float32_bits(X1SEXP, "X1");
-  const Rcpp::IntegerMatrix X2 = windows_float32_bits(X2SEXP, "X2");
-  if (X1.ncol() != X2.ncol()) {
-    Rcpp::stop("X1 and X2 must have the same number of columns");
-  }
-  Rcpp::IntegerMatrix out(X1.nrow(), X2.nrow());
-  const float gamma_f = static_cast<float>(gamma);
-  const float coef0_f = static_cast<float>(coef0);
-  for (int i = 0; i < X1.nrow(); ++i) {
-    for (int j = 0; j < X2.nrow(); ++j) {
-      float dot = 0.0f;
-      float distance = 0.0f;
-      for (int col = 0; col < X1.ncol(); ++col) {
-        const float a = windows_bits_to_float(X1(i, col));
-        const float b = windows_bits_to_float(X2(j, col));
-        dot += a * b;
-        const float delta = a - b;
-        distance += delta * delta;
-      }
-      float value;
-      if (kernel == 1) {
-        value = dot;
-      } else if (kernel == 2) {
-        value = std::exp(-gamma_f * distance);
-      } else if (kernel == 3) {
-        value = std::pow(gamma_f * dot + coef0_f, degree);
-      } else {
-        Rcpp::stop("Unknown kernel id");
-      }
-      out(i, j) = windows_float_to_bits(value);
-    }
-  }
-  return Rcpp::List::create(Rcpp::Named("K") = out);
 }
 
 Rcpp::List opls_filter_float32_cpp(SEXP XSEXP, SEXP YSEXP, int north, int scaling, int backend, int svd_method, int rsvd_oversample, int rsvd_power, int seed) {

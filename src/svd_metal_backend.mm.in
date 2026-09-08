@@ -1,4 +1,5 @@
 #include "svd_metal_backend.h"
+#include "accelerator_core_backend.h"
 
 #import <Foundation/Foundation.h>
 #import <Metal/Metal.h>
@@ -40,27 +41,45 @@ id<MTLCommandQueue> default_command_queue() {
 }
 
 template<typename T>
-void copy_to_mps_buffer(const arma::Mat<T>& X, id<MTLBuffer> buffer,
-                        const NSUInteger row_bytes) {
-  const arma::uword nr = X.n_rows;
-  const arma::uword nc = X.n_cols;
+void copy_column_major_to_mps_buffer(const T* values,
+                                     const std::size_t nr,
+                                     const std::size_t nc,
+                                     const std::size_t leading_dimension,
+                                     id<MTLBuffer> buffer,
+                                     const NSUInteger row_bytes) {
   char* base = static_cast<char*>([buffer contents]);
   // Tile the column-major/row-major copy so neither side repeatedly evicts
   // cache lines from the other. Casts and matrix entries are unchanged.
-  constexpr arma::uword tile = 32;
-  for (arma::uword row0 = 0; row0 < nr; row0 += tile) {
-    const arma::uword row_end = std::min(nr, row0 + tile);
-    for (arma::uword col0 = 0; col0 < nc; col0 += tile) {
-      const arma::uword col_end = std::min(nc, col0 + tile);
-      for (arma::uword j = col0; j < col_end; ++j) {
-        const T* column = X.colptr(j);
-        for (arma::uword i = row0; i < row_end; ++i) {
+  constexpr std::size_t tile = 32;
+  for (std::size_t row0 = 0; row0 < nr; row0 += tile) {
+    const std::size_t row_end = std::min(nr, row0 + tile);
+    for (std::size_t col0 = 0; col0 < nc; col0 += tile) {
+      const std::size_t col_end = std::min(nc, col0 + tile);
+      for (std::size_t j = col0; j < col_end; ++j) {
+        const T* column = values + j * leading_dimension;
+        for (std::size_t i = row0; i < row_end; ++i) {
           float* row = reinterpret_cast<float*>(base + static_cast<NSUInteger>(i) * row_bytes);
           row[j] = static_cast<float>(column[i]);
         }
       }
     }
   }
+}
+
+template<typename T>
+void copy_to_mps_buffer(const arma::Mat<T>& X, id<MTLBuffer> buffer,
+                        const NSUInteger row_bytes) {
+  copy_column_major_to_mps_buffer(
+    X.memptr(), X.n_rows, X.n_cols, X.n_rows, buffer, row_bytes
+  );
+}
+
+void copy_core_to_mps_buffer(fastpls::core::ConstMatrixView<float> X,
+                             id<MTLBuffer> buffer,
+                             const NSUInteger row_bytes) {
+  copy_column_major_to_mps_buffer(
+    X.data(), X.rows(), X.columns(), X.leading_dimension(), buffer, row_bytes
+  );
 }
 
 void copy_arma_to_mps_buffer(const arma::mat& X,
@@ -76,25 +95,49 @@ void copy_fmat_to_mps_buffer(const arma::fmat& X,
 }
 
 template<typename T>
-arma::Mat<T> copy_from_mps_buffer(id<MTLBuffer> buffer, const arma::uword nr,
-                                  const arma::uword nc, const NSUInteger row_bytes) {
-  arma::Mat<T> out(nr, nc);
+void copy_mps_buffer_to_column_major(id<MTLBuffer> buffer,
+                                     T* output,
+                                     const std::size_t nr,
+                                     const std::size_t nc,
+                                     const std::size_t leading_dimension,
+                                     const NSUInteger row_bytes) {
   const char* base = static_cast<const char*>([buffer contents]);
-  constexpr arma::uword tile = 32;
-  for (arma::uword row0 = 0; row0 < nr; row0 += tile) {
-    const arma::uword row_end = std::min(nr, row0 + tile);
-    for (arma::uword col0 = 0; col0 < nc; col0 += tile) {
-      const arma::uword col_end = std::min(nc, col0 + tile);
-      for (arma::uword j = col0; j < col_end; ++j) {
-        T* column = out.colptr(j);
-        for (arma::uword i = row0; i < row_end; ++i) {
+  constexpr std::size_t tile = 32;
+  for (std::size_t row0 = 0; row0 < nr; row0 += tile) {
+    const std::size_t row_end = std::min(nr, row0 + tile);
+    for (std::size_t col0 = 0; col0 < nc; col0 += tile) {
+      const std::size_t col_end = std::min(nc, col0 + tile);
+      for (std::size_t j = col0; j < col_end; ++j) {
+        T* column = output + j * leading_dimension;
+        for (std::size_t i = row0; i < row_end; ++i) {
           const float* row = reinterpret_cast<const float*>(base + static_cast<NSUInteger>(i) * row_bytes);
           column[i] = static_cast<T>(row[j]);
         }
       }
     }
   }
+}
+
+template<typename T>
+arma::Mat<T> copy_from_mps_buffer(id<MTLBuffer> buffer, const arma::uword nr,
+                                  const arma::uword nc, const NSUInteger row_bytes) {
+  arma::Mat<T> out(nr, nc);
+  copy_mps_buffer_to_column_major(
+    buffer, out.memptr(), nr, nc, nr, row_bytes
+  );
   return out;
+}
+
+fastpls::core::Matrix<float> copy_mps_buffer_to_core_float(
+    id<MTLBuffer> buffer,
+    const std::size_t nr,
+    const std::size_t nc,
+    const NSUInteger row_bytes) {
+  fastpls::core::Matrix<float> output(nr, nc);
+  copy_mps_buffer_to_column_major(
+    buffer, output.data(), nr, nc, nr, row_bytes
+  );
+  return output;
 }
 
 arma::mat copy_mps_buffer_to_arma(id<MTLBuffer> buffer,
@@ -755,46 +798,65 @@ arma::mat metal_matrix_multiply(const arma::mat& A,
   }
 }
 
-arma::fmat metal_matrix_multiply_float(const arma::fmat& A,
-                                       const arma::fmat& B,
-                                       const bool transpose_left,
-                                       const bool transpose_right) {
-  const arma::uword a_rows = transpose_left ? A.n_cols : A.n_rows;
-  const arma::uword a_cols = transpose_left ? A.n_rows : A.n_cols;
-  const arma::uword b_rows = transpose_right ? B.n_cols : B.n_rows;
-  const arma::uword b_cols = transpose_right ? B.n_rows : B.n_cols;
+fastpls::core::Matrix<float> metal_core_gemm_f32(
+    fastpls::core::ConstMatrixView<float> A,
+    fastpls::core::ConstMatrixView<float> B,
+    const bool transpose_left,
+    const bool transpose_right) {
+  const std::size_t a_rows = transpose_left ? A.columns() : A.rows();
+  const std::size_t a_cols = transpose_left ? A.rows() : A.columns();
+  const std::size_t b_rows = transpose_right ? B.columns() : B.rows();
+  const std::size_t b_cols = transpose_right ? B.rows() : B.columns();
 
   if (a_cols != b_rows) {
-    throw std::runtime_error("metal_matrix_multiply_float: non-conformable matrices");
+    throw std::runtime_error("metal_core_gemm_f32: non-conformable matrices");
   }
 
   @autoreleasepool {
     id<MTLDevice> device = default_device();
     if (device == nil) {
       throw std::runtime_error(
-        "metal_matrix_multiply_float: no Metal device available; no CPU fallback is performed"
+        "metal_core_gemm_f32: no Metal device available; no CPU fallback is performed"
       );
     }
 
     id<MTLCommandQueue> queue = default_command_queue();
     if (queue == nil) {
-      throw std::runtime_error("metal_matrix_multiply_float: failed to create Metal command queue");
+      throw std::runtime_error("metal_core_gemm_f32: failed to create Metal command queue");
     }
 
     if (a_rows == 0 || b_cols == 0 || a_cols == 0) {
-      return arma::fmat(a_rows, b_cols, arma::fill::zeros);
+      return fastpls::core::Matrix<float>(a_rows, b_cols);
     }
     auto& cache = host_product_cache();
     std::lock_guard<std::mutex> lock(cache.mutex);
     std::unique_ptr<MetalHostProduct> transient;
-    auto& workspace = cache.acquire(device, A.n_rows, A.n_cols, B.n_rows,
-      B.n_cols, transpose_left, transpose_right, transient);
-    copy_fmat_to_mps_buffer(A, workspace.left.buffer, workspace.left.row_bytes);
-    copy_fmat_to_mps_buffer(B, workspace.right.buffer, workspace.right.row_bytes);
+    auto& workspace = cache.acquire(device, A.rows(), A.columns(), B.rows(),
+      B.columns(), transpose_left, transpose_right, transient);
+    copy_core_to_mps_buffer(A, workspace.left.buffer, workspace.left.row_bytes);
+    copy_core_to_mps_buffer(B, workspace.right.buffer, workspace.right.row_bytes);
     run_metal_products(queue, {&workspace.product});
-    return copy_mps_buffer_to_fmat(workspace.result.buffer, a_rows, b_cols,
+    return copy_mps_buffer_to_core_float(workspace.result.buffer, a_rows, b_cols,
       workspace.result.row_bytes);
   }
+}
+
+arma::fmat metal_matrix_multiply_float(const arma::fmat& A,
+                                       const arma::fmat& B,
+                                       const bool transpose_left,
+                                       const bool transpose_right) {
+  const auto result = metal_core_gemm_f32(
+    fastpls::core::make_const_view(
+      A.memptr(), A.n_rows, A.n_cols, A.n_rows
+    ),
+    fastpls::core::make_const_view(
+      B.memptr(), B.n_rows, B.n_cols, B.n_rows
+    ),
+    transpose_left, transpose_right
+  );
+  arma::fmat output(result.rows(), result.columns());
+  std::copy(result.data(), result.data() + result.size(), output.memptr());
+  return output;
 }
 
 arma::mat metal_matrix_multiply(const arma::mat& A, const arma::mat& B) {

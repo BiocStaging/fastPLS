@@ -42,6 +42,56 @@ test_that("float32 CPU products use the native R C boundary", {
   )
 })
 
+test_that("float32 CPU kernels use the standalone matrix boundary", {
+  skip_if_not_installed("float")
+  left_values <- matrix(c(1, 2, 3, 4, 5, 6), nrow = 3L)
+  right_values <- matrix(c(2, 1, 0, 3), nrow = 2L)
+  left <- float::fl(left_values)
+  right <- float::fl(right_values)
+  dots <- left_values %*% t(right_values)
+
+  linear <- fastPLS:::kernel_matrix_float32_cpp(
+    left, right, 1L, 0.5, 2L, 1, 0L
+  )
+  expect_equal(
+    float::dbl(fastPLS:::.float32_from_bits(linear$K)), dots,
+    tolerance = 1e-5
+  )
+
+  polynomial <- fastPLS:::kernel_matrix_float32_cpp(
+    left, right, 3L, 0.5, 2L, 1, 0L
+  )
+  expect_equal(
+    float::dbl(fastPLS:::.float32_from_bits(polynomial$K)),
+    (0.5 * dots + 1)^2,
+    tolerance = 1e-5
+  )
+
+  distances <- outer(
+    seq_len(nrow(left_values)), seq_len(nrow(right_values)),
+    Vectorize(function(i, j) sum((left_values[i, ] - right_values[j, ])^2))
+  )
+  radial <- fastPLS:::kernel_matrix_float32_cpp(
+    left, right, 2L, 0.25, 2L, 1, 0L
+  )
+  expect_equal(
+    float::dbl(fastPLS:::.float32_from_bits(radial$K)),
+    exp(-0.25 * distances),
+    tolerance = 1e-5
+  )
+
+  expect_error(
+    fastPLS:::kernel_matrix_float32_cpp(
+      left, float::fl(matrix(1, 2L, 3L)), 1L, 1, 2L, 0, 0L
+    ),
+    "same number of columns"
+  )
+  expect_error(
+    fastPLS:::kernel_matrix_float32_cpp(left, right, 4L, 1, 2L, 0, 0L),
+    "Unknown kernel type"
+  )
+})
+
 test_that("Windows float32 argmax uses the portable compiled entry point", {
   skip_if_not_installed("float")
   skip_if_not(.Platform$OS.type == "windows", "Windows-only implementation")

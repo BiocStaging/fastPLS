@@ -1,4 +1,5 @@
 #include "svd_cuda_rsvd.h"
+#include "accelerator_core_backend.h"
 
 #ifdef FASTPLS_HAS_CUDA
 
@@ -2524,50 +2525,54 @@ void CudaFloatCrossproduct::orthonormalize(arma::fmat& B) {
   check_cuda(cudaStreamSynchronize(ws.stream()), "synchronize float32 cross-product QR");
 }
 
-arma::fmat cuda_matrix_multiply_float(const arma::fmat& A,
-                                      const arma::fmat& B,
-                                      const bool transpose_left,
-                                      const bool transpose_right) {
+fastpls::core::Matrix<float> cuda_core_gemm_f32(
+    fastpls::core::ConstMatrixView<float> A,
+    fastpls::core::ConstMatrixView<float> B,
+    const bool transpose_left,
+    const bool transpose_right) {
   if (!cuda_runtime_available()) {
     throw std::runtime_error("CUDA runtime not available");
   }
 
-  const arma::uword a_rows = transpose_left ? A.n_cols : A.n_rows;
-  const arma::uword a_cols = transpose_left ? A.n_rows : A.n_cols;
-  const arma::uword b_rows = transpose_right ? B.n_cols : B.n_rows;
-  const arma::uword b_cols = transpose_right ? B.n_rows : B.n_cols;
+  const std::size_t a_rows = transpose_left ? A.columns() : A.rows();
+  const std::size_t a_cols = transpose_left ? A.rows() : A.columns();
+  const std::size_t b_rows = transpose_right ? B.columns() : B.rows();
+  const std::size_t b_cols = transpose_right ? B.rows() : B.columns();
   if (a_cols != b_rows) {
-    throw std::runtime_error("cuda_matrix_multiply_float: non-conformable matrices");
+    throw std::runtime_error("cuda_core_gemm_f32: non-conformable matrices");
   }
-  if (A.n_rows > static_cast<arma::uword>(std::numeric_limits<int>::max()) ||
-      A.n_cols > static_cast<arma::uword>(std::numeric_limits<int>::max()) ||
-      B.n_rows > static_cast<arma::uword>(std::numeric_limits<int>::max()) ||
-      B.n_cols > static_cast<arma::uword>(std::numeric_limits<int>::max())) {
-    throw std::runtime_error("cuda_matrix_multiply_float: matrix dimension exceeds CUDA int limits");
+  if (!A.contiguous() || !B.contiguous()) {
+    throw std::runtime_error("cuda_core_gemm_f32 requires contiguous matrices");
+  }
+  if (A.rows() > static_cast<std::size_t>(std::numeric_limits<int>::max()) ||
+      A.columns() > static_cast<std::size_t>(std::numeric_limits<int>::max()) ||
+      B.rows() > static_cast<std::size_t>(std::numeric_limits<int>::max()) ||
+      B.columns() > static_cast<std::size_t>(std::numeric_limits<int>::max())) {
+    throw std::runtime_error("cuda_core_gemm_f32: matrix dimension exceeds CUDA int limits");
   }
 
   const int m = static_cast<int>(a_rows);
   const int k = static_cast<int>(a_cols);
   const int n = static_cast<int>(b_cols);
   if (m < 1 || k < 1 || n < 1) {
-    return arma::fmat(a_rows, b_cols, arma::fill::zeros);
+    return fastpls::core::Matrix<float>(a_rows, b_cols);
   }
 
-  const size_t elems_A = static_cast<size_t>(A.n_elem);
-  const size_t elems_B = static_cast<size_t>(B.n_elem);
+  const size_t elems_A = A.rows() * A.columns();
+  const size_t elems_B = B.rows() * B.columns();
   const size_t elems_C = static_cast<size_t>(m) * static_cast<size_t>(n);
-  arma::fmat C(a_rows, b_cols, arma::fill::none);
+  fastpls::core::Matrix<float> C(a_rows, b_cols);
   CudaFloatWorkspace& ws = g_float_workspace;
   ws.initialize();
   ws.a.ensure(elems_A);
   ws.b.ensure(elems_B);
   ws.c.ensure(elems_C);
   check_cuda(cudaMemcpyAsync(
-    ws.a.data(), A.memptr(), sizeof(float) * elems_A,
+    ws.a.data(), A.data(), sizeof(float) * elems_A,
     cudaMemcpyHostToDevice, ws.stream()
   ), "cudaMemcpyAsync(cuda_matrix_multiply_float A)");
   check_cuda(cudaMemcpyAsync(
-    ws.b.data(), B.memptr(), sizeof(float) * elems_B,
+    ws.b.data(), B.data(), sizeof(float) * elems_B,
     cudaMemcpyHostToDevice, ws.stream()
   ), "cudaMemcpyAsync(cuda_matrix_multiply_float B)");
 
@@ -2583,9 +2588,9 @@ arma::fmat cuda_matrix_multiply_float(const arma::fmat& A,
       k,
       &one,
       ws.a.data(),
-      static_cast<int>(A.n_rows),
+      static_cast<int>(A.rows()),
       ws.b.data(),
-      static_cast<int>(B.n_rows),
+      static_cast<int>(B.rows()),
       &zero,
       ws.c.data(),
       m
@@ -2593,7 +2598,7 @@ arma::fmat cuda_matrix_multiply_float(const arma::fmat& A,
     "cublasSgemm(cuda_matrix_multiply_float)"
   );
   check_cuda(cudaMemcpyAsync(
-    C.memptr(), ws.c.data(), sizeof(float) * elems_C,
+    C.data(), ws.c.data(), sizeof(float) * elems_C,
     cudaMemcpyDeviceToHost, ws.stream()
   ), "cudaMemcpyAsync(cuda_matrix_multiply_float C)");
   check_cuda(
@@ -2601,6 +2606,24 @@ arma::fmat cuda_matrix_multiply_float(const arma::fmat& A,
     "cudaStreamSynchronize(cuda_matrix_multiply_float)"
   );
   return C;
+}
+
+arma::fmat cuda_matrix_multiply_float(const arma::fmat& A,
+                                      const arma::fmat& B,
+                                      const bool transpose_left,
+                                      const bool transpose_right) {
+  const auto result = cuda_core_gemm_f32(
+    fastpls::core::make_const_view(
+      A.memptr(), A.n_rows, A.n_cols, A.n_rows
+    ),
+    fastpls::core::make_const_view(
+      B.memptr(), B.n_rows, B.n_cols, B.n_rows
+    ),
+    transpose_left, transpose_right
+  );
+  arma::fmat output(result.rows(), result.columns());
+  std::copy(result.data(), result.data() + result.size(), output.memptr());
+  return output;
 }
 
 bool cuda_rsvd_prefer_block_gpu(int m, int n, int l, int power_iters) {
@@ -4586,6 +4609,14 @@ arma::fmat cuda_matrix_multiply_float(const arma::fmat&,
                                       const arma::fmat&,
                                       bool,
                                       bool) {
+  throw std::runtime_error("CUDA backend not compiled");
+}
+
+fastpls::core::Matrix<float> cuda_core_gemm_f32(
+    fastpls::core::ConstMatrixView<float>,
+    fastpls::core::ConstMatrixView<float>,
+    bool,
+    bool) {
   throw std::runtime_error("CUDA backend not compiled");
 }
 
