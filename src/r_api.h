@@ -72,6 +72,10 @@ SEXP _fastPLS_kernel_matrix_float32_cpp(
   SEXP left, SEXP right, SEXP kernel, SEXP gamma, SEXP degree,
   SEXP offset, SEXP backend
 );
+SEXP _fastPLS_opls_apply_filter_float32_cpp(
+  SEXP matrix, SEXP center, SEXP scale, SEXP weights, SEXP loadings,
+  SEXP backend
+);
 SEXP _fastPLS_lda_train_prefix_float32_cpp(SEXP scores, SEXP labels,
                                             SEXP class_count,
                                             SEXP components);

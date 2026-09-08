@@ -92,6 +92,55 @@ test_that("float32 CPU kernels use the standalone matrix boundary", {
   )
 })
 
+test_that("float32 OPLS filtering uses the standalone matrix boundary", {
+  skip_if_not_installed("float")
+  values <- matrix(seq_len(20), nrow = 5L, ncol = 4L) / 7
+  center <- matrix(c(0.2, -0.1, 0.4, 0.3), nrow = 1L)
+  scale <- matrix(c(1.1, 0.8, 1.4, 0.9), nrow = 1L)
+  weights <- matrix(c(0.3, -0.2, 0.4, 0.1), ncol = 1L)
+  loadings <- matrix(c(0.2, 0.3, -0.1, 0.25), ncol = 1L)
+  expected <- sweep(values, 2L, center, "-")
+  expected <- sweep(expected, 2L, scale, "/")
+  expected <- expected - (expected %*% weights) %*% t(loadings)
+
+  filtered <- fastPLS:::opls_apply_filter_float32_cpp(
+    float::fl(values), float::fl(center), float::fl(scale),
+    float::fl(weights), float::fl(loadings), 0L
+  )
+  expect_equal(
+    float::dbl(fastPLS:::.float32_from_bits(filtered$X)), expected,
+    tolerance = 1e-5
+  )
+  for (backend in c(cuda = 1L, metal = 2L)) {
+    available <- if (backend == 1L) has_cuda() else has_metal()
+    if (isTRUE(available)) {
+      accelerated <- fastPLS:::opls_apply_filter_float32_cpp(
+        float::fl(values), float::fl(center), float::fl(scale),
+        float::fl(weights), float::fl(loadings), backend
+      )
+      expect_equal(
+        float::dbl(fastPLS:::.float32_from_bits(accelerated$X)), expected,
+        tolerance = 1e-5,
+        info = paste(names(backend), "OPLS filter")
+      )
+    }
+  }
+  expect_error(
+    fastPLS:::opls_apply_filter_float32_cpp(
+      float::fl(values), float::fl(center[, -1, drop = FALSE]),
+      float::fl(scale), float::fl(weights), float::fl(loadings), 0L
+    ),
+    "stored OPLS preprocessing"
+  )
+  expect_error(
+    fastPLS:::opls_apply_filter_float32_cpp(
+      float::fl(values), float::fl(center), float::fl(scale),
+      float::fl(weights), float::fl(loadings), 3L
+    ),
+    "backend must be 0, 1, or 2"
+  )
+})
+
 test_that("Windows float32 argmax uses the portable compiled entry point", {
   skip_if_not_installed("float")
   skip_if_not(.Platform$OS.type == "windows", "Windows-only implementation")

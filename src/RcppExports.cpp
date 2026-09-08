@@ -52,22 +52,6 @@ BEGIN_RCPP
     return rcpp_result_gen;
 END_RCPP
 }
-// opls_apply_filter_float32_cpp
-Rcpp::List opls_apply_filter_float32_cpp(SEXP XSEXP, SEXP mXSEXP, SEXP vXSEXP, SEXP WSEXP, SEXP PSEXP, int backend);
-RcppExport SEXP _fastPLS_opls_apply_filter_float32_cpp(SEXP XSEXPSEXP, SEXP mXSEXPSEXP, SEXP vXSEXPSEXP, SEXP WSEXPSEXP, SEXP PSEXPSEXP, SEXP backendSEXP) {
-BEGIN_RCPP
-    Rcpp::RObject rcpp_result_gen;
-    Rcpp::RNGScope rcpp_rngScope_gen;
-    Rcpp::traits::input_parameter< SEXP >::type XSEXP(XSEXPSEXP);
-    Rcpp::traits::input_parameter< SEXP >::type mXSEXP(mXSEXPSEXP);
-    Rcpp::traits::input_parameter< SEXP >::type vXSEXP(vXSEXPSEXP);
-    Rcpp::traits::input_parameter< SEXP >::type WSEXP(WSEXPSEXP);
-    Rcpp::traits::input_parameter< SEXP >::type PSEXP(PSEXPSEXP);
-    Rcpp::traits::input_parameter< int >::type backend(backendSEXP);
-    rcpp_result_gen = Rcpp::wrap(opls_apply_filter_float32_cpp(XSEXP, mXSEXP, vXSEXP, WSEXP, PSEXP, backend));
-    return rcpp_result_gen;
-END_RCPP
-}
 // lda_train_prefix_float32_cuda
 Rcpp::List lda_train_prefix_float32_cuda(SEXP TtrainSEXP, const Rcpp::IntegerVector& y, int n_classes, const Rcpp::IntegerVector& ncomp);
 RcppExport SEXP _fastPLS_lda_train_prefix_float32_cuda(SEXP TtrainSEXPSEXP, SEXP ySEXP, SEXP n_classesSEXP, SEXP ncompSEXP) {

@@ -1607,21 +1607,6 @@ arma::fmat float32_backend_matmul(const arma::fmat& A,
   return A * B;
 }
 
-arma::fmat float32_bits_to_fmat_allow_empty(SEXP xSEXP, const char* name) {
-  Rcpp::S4 x(xSEXP);
-  Rcpp::IntegerMatrix bits = x.slot("Data");
-  if (bits.nrow() < 1 || bits.ncol() < 0) {
-    Rcpp::stop("%s must be a float32 matrix", name);
-  }
-  arma::fmat out(bits.nrow(), bits.ncol());
-  const int* src = INTEGER(bits);
-  float* dst = out.memptr();
-  for (arma::uword i = 0; i < out.n_elem; ++i) {
-    std::memcpy(dst + i, src + i, sizeof(float));
-  }
-  return out;
-}
-
 #endif
 
 } // namespace
@@ -1788,41 +1773,6 @@ Rcpp::List opls_filter_float32_labels_cpp(
     Rcpp::Named("W_orth") = fmat_to_float32_bits(filter.W),
     Rcpp::Named("P_orth") = fmat_to_float32_bits(filter.P),
     Rcpp::Named("north") = filter.completed
-  );
-}
-
-// [[Rcpp::export]]
-Rcpp::List opls_apply_filter_float32_cpp(SEXP XSEXP,
-                                         SEXP mXSEXP,
-                                         SEXP vXSEXP,
-                                         SEXP WSEXP,
-                                         SEXP PSEXP,
-                                         int backend) {
-  arma::fmat X = float32_bits_to_fmat(XSEXP, "X");
-  const arma::frowvec mX = arma::vectorise(
-    float32_bits_to_fmat(mXSEXP, "mX"), 1
-  );
-  const arma::frowvec vX = arma::vectorise(
-    float32_bits_to_fmat(vXSEXP, "vX"), 1
-  );
-  if (X.n_cols != mX.n_cols || X.n_cols != vX.n_cols) {
-    Rcpp::stop("X columns must match stored OPLS preprocessing");
-  }
-  X.each_row() -= mX;
-  X.each_row() /= vX;
-  const arma::fmat W = float32_bits_to_fmat_allow_empty(WSEXP, "W_orth");
-  const arma::fmat P = float32_bits_to_fmat_allow_empty(PSEXP, "P_orth");
-  if (W.n_cols != P.n_cols || W.n_rows != X.n_cols || P.n_rows != X.n_cols) {
-    Rcpp::stop("Invalid OPLS orthogonal filter dimensions");
-  }
-  for (arma::uword component = 0; component < W.n_cols; ++component) {
-    const arma::fmat w = W.col(component);
-    const arma::fmat p = P.col(component);
-    const arma::fmat t = float32_backend_matmul(X, w, backend, false, false);
-    X -= float32_backend_matmul(t, p, backend, false, true);
-  }
-  return Rcpp::List::create(
-    Rcpp::Named("X") = fmat_to_float32_bits(X)
   );
 }
 
@@ -3184,10 +3134,6 @@ Rcpp::List opls_filter_float32_labels_cpp(SEXP XSEXP,
                                            int svd_method,
                                            int rsvd_oversample,
                                            int rsvd_power, int seed) {
-  return windows_float32_unavailable();
-}
-
-Rcpp::List opls_apply_filter_float32_cpp(SEXP XSEXP, SEXP mXSEXP, SEXP vXSEXP, SEXP WSEXP, SEXP PSEXP, int backend) {
   return windows_float32_unavailable();
 }
 
