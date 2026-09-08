@@ -3,6 +3,8 @@
 
 #include "svd_cuda_rsvd.h"
 #include "svd_metal_backend.h"
+#include "core_cpu_backend.h"
+#include <fastpls/core/operators.hpp>
 #include <fastpls/native/operators.hpp>
 #include <stdexcept>
 
@@ -24,8 +26,17 @@ class FloatCrosscovOperator {
     else if (backend == 2 || backend == 3) {
       metal_.reset(new MetalFloatCrossproduct(X, Y));
     }
-    else if (backend == 0) cpu_.reset(new fastpls::native::CrosscovOperator<float>(
-      X, Y, max_components));
+    else if (backend == 0) {
+      cpu_.reset(new CpuCrosscov(
+        fastpls::core::make_const_view(
+          X.memptr(), X.n_rows, X.n_cols, X.n_rows
+        ),
+        fastpls::core::make_const_view(
+          Y.memptr(), Y.n_rows, Y.n_cols, Y.n_rows
+        ),
+        max_components, cpu_backend_
+      ));
+    }
     else throw std::runtime_error("Invalid float32 cross-product backend");
   }
   arma::uword workspace_rows() const { return Y_.n_rows; }
@@ -37,7 +48,19 @@ class FloatCrosscovOperator {
     arma::fmat result;
     if (cuda_) result = cuda_->multiply(B, transpose);
     else if (metal_) result = metal_->multiply(B, transpose);
-    else result = cpu_->multiply(B, transpose);
+    else {
+      const arma::uword output_rows = transpose ? n_cols : n_rows;
+      result.set_size(output_rows, B.n_cols);
+      cpu_->multiply(
+        fastpls::core::make_const_view(
+          B.memptr(), B.n_rows, B.n_cols, B.n_rows
+        ),
+        transpose,
+        fastpls::core::make_view(
+          result.memptr(), result.n_rows, result.n_cols, result.n_rows
+        )
+      );
+    }
     return result;
   }
 
@@ -47,7 +70,11 @@ class FloatCrosscovOperator {
     }
     if (cuda_) cuda_->deflate(v);
     else if (metal_) metal_->deflate(v);
-    else cpu_->deflate(v);
+    else {
+      cpu_->deflate(fastpls::core::make_const_view(
+        v.memptr(), v.n_elem, std::size_t(1), v.n_elem
+      ));
+    }
     ++active_;
   }
 
@@ -55,7 +82,31 @@ class FloatCrosscovOperator {
     // Exact factor-product reduction for breakdown/full-rank cases, without
     // allocating the p-by-q operator. This reduced decomposition is host-side.
     if (cpu_) {
-      cpu_->full_svd(U, d, V, left_only);
+      fastpls::core::Matrix<float> matrix;
+      fastpls::core::Matrix<float> core_u;
+      fastpls::core::Matrix<float> core_vt;
+      std::vector<float> singular;
+      cpu_->materialize(matrix);
+      if (!cpu_backend_.svd_economy(
+            matrix.view(), left_only, core_u, singular, core_vt)) {
+        throw std::runtime_error(
+          "float32 cross-covariance decomposition failed"
+        );
+      }
+      U = arma::fmat(
+        core_u.data(), core_u.rows(), core_u.columns()
+      );
+      d = arma::fvec(singular.data(), singular.size());
+      if (left_only) {
+        V.reset();
+      } else {
+        V.set_size(core_vt.columns(), core_vt.rows());
+        for (arma::uword column = 0; column < V.n_cols; ++column) {
+          for (arma::uword row = 0; row < V.n_rows; ++row) {
+            V(row, column) = core_vt(column, row);
+          }
+        }
+      }
       return;
     }
     arma::fmat factor = cuda_ ? cuda_->left_factor() : metal_->left_factor();
@@ -73,8 +124,12 @@ class FloatCrosscovOperator {
   const arma::uword n_rows, n_cols;
 
  private:
+  using CpuCrosscov = fastpls::core::CrosscovOperator<
+    float, fastpls::runtime::CpuLinearAlgebraF32
+  >;
   const arma::fmat& Y_;
-  std::unique_ptr<fastpls::native::CrosscovOperator<float>> cpu_;
+  fastpls::runtime::CpuLinearAlgebraF32 cpu_backend_;
+  std::unique_ptr<CpuCrosscov> cpu_;
   const arma::uword capacity_;
   arma::uword active_ = 0;
   std::unique_ptr<CudaFloatCrossproduct> cuda_;

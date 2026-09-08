@@ -32,7 +32,12 @@ class ExplicitOperator {
                 Matrix<T>& output) {
     const std::size_t output_rows = transpose ? columns() : rows();
     output.resize(output_rows, right.columns());
-    backend_.gemm(matrix_, right, transpose, false, output.view());
+    multiply(right, transpose, output.view());
+  }
+
+  void multiply(ConstMatrixView<T> right, bool transpose,
+                MatrixView<T> output) {
+    backend_.gemm(matrix_, right, transpose, false, output);
   }
 
   void materialize(Matrix<T>& output) const {
@@ -84,8 +89,18 @@ class CrosscovOperator {
 
   void multiply(ConstMatrixView<T> right, bool transpose,
                 Matrix<T>& output) {
+    const std::size_t output_rows = transpose ? columns() : rows();
+    output.resize(output_rows, right.columns());
+    multiply(right, transpose, output.view());
+  }
+
+  void multiply(ConstMatrixView<T> right, bool transpose,
+                MatrixView<T> output) {
     const std::size_t expected_rows = transpose ? rows() : columns();
-    if (right.rows() != expected_rows) {
+    const std::size_t expected_output_rows = transpose ? columns() : rows();
+    if (right.rows() != expected_rows ||
+        output.rows() != expected_output_rows ||
+        output.columns() != right.columns()) {
       throw std::invalid_argument(
         "fastPLS cross-covariance product dimensions are inconsistent"
       );
@@ -95,17 +110,15 @@ class CrosscovOperator {
       backend_.gemm(
         left_.view(), right, false, false, intermediate_.view()
       );
-      output.resize(columns(), right.columns());
       backend_.gemm(
-        responses_, intermediate_.view(), true, false, output.view()
+        responses_, intermediate_.view(), true, false, output
       );
     } else {
       backend_.gemm(
         responses_, right, false, false, intermediate_.view()
       );
-      output.resize(rows(), right.columns());
       backend_.gemm(
-        left_.view(), intermediate_.view(), true, false, output.view()
+        left_.view(), intermediate_.view(), true, false, output
       );
     }
   }
@@ -133,8 +146,17 @@ class CrosscovOperator {
 
   void materialize(Matrix<T>& output) {
     output.resize(rows(), columns());
+    materialize(output.view());
+  }
+
+  void materialize(MatrixView<T> output) {
+    if (output.rows() != rows() || output.columns() != columns()) {
+      throw std::invalid_argument(
+        "fastPLS cross-covariance materialization dimensions are inconsistent"
+      );
+    }
     backend_.gemm(
-      left_.view(), responses_, true, false, output.view()
+      left_.view(), responses_, true, false, output
     );
   }
 
