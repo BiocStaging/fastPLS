@@ -80,6 +80,10 @@ if(BUILD_TESTING)
   target_link_libraries(test_core_operator_rsvd PRIVATE fastpls_core)
   add_test(NAME core_operator_rsvd COMMAND test_core_operator_rsvd)
 
+  add_executable(test_core_simpls tests/test_core_simpls.cpp)
+  target_link_libraries(test_core_simpls PRIVATE fastpls_core)
+  add_test(NAME core_simpls COMMAND test_core_simpls)
+
   add_executable(test_core_kernels tests/test_core_kernels.cpp)
   target_link_libraries(test_core_kernels PRIVATE fastpls_core)
   add_test(NAME core_kernels COMMAND test_core_kernels)

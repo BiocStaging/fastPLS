@@ -31,6 +31,8 @@ namespace {
 using CblasSgemm = void (*)(int, int, int, int, int, int, float,
                             const float*, int, const float*, int, float,
                             float*, int);
+using CblasSgemv = void (*)(int, int, int, int, float, const float*, int,
+                            const float*, int, float, float*, int);
 using CblasDgemm = void (*)(int, int, int, int, int, int, double,
                             const double*, int, const double*, int, double,
                             double*, int);
@@ -42,6 +44,13 @@ using CblasDgemm = void (*)(int, int, int, int, int, int, double,
 CblasSgemm system_cblas_sgemm() {
   static CblasSgemm function = reinterpret_cast<CblasSgemm>(
     dlsym(RTLD_DEFAULT, "cblas_sgemm")
+  );
+  return function;
+}
+
+CblasSgemv system_cblas_sgemv() {
+  static CblasSgemv function = reinterpret_cast<CblasSgemv>(
+    dlsym(RTLD_DEFAULT, "cblas_sgemv")
   );
   return function;
 }
@@ -73,6 +82,12 @@ CblasSgemm linked_openblas_sgemm() {
   return function;
 }
 
+CblasSgemv linked_openblas_sgemv() {
+  static CblasSgemv function =
+    linked_openblas_function<CblasSgemv>("cblas_sgemv");
+  return function;
+}
+
 CblasDgemm linked_openblas_dgemm() {
   static CblasDgemm function =
     linked_openblas_function<CblasDgemm>("cblas_dgemm");
@@ -99,6 +114,48 @@ void configure_openblas_threads() {
   }
 }
 #endif
+
+bool cpu_gemv_f32(core::ConstMatrixView<float> matrix,
+                  bool transpose,
+                  const float* vector,
+                  float* output) {
+  if (vector == nullptr || output == nullptr) return false;
+#if defined(FASTPLS_USE_ACCELERATE)
+  cblas_sgemv(
+    CblasColMajor, transpose ? CblasTrans : CblasNoTrans,
+    static_cast<int>(matrix.rows()),
+    static_cast<int>(matrix.columns()), 1.0f, matrix.data(),
+    static_cast<int>(matrix.leading_dimension()), vector, 1, 0.0f,
+    output, 1
+  );
+  return true;
+#elif defined(FASTPLS_USE_OPENBLAS)
+  configure_openblas_threads();
+  const CblasSgemv sgemv = linked_openblas_sgemv();
+  if (sgemv == nullptr) return false;
+  sgemv(
+    102, transpose ? 112 : 111,
+    static_cast<int>(matrix.rows()),
+    static_cast<int>(matrix.columns()), 1.0f, matrix.data(),
+    static_cast<int>(matrix.leading_dimension()), vector, 1, 0.0f,
+    output, 1
+  );
+  return true;
+#elif !defined(_WIN32) && !defined(__APPLE__)
+  const CblasSgemv sgemv = system_cblas_sgemv();
+  if (sgemv == nullptr) return false;
+  sgemv(
+    102, transpose ? 112 : 111,
+    static_cast<int>(matrix.rows()),
+    static_cast<int>(matrix.columns()), 1.0f, matrix.data(),
+    static_cast<int>(matrix.leading_dimension()), vector, 1, 0.0f,
+    output, 1
+  );
+  return true;
+#else
+  return false;
+#endif
+}
 
 }  // namespace
 
@@ -132,6 +189,16 @@ void cpu_gemm_f32(core::ConstMatrixView<float> left,
   if (inner_left != inner_right || output.rows() != rows ||
       output.columns() != columns) {
     throw std::invalid_argument("fastPLS CPU matrix-product dimensions are inconsistent");
+  }
+
+  if (!transpose_right && right.columns() == 1 &&
+      cpu_gemv_f32(left, transpose_left, right.data(), output.data())) {
+    return;
+  }
+  if (transpose_left && !transpose_right && left.columns() == 1 &&
+      output.rows() == 1 && cpu_gemv_f32(
+        right, true, left.data(), output.data())) {
+    return;
   }
 
 #if defined(FASTPLS_USE_ACCELERATE)
