@@ -10,6 +10,7 @@
 #include <fastpls/core/statistics.hpp>
 
 #include <algorithm>
+#include <cmath>
 #include <cstdint>
 #include <cstring>
 #include <exception>
@@ -135,6 +136,39 @@ fastpls::core::Matrix<double> numeric_matrix_from_sexp(SEXP object,
   return values;
 }
 
+fastpls::core::ConstMatrixView<double> numeric_matrix_view(
+    SEXP object, const char* name) {
+  if (!Rf_isMatrix(object) || TYPEOF(object) != REALSXP) {
+    throw std::invalid_argument(std::string(name) + " must be a double matrix");
+  }
+  const SEXP dimensions = Rf_getAttrib(object, R_DimSymbol);
+  if (TYPEOF(dimensions) != INTSXP || XLENGTH(dimensions) != 2 ||
+      INTEGER(dimensions)[0] < 1 || INTEGER(dimensions)[1] < 1) {
+    throw std::invalid_argument(std::string(name) + " must be non-empty");
+  }
+  const std::size_t rows = static_cast<std::size_t>(INTEGER(dimensions)[0]);
+  return fastpls::core::make_const_view(
+    REAL(object), rows, static_cast<std::size_t>(INTEGER(dimensions)[1]), rows
+  );
+}
+
+std::vector<double> numeric_values(SEXP object, const char* name) {
+  if (TYPEOF(object) != REALSXP && TYPEOF(object) != INTSXP) {
+    throw std::invalid_argument(std::string(name) + " must be numeric");
+  }
+  std::vector<double> values(static_cast<std::size_t>(XLENGTH(object)));
+  if (TYPEOF(object) == REALSXP) {
+    std::copy(REAL(object), REAL(object) + values.size(), values.begin());
+  } else {
+    for (std::size_t index = 0; index < values.size(); ++index) {
+      const int value = INTEGER(object)[index];
+      values[index] = value == NA_INTEGER ? NA_REAL :
+        static_cast<double>(value);
+    }
+  }
+  return values;
+}
+
 SEXP float_bits_matrix(const fastpls::core::Matrix<float>& values) {
   SEXP result = Rf_allocMatrix(
     INTSXP, static_cast<int>(values.rows()), static_cast<int>(values.columns())
@@ -180,6 +214,206 @@ SEXP float_lda_model(const fastpls::core::LdaModel<float>& model) {
   Rf_setAttrib(output, R_NamesSymbol, names);
   UNPROTECT(2);
   return output;
+}
+
+SEXP double_row_matrix(const std::vector<double>& values) {
+  SEXP output = Rf_allocMatrix(REALSXP, 1, static_cast<int>(values.size()));
+  std::copy(values.begin(), values.end(), REAL(output));
+  return output;
+}
+
+SEXP double_column_matrix(const std::vector<double>& values) {
+  SEXP output = Rf_allocMatrix(REALSXP, static_cast<int>(values.size()), 1);
+  std::copy(values.begin(), values.end(), REAL(output));
+  return output;
+}
+
+SEXP double_lda_model(const fastpls::core::LdaModel<double>& model,
+                      const char* backend = nullptr) {
+  const int field_count = backend == nullptr ? 7 : 8;
+  SEXP output = PROTECT(Rf_allocVector(VECSXP, field_count));
+  SET_VECTOR_ELT(output, 0, numeric_matrix(model.means));
+  SET_VECTOR_ELT(output, 1, Rf_allocMatrix(REALSXP, 0, 0));
+  SET_VECTOR_ELT(output, 2, numeric_matrix(model.linear));
+  SET_VECTOR_ELT(output, 3, double_row_matrix(model.constants));
+  SET_VECTOR_ELT(output, 4, double_column_matrix(model.priors));
+  SET_VECTOR_ELT(output, 5, Rf_ScalarReal(model.ridge));
+  SET_VECTOR_ELT(output, 6, Rf_ScalarReal(model.relative_ridge));
+  if (backend != nullptr) SET_VECTOR_ELT(output, 7, Rf_mkString(backend));
+  SEXP names = PROTECT(Rf_allocVector(STRSXP, field_count));
+  const char* labels[] = {
+    "means", "inv_cov", "linear", "constants", "priors", "ridge",
+    "ridge_relative", "backend"
+  };
+  for (int index = 0; index < field_count; ++index) {
+    SET_STRING_ELT(names, index, Rf_mkChar(labels[index]));
+  }
+  Rf_setAttrib(output, R_NamesSymbol, names);
+  UNPROTECT(2);
+  return output;
+}
+
+SEXP double_lda_models(
+    const std::vector<fastpls::core::LdaModel<double>>& models,
+    const int* components, const char* backend = nullptr) {
+  SEXP output = PROTECT(Rf_allocVector(VECSXP, models.size()));
+  SEXP names = PROTECT(Rf_allocVector(STRSXP, models.size()));
+  for (std::size_t index = 0; index < models.size(); ++index) {
+    SET_VECTOR_ELT(output, index, double_lda_model(models[index], backend));
+    SET_STRING_ELT(
+      names, index, Rf_mkChar(std::to_string(components[index]).c_str())
+    );
+  }
+  Rf_setAttrib(output, R_NamesSymbol, names);
+  UNPROTECT(2);
+  return output;
+}
+
+std::vector<fastpls::core::LdaModel<double>> train_double_lda(
+    fastpls::core::ConstMatrixView<double> scores, const int* labels,
+    std::size_t label_count, std::size_t class_count,
+    const int* components, std::size_t component_count) {
+  if (scores.empty() || labels == nullptr || scores.rows() != label_count ||
+      class_count < 2 || components == nullptr || component_count < 1) {
+    throw std::invalid_argument("fastPLS LDA training dimensions are invalid");
+  }
+  std::size_t maximum = 0;
+  for (std::size_t index = 0; index < component_count; ++index) {
+    if (components[index] < 1 ||
+        static_cast<std::size_t>(components[index]) > scores.columns()) {
+      throw std::invalid_argument(
+        "fastPLS LDA component counts must be within the score dimension"
+      );
+    }
+    maximum = std::max(maximum, static_cast<std::size_t>(components[index]));
+  }
+
+  std::vector<double> counts(class_count, 0.0);
+  fastpls::core::Matrix<double> class_sums(class_count, maximum);
+  for (std::size_t sample = 0; sample < scores.rows(); ++sample) {
+    const int encoded = labels[sample] - 1;
+    if (encoded < 0 || static_cast<std::size_t>(encoded) >= class_count) {
+      throw std::invalid_argument(
+        "fastPLS LDA labels must be encoded as 1..n_classes"
+      );
+    }
+    const std::size_t class_index = static_cast<std::size_t>(encoded);
+    counts[class_index] += 1.0;
+    for (std::size_t component = 0; component < maximum; ++component) {
+      class_sums(class_index, component) += scores(sample, component);
+    }
+  }
+  const auto retained_scores = fastpls::core::make_const_view(
+    scores.data(), scores.rows(), maximum, scores.leading_dimension()
+  );
+  fastpls::core::Matrix<double> gram(maximum, maximum);
+  fastpls::runtime::cpu_gemm_f64(
+    retained_scores, retained_scores, true, false, gram.view()
+  );
+  return fastpls::core::train_lda_prefixes_from_moments<double>(
+    gram.view(), class_sums.view(), counts.data(), counts.size(),
+    scores.rows(), components, component_count
+  );
+}
+
+fastpls::core::LdaModel<double> double_lda_model_from_sexp(SEXP object) {
+  fastpls::core::LdaModel<double> model;
+  model.linear = numeric_matrix_from_sexp(
+    list_element(object, "linear"), "lda$linear"
+  );
+  model.constants = numeric_values(
+    list_element(object, "constants"), "lda$constants"
+  );
+  return model;
+}
+
+SEXP integer_predictions(const std::vector<int>& predictions) {
+  SEXP output = Rf_allocVector(INTSXP, predictions.size());
+  std::copy(predictions.begin(), predictions.end(), INTEGER(output));
+  return output;
+}
+
+class ProtectStack {
+ public:
+  SEXP add(SEXP object) {
+    PROTECT(object);
+    ++count_;
+    return object;
+  }
+
+  ~ProtectStack() { UNPROTECT(count_); }
+
+ private:
+  int count_ = 0;
+};
+
+template<class Callable>
+SEXP translate_exceptions(const char* context, Callable&& callable) {
+  try {
+    return callable();
+  } catch (const std::exception& exception) {
+    Rf_error("%s", exception.what());
+  } catch (...) {
+    Rf_error("Unknown error in %s", context);
+  }
+  return R_NilValue;
+}
+
+fastpls::core::Matrix<double> project_double_scores(
+    fastpls::core::ConstMatrixView<double> values,
+    fastpls::core::ConstMatrixView<double> projection,
+    const std::vector<double>& offset) {
+  if (values.columns() != projection.rows() || projection.columns() < 1 ||
+      (!offset.empty() && offset.size() < projection.columns())) {
+    throw std::invalid_argument(
+      "fastPLS projected LDA dimensions are inconsistent"
+    );
+  }
+  fastpls::core::Matrix<double> scores(values.rows(), projection.columns());
+  fastpls::runtime::cpu_gemm_f64(
+    values, projection, false, false, scores.view()
+  );
+  if (!offset.empty()) {
+    for (std::size_t column = 0; column < scores.columns(); ++column) {
+      for (std::size_t row = 0; row < scores.rows(); ++row) {
+        scores(row, column) -= offset[column];
+      }
+    }
+  }
+  return scores;
+}
+
+std::vector<int> labels_from_discriminants(
+    fastpls::core::ConstMatrixView<double> discriminants) {
+  std::vector<int> predictions(discriminants.rows());
+  for (std::size_t row = 0; row < discriminants.rows(); ++row) {
+    predictions[row] = static_cast<int>(
+      fastpls::core::row_argmax(discriminants, row) + 1
+    );
+  }
+  return predictions;
+}
+
+fastpls::core::Matrix<double> double_lda_discriminants(
+    fastpls::core::ConstMatrixView<double> scores,
+    const fastpls::core::LdaModel<double>& model) {
+  if (scores.empty() || scores.columns() != model.linear.columns() ||
+      model.linear.rows() != model.constants.size()) {
+    throw std::invalid_argument("fastPLS LDA prediction dimensions are invalid");
+  }
+  fastpls::core::Matrix<double> discriminants(
+    scores.rows(), model.linear.rows()
+  );
+  fastpls::runtime::cpu_gemm_f64(
+    scores, model.linear.view(), false, true, discriminants.view()
+  );
+  for (std::size_t class_index = 0;
+       class_index < discriminants.columns(); ++class_index) {
+    for (std::size_t row = 0; row < discriminants.rows(); ++row) {
+      discriminants(row, class_index) += model.constants[class_index];
+    }
+  }
+  return discriminants;
 }
 
 }  // namespace
@@ -236,6 +470,192 @@ extern "C" SEXP _fastPLS_rsvd_audit_summary_debug() {
   Rf_setAttrib(output, R_NamesSymbol, names);
   UNPROTECT(2);
   return output;
+}
+
+extern "C" SEXP _fastPLS_lda_train_prefix_cpp(
+    SEXP scores, SEXP labels, SEXP class_count, SEXP components, SEXP ridge) {
+  return translate_exceptions("double PLS-LDA fitting", [&] {
+    ProtectStack protect;
+    SEXP scores_real = protect.add(Rf_coerceVector(scores, REALSXP));
+    SEXP labels_integer = protect.add(Rf_coerceVector(labels, INTSXP));
+    SEXP components_integer = protect.add(
+      Rf_coerceVector(components, INTSXP)
+    );
+    (void)ridge;  // The regularization sequence is deterministic.
+    const int classes = Rf_asInteger(class_count);
+    if (classes < 2) {
+      throw std::invalid_argument("fastPLS LDA requires at least two classes");
+    }
+    const auto models = train_double_lda(
+      numeric_matrix_view(scores_real, "Ttrain"), INTEGER(labels_integer),
+      static_cast<std::size_t>(XLENGTH(labels_integer)),
+      static_cast<std::size_t>(classes), INTEGER(components_integer),
+      static_cast<std::size_t>(XLENGTH(components_integer))
+    );
+    return protect.add(double_lda_models(
+      models, INTEGER(components_integer)
+    ));
+  });
+}
+
+extern "C" SEXP _fastPLS_lda_train_moments_prefix_cpp(
+    SEXP gram, SEXP class_sums, SEXP counts, SEXP sample_count,
+    SEXP components) {
+  return translate_exceptions("moment-based double PLS-LDA fitting", [&] {
+    ProtectStack protect;
+    SEXP gram_real = protect.add(Rf_coerceVector(gram, REALSXP));
+    SEXP sums_real = protect.add(Rf_coerceVector(class_sums, REALSXP));
+    SEXP counts_real = protect.add(Rf_coerceVector(counts, REALSXP));
+    SEXP components_integer = protect.add(
+      Rf_coerceVector(components, INTSXP)
+    );
+    const int samples = Rf_asInteger(sample_count);
+    if (samples < 1) {
+      throw std::invalid_argument("fastPLS LDA sample count must be positive");
+    }
+    const auto count_values = numeric_values(counts_real, "counts");
+    const auto models =
+      fastpls::core::train_lda_prefixes_from_moments<double>(
+        numeric_matrix_view(gram_real, "gram"),
+        numeric_matrix_view(sums_real, "class_sums"), count_values.data(),
+        count_values.size(), static_cast<std::size_t>(samples),
+        INTEGER(components_integer),
+        static_cast<std::size_t>(XLENGTH(components_integer))
+      );
+    return protect.add(double_lda_models(
+      models, INTEGER(components_integer)
+    ));
+  });
+}
+
+extern "C" SEXP _fastPLS_lda_project_train_prefix_cpp(
+    SEXP predictors, SEXP projection, SEXP offset, SEXP labels,
+    SEXP class_count, SEXP components, SEXP ridge) {
+  return translate_exceptions("projected double PLS-LDA fitting", [&] {
+    ProtectStack protect;
+    SEXP predictors_real = protect.add(Rf_coerceVector(predictors, REALSXP));
+    SEXP projection_real = protect.add(Rf_coerceVector(projection, REALSXP));
+    SEXP offset_real = protect.add(Rf_coerceVector(offset, REALSXP));
+    SEXP labels_integer = protect.add(Rf_coerceVector(labels, INTSXP));
+    SEXP components_integer = protect.add(
+      Rf_coerceVector(components, INTSXP)
+    );
+    (void)ridge;
+    const auto x = numeric_matrix_view(predictors_real, "Xtrain");
+    const auto weights = numeric_matrix_view(projection_real, "R");
+    const auto offsets = numeric_values(offset_real, "offset");
+    const auto scores = project_double_scores(x, weights, offsets);
+    const int classes = Rf_asInteger(class_count);
+    if (classes < 2) {
+      throw std::invalid_argument("fastPLS LDA requires at least two classes");
+    }
+    const auto models = train_double_lda(
+      scores.view(), INTEGER(labels_integer),
+      static_cast<std::size_t>(XLENGTH(labels_integer)),
+      static_cast<std::size_t>(classes), INTEGER(components_integer),
+      static_cast<std::size_t>(XLENGTH(components_integer))
+    );
+    return protect.add(double_lda_models(
+      models, INTEGER(components_integer), "cpp_project"
+    ));
+  });
+}
+
+extern "C" SEXP _fastPLS_lda_predict_cpp(SEXP scores, SEXP model) {
+  return translate_exceptions("double PLS-LDA prediction", [&] {
+    ProtectStack protect;
+    SEXP scores_real = protect.add(Rf_coerceVector(scores, REALSXP));
+    const auto values = numeric_matrix_view(scores_real, "Ttest");
+    const auto fitted = double_lda_model_from_sexp(model);
+    const auto discriminants = double_lda_discriminants(values, fitted);
+    const auto predictions = labels_from_discriminants(discriminants.view());
+    SEXP output = protect.add(Rf_allocVector(VECSXP, 2));
+    SET_VECTOR_ELT(output, 0, integer_predictions(predictions));
+    SET_VECTOR_ELT(output, 1, numeric_matrix(discriminants));
+    SEXP names = protect.add(Rf_allocVector(STRSXP, 2));
+    SET_STRING_ELT(names, 0, Rf_mkChar("pred"));
+    SET_STRING_ELT(names, 1, Rf_mkChar("scores"));
+    Rf_setAttrib(output, R_NamesSymbol, names);
+    return output;
+  });
+}
+
+extern "C" SEXP _fastPLS_lda_predict_labels_cpp(SEXP scores, SEXP model) {
+  return translate_exceptions("double PLS-LDA label prediction", [&] {
+    ProtectStack protect;
+    SEXP scores_real = protect.add(Rf_coerceVector(scores, REALSXP));
+    const auto discriminants = double_lda_discriminants(
+      numeric_matrix_view(scores_real, "Ttest"),
+      double_lda_model_from_sexp(model)
+    );
+    const auto predictions = labels_from_discriminants(discriminants.view());
+    return protect.add(integer_predictions(predictions));
+  });
+}
+
+extern "C" SEXP _fastPLS_lda_project_predict_labels_cpp(
+    SEXP predictors, SEXP projection, SEXP offset, SEXP model) {
+  return translate_exceptions("projected double PLS-LDA prediction", [&] {
+    ProtectStack protect;
+    SEXP predictors_real = protect.add(Rf_coerceVector(predictors, REALSXP));
+    SEXP projection_real = protect.add(Rf_coerceVector(projection, REALSXP));
+    SEXP offset_real = protect.add(Rf_coerceVector(offset, REALSXP));
+    const auto x = numeric_matrix_view(predictors_real, "Xtest");
+    const auto weights = numeric_matrix_view(projection_real, "R");
+    const auto offsets = numeric_values(offset_real, "offset");
+    const auto fitted = double_lda_model_from_sexp(model);
+    if (x.columns() != weights.rows() ||
+        weights.columns() != fitted.linear.columns() ||
+        fitted.linear.rows() != fitted.constants.size() ||
+        (!offsets.empty() && offsets.size() < weights.columns())) {
+      throw std::invalid_argument(
+        "fastPLS projected LDA prediction dimensions are inconsistent"
+      );
+    }
+
+    const double latent_work = static_cast<double>(x.rows()) *
+      static_cast<double>(weights.columns()) *
+      static_cast<double>(x.columns() + fitted.linear.rows());
+    const double direct_work = static_cast<double>(x.rows()) *
+      static_cast<double>(x.columns()) *
+      static_cast<double>(fitted.linear.rows());
+    std::vector<int> predictions;
+    if (std::isfinite(latent_work) && std::isfinite(direct_work) &&
+        direct_work < 0.5 * latent_work) {
+      fastpls::core::Matrix<double> direct_weights(
+        weights.rows(), fitted.linear.rows()
+      );
+      fastpls::runtime::cpu_gemm_f64(
+        weights, fitted.linear.view(), false, true, direct_weights.view()
+      );
+      fastpls::core::Matrix<double> discriminants(
+        x.rows(), fitted.linear.rows()
+      );
+      fastpls::runtime::cpu_gemm_f64(
+        x, direct_weights.view(), false, false, discriminants.view()
+      );
+      for (std::size_t class_index = 0;
+           class_index < discriminants.columns(); ++class_index) {
+        double constant = fitted.constants[class_index];
+        for (std::size_t component = 0;
+             component < weights.columns() && !offsets.empty(); ++component) {
+          constant -= offsets[component] *
+            fitted.linear(class_index, component);
+        }
+        for (std::size_t row = 0; row < discriminants.rows(); ++row) {
+          discriminants(row, class_index) += constant;
+        }
+      }
+      predictions = labels_from_discriminants(discriminants.view());
+    } else {
+      const auto projected = project_double_scores(x, weights, offsets);
+      const auto discriminants = double_lda_discriminants(
+        projected.view(), fitted
+      );
+      predictions = labels_from_discriminants(discriminants.view());
+    }
+    return protect.add(integer_predictions(predictions));
+  });
 }
 
 extern "C" SEXP _fastPLS_spearman_correlation_cpp(SEXP observed,

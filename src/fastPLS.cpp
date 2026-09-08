@@ -3370,7 +3370,6 @@ Rcpp::List lda_train_moments_core(
 
 } // namespace
 
-// [[Rcpp::export]]
 Rcpp::List lda_train_prefix_cpp(const arma::mat& Ttrain,
                                 const Rcpp::IntegerVector& y,
                                 int n_classes,
@@ -3424,43 +3423,12 @@ Rcpp::List lda_train_prefix_cpp(const arma::mat& Ttrain,
   );
 }
 
-// [[Rcpp::export]]
 Rcpp::List lda_train_moments_prefix_cpp(const arma::mat& gram,
                                         const arma::mat& class_sums,
                                         const arma::vec& counts,
                                         int n,
                                         const Rcpp::IntegerVector& ncomp) {
   return lda_train_moments_core(gram, class_sums, counts, n, ncomp);
-}
-
-// [[Rcpp::export]]
-Rcpp::List lda_project_train_prefix_cpp(const arma::mat& Xtrain,
-                                        const arma::mat& R,
-                                        const arma::rowvec& offset,
-                                        const Rcpp::IntegerVector& y,
-                                        int n_classes,
-                                        const Rcpp::IntegerVector& ncomp,
-                                        double ridge) {
-  if (Xtrain.n_rows == 0 || Xtrain.n_cols == 0) {
-    stop("lda_project_train_prefix_cpp requires a non-empty predictor matrix");
-  }
-  if (R.n_rows != Xtrain.n_cols || R.n_cols == 0) {
-    stop("lda_project_train_prefix_cpp projection matrix has incompatible dimensions");
-  }
-  if (offset.n_elem > 0 && offset.n_elem < R.n_cols) {
-    stop("lda_project_train_prefix_cpp offset is shorter than the projection dimension");
-  }
-  arma::mat Ttrain = Xtrain * R;
-  if (offset.n_elem >= R.n_cols) {
-    Ttrain.each_row() -= offset.subvec(0, R.n_cols - 1);
-  }
-  Rcpp::List models = lda_train_prefix_cpp(Ttrain, y, n_classes, ncomp, ridge);
-  for (R_xlen_t i = 0; i < models.size(); ++i) {
-    Rcpp::List model = models[i];
-    model["backend"] = "cpp_project";
-    models[i] = model;
-  }
-  return models;
 }
 
 // [[Rcpp::export]]
@@ -3547,114 +3515,6 @@ Rcpp::List lda_project_train_prefix_cuda(const arma::mat& Xtrain,
   }
   models.attr("names") = model_names;
   return models;
-}
-
-// [[Rcpp::export]]
-Rcpp::List lda_predict_cpp(const arma::mat& Ttest,
-                           const Rcpp::List& lda) {
-  if (Ttest.n_rows == 0 || Ttest.n_cols == 0) {
-    stop("lda_predict_cpp requires a non-empty score matrix");
-  }
-  arma::mat linear = Rcpp::as<arma::mat>(lda["linear"]);
-  arma::rowvec constants = Rcpp::as<arma::rowvec>(lda["constants"]);
-  if (Ttest.n_cols != linear.n_cols) {
-    stop("lda_predict_cpp score dimension does not match the LDA model");
-  }
-  if (constants.n_elem != linear.n_rows) {
-    stop("lda_predict_cpp has inconsistent LDA constants");
-  }
-
-  arma::mat scores = Ttest * linear.t();
-  scores.each_row() += constants;
-
-  Rcpp::IntegerVector pred(scores.n_rows);
-  for (arma::uword i = 0; i < scores.n_rows; ++i) {
-    arma::uword best = 0;
-    double best_val = scores(i, 0);
-    for (arma::uword c = 1; c < scores.n_cols; ++c) {
-      if (scores(i, c) > best_val) {
-        best_val = scores(i, c);
-        best = c;
-      }
-    }
-    pred[i] = static_cast<int>(best) + 1;
-  }
-
-  return Rcpp::List::create(
-    Rcpp::Named("pred") = pred,
-    Rcpp::Named("scores") = scores
-  );
-}
-
-// [[Rcpp::export]]
-Rcpp::IntegerVector lda_predict_labels_cpp(const arma::mat& Ttest,
-                                           const Rcpp::List& lda) {
-  if (Ttest.n_rows == 0 || Ttest.n_cols == 0) {
-    stop("lda_predict_labels_cpp requires a non-empty score matrix");
-  }
-  arma::mat linear = Rcpp::as<arma::mat>(lda["linear"]);
-  arma::rowvec constants = Rcpp::as<arma::rowvec>(lda["constants"]);
-  if (Ttest.n_cols != linear.n_cols) {
-    stop("lda_predict_labels_cpp score dimension does not match the LDA model");
-  }
-  if (constants.n_elem != linear.n_rows) {
-    stop("lda_predict_labels_cpp has inconsistent LDA constants");
-  }
-
-  arma::mat scores = Ttest * linear.t();
-  Rcpp::IntegerVector pred = lda_labels_from_scores(scores, constants);
-
-  return pred;
-}
-
-// [[Rcpp::export]]
-Rcpp::IntegerVector lda_project_predict_labels_cpp(const arma::mat& Xtest,
-                                                   const arma::mat& R,
-                                                   const arma::rowvec& offset,
-                                                   const Rcpp::List& lda) {
-  if (Xtest.n_rows == 0 || Xtest.n_cols == 0) {
-    stop("lda_project_predict_labels_cpp requires a non-empty predictor matrix");
-  }
-  if (R.n_rows != Xtest.n_cols || R.n_cols == 0) {
-    stop("lda_project_predict_labels_cpp projection matrix has incompatible dimensions");
-  }
-  if (offset.n_elem > 0 && offset.n_elem < R.n_cols) {
-    stop("lda_project_predict_labels_cpp offset is shorter than the projection dimension");
-  }
-
-  arma::mat linear = Rcpp::as<arma::mat>(lda["linear"]);
-  arma::rowvec constants = Rcpp::as<arma::rowvec>(lda["constants"]);
-  if (R.n_cols != linear.n_cols) {
-    stop("lda_project_predict_labels_cpp projection dimension does not match the LDA model");
-  }
-  if (constants.n_elem != linear.n_rows) {
-    stop("lda_project_predict_labels_cpp has inconsistent LDA constants");
-  }
-
-  const double n = static_cast<double>(Xtest.n_rows);
-  const double p = static_cast<double>(Xtest.n_cols);
-  const double k = static_cast<double>(R.n_cols);
-  const double n_classes = static_cast<double>(linear.n_rows);
-  const double latent_ops = n * k * (p + n_classes);
-  const double direct_ops = n * p * n_classes;
-
-  if (std::isfinite(latent_ops) && std::isfinite(direct_ops) &&
-      direct_ops < 0.5 * latent_ops) {
-    arma::mat W = R * linear.t();
-    arma::rowvec constants_adj = constants;
-    if (offset.n_elem >= R.n_cols) {
-      constants_adj -= offset.subvec(0, R.n_cols - 1) * linear.t();
-    }
-    arma::mat scores = Xtest * W;
-    return lda_labels_from_scores(scores, constants_adj);
-  }
-
-  arma::mat Ttest = Xtest * R;
-  if (offset.n_elem >= R.n_cols) {
-    Ttest.each_row() -= offset.subvec(0, R.n_cols - 1);
-  }
-  arma::mat scores = Ttest * linear.t();
-  return lda_labels_from_scores(scores, constants);
 }
 
 // [[Rcpp::export]]

@@ -1,3 +1,13 @@
+# fastPLS 0.99.54
+
+* Replaced six generated RcppArmadillo wrappers for double-precision CPU LDA
+  fitting, sufficient-statistics fitting, projection and prediction with a
+  hand-written R C-API boundary over the MIT core and optimized CPU GEMM.
+
+* Removed the superseded Rcpp projection and prediction implementations.
+  Old and new boundaries return the same model fields and labels, while a
+  representative BLAS-backed LDA workload retained its previous median time.
+
 # fastPLS 0.99.53
 
 * Consolidated double- and single-precision pooled-covariance LDA training in

@@ -42,6 +42,22 @@ SEXP _fastPLS_has_metal();
 SEXP _fastPLS_lda_cuda_native_available();
 SEXP _fastPLS_rsvd_audit_reset_debug();
 SEXP _fastPLS_rsvd_audit_summary_debug();
+SEXP _fastPLS_lda_train_prefix_cpp(SEXP scores, SEXP labels,
+                                    SEXP class_count, SEXP components,
+                                    SEXP ridge);
+SEXP _fastPLS_lda_train_moments_prefix_cpp(
+  SEXP gram, SEXP class_sums, SEXP counts, SEXP sample_count,
+  SEXP components
+);
+SEXP _fastPLS_lda_project_train_prefix_cpp(
+  SEXP predictors, SEXP projection, SEXP offset, SEXP labels,
+  SEXP class_count, SEXP components, SEXP ridge
+);
+SEXP _fastPLS_lda_predict_cpp(SEXP scores, SEXP model);
+SEXP _fastPLS_lda_predict_labels_cpp(SEXP scores, SEXP model);
+SEXP _fastPLS_lda_project_predict_labels_cpp(
+  SEXP predictors, SEXP projection, SEXP offset, SEXP model
+);
 SEXP _fastPLS_spearman_correlation_cpp(SEXP observed, SEXP predicted);
 SEXP _fastPLS_float32_argmax_cpp(SEXP scores);
 SEXP _fastPLS_float32_topk_cpp(SEXP scores, SEXP top);

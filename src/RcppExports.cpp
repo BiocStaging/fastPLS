@@ -229,53 +229,6 @@ BEGIN_RCPP
     return rcpp_result_gen;
 END_RCPP
 }
-// lda_train_prefix_cpp
-Rcpp::List lda_train_prefix_cpp(const arma::mat& Ttrain, const Rcpp::IntegerVector& y, int n_classes, const Rcpp::IntegerVector& ncomp, double ridge);
-RcppExport SEXP _fastPLS_lda_train_prefix_cpp(SEXP TtrainSEXP, SEXP ySEXP, SEXP n_classesSEXP, SEXP ncompSEXP, SEXP ridgeSEXP) {
-BEGIN_RCPP
-    Rcpp::RObject rcpp_result_gen;
-    Rcpp::RNGScope rcpp_rngScope_gen;
-    Rcpp::traits::input_parameter< const arma::mat& >::type Ttrain(TtrainSEXP);
-    Rcpp::traits::input_parameter< const Rcpp::IntegerVector& >::type y(ySEXP);
-    Rcpp::traits::input_parameter< int >::type n_classes(n_classesSEXP);
-    Rcpp::traits::input_parameter< const Rcpp::IntegerVector& >::type ncomp(ncompSEXP);
-    Rcpp::traits::input_parameter< double >::type ridge(ridgeSEXP);
-    rcpp_result_gen = Rcpp::wrap(lda_train_prefix_cpp(Ttrain, y, n_classes, ncomp, ridge));
-    return rcpp_result_gen;
-END_RCPP
-}
-// lda_train_moments_prefix_cpp
-Rcpp::List lda_train_moments_prefix_cpp(const arma::mat& gram, const arma::mat& class_sums, const arma::vec& counts, int n, const Rcpp::IntegerVector& ncomp);
-RcppExport SEXP _fastPLS_lda_train_moments_prefix_cpp(SEXP gramSEXP, SEXP class_sumsSEXP, SEXP countsSEXP, SEXP nSEXP, SEXP ncompSEXP) {
-BEGIN_RCPP
-    Rcpp::RObject rcpp_result_gen;
-    Rcpp::RNGScope rcpp_rngScope_gen;
-    Rcpp::traits::input_parameter< const arma::mat& >::type gram(gramSEXP);
-    Rcpp::traits::input_parameter< const arma::mat& >::type class_sums(class_sumsSEXP);
-    Rcpp::traits::input_parameter< const arma::vec& >::type counts(countsSEXP);
-    Rcpp::traits::input_parameter< int >::type n(nSEXP);
-    Rcpp::traits::input_parameter< const Rcpp::IntegerVector& >::type ncomp(ncompSEXP);
-    rcpp_result_gen = Rcpp::wrap(lda_train_moments_prefix_cpp(gram, class_sums, counts, n, ncomp));
-    return rcpp_result_gen;
-END_RCPP
-}
-// lda_project_train_prefix_cpp
-Rcpp::List lda_project_train_prefix_cpp(const arma::mat& Xtrain, const arma::mat& R, const arma::rowvec& offset, const Rcpp::IntegerVector& y, int n_classes, const Rcpp::IntegerVector& ncomp, double ridge);
-RcppExport SEXP _fastPLS_lda_project_train_prefix_cpp(SEXP XtrainSEXP, SEXP RSEXP, SEXP offsetSEXP, SEXP ySEXP, SEXP n_classesSEXP, SEXP ncompSEXP, SEXP ridgeSEXP) {
-BEGIN_RCPP
-    Rcpp::RObject rcpp_result_gen;
-    Rcpp::RNGScope rcpp_rngScope_gen;
-    Rcpp::traits::input_parameter< const arma::mat& >::type Xtrain(XtrainSEXP);
-    Rcpp::traits::input_parameter< const arma::mat& >::type R(RSEXP);
-    Rcpp::traits::input_parameter< const arma::rowvec& >::type offset(offsetSEXP);
-    Rcpp::traits::input_parameter< const Rcpp::IntegerVector& >::type y(ySEXP);
-    Rcpp::traits::input_parameter< int >::type n_classes(n_classesSEXP);
-    Rcpp::traits::input_parameter< const Rcpp::IntegerVector& >::type ncomp(ncompSEXP);
-    Rcpp::traits::input_parameter< double >::type ridge(ridgeSEXP);
-    rcpp_result_gen = Rcpp::wrap(lda_project_train_prefix_cpp(Xtrain, R, offset, y, n_classes, ncomp, ridge));
-    return rcpp_result_gen;
-END_RCPP
-}
 // lda_train_prefix_cuda
 Rcpp::List lda_train_prefix_cuda(const arma::mat& Ttrain, const Rcpp::IntegerVector& y, int n_classes, const Rcpp::IntegerVector& ncomp, double ridge);
 RcppExport SEXP _fastPLS_lda_train_prefix_cuda(SEXP TtrainSEXP, SEXP ySEXP, SEXP n_classesSEXP, SEXP ncompSEXP, SEXP ridgeSEXP) {
@@ -305,44 +258,6 @@ BEGIN_RCPP
     Rcpp::traits::input_parameter< const Rcpp::IntegerVector& >::type ncomp(ncompSEXP);
     Rcpp::traits::input_parameter< double >::type ridge(ridgeSEXP);
     rcpp_result_gen = Rcpp::wrap(lda_project_train_prefix_cuda(Xtrain, R, offset, y, n_classes, ncomp, ridge));
-    return rcpp_result_gen;
-END_RCPP
-}
-// lda_predict_cpp
-Rcpp::List lda_predict_cpp(const arma::mat& Ttest, const Rcpp::List& lda);
-RcppExport SEXP _fastPLS_lda_predict_cpp(SEXP TtestSEXP, SEXP ldaSEXP) {
-BEGIN_RCPP
-    Rcpp::RObject rcpp_result_gen;
-    Rcpp::RNGScope rcpp_rngScope_gen;
-    Rcpp::traits::input_parameter< const arma::mat& >::type Ttest(TtestSEXP);
-    Rcpp::traits::input_parameter< const Rcpp::List& >::type lda(ldaSEXP);
-    rcpp_result_gen = Rcpp::wrap(lda_predict_cpp(Ttest, lda));
-    return rcpp_result_gen;
-END_RCPP
-}
-// lda_predict_labels_cpp
-Rcpp::IntegerVector lda_predict_labels_cpp(const arma::mat& Ttest, const Rcpp::List& lda);
-RcppExport SEXP _fastPLS_lda_predict_labels_cpp(SEXP TtestSEXP, SEXP ldaSEXP) {
-BEGIN_RCPP
-    Rcpp::RObject rcpp_result_gen;
-    Rcpp::RNGScope rcpp_rngScope_gen;
-    Rcpp::traits::input_parameter< const arma::mat& >::type Ttest(TtestSEXP);
-    Rcpp::traits::input_parameter< const Rcpp::List& >::type lda(ldaSEXP);
-    rcpp_result_gen = Rcpp::wrap(lda_predict_labels_cpp(Ttest, lda));
-    return rcpp_result_gen;
-END_RCPP
-}
-// lda_project_predict_labels_cpp
-Rcpp::IntegerVector lda_project_predict_labels_cpp(const arma::mat& Xtest, const arma::mat& R, const arma::rowvec& offset, const Rcpp::List& lda);
-RcppExport SEXP _fastPLS_lda_project_predict_labels_cpp(SEXP XtestSEXP, SEXP RSEXP, SEXP offsetSEXP, SEXP ldaSEXP) {
-BEGIN_RCPP
-    Rcpp::RObject rcpp_result_gen;
-    Rcpp::RNGScope rcpp_rngScope_gen;
-    Rcpp::traits::input_parameter< const arma::mat& >::type Xtest(XtestSEXP);
-    Rcpp::traits::input_parameter< const arma::mat& >::type R(RSEXP);
-    Rcpp::traits::input_parameter< const arma::rowvec& >::type offset(offsetSEXP);
-    Rcpp::traits::input_parameter< const Rcpp::List& >::type lda(ldaSEXP);
-    rcpp_result_gen = Rcpp::wrap(lda_project_predict_labels_cpp(Xtest, R, offset, lda));
     return rcpp_result_gen;
 END_RCPP
 }
