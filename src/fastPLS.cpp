@@ -20,6 +20,7 @@
 #include "svd_cuda_rsvd.h"
 #include "svd_metal_backend.h"
 #include "float_crosscov_operator.h"
+#include <fastpls/core/statistics.hpp>
 #include <fastpls/native/simpls.hpp>
 #include <fastpls/native/opls.hpp>
 #include <fastpls/native/kernels.hpp>
@@ -326,24 +327,6 @@ arma::mat numeric_matrix_view(SEXP x, const char* name) {
   );
 }
 
-arma::rowvec variance_nocopy(const arma::mat& x) {
-  const int nrow = static_cast<int>(x.n_rows);
-  const int ncol = static_cast<int>(x.n_cols);
-  arma::rowvec out(ncol);
-  for (int j = 0; j < ncol; ++j) {
-    double mean_j = 0.0;
-    double m2 = 0.0;
-    for (int i = 0; i < nrow; ++i) {
-      const double xx = x(i, j);
-      const double delta = xx - mean_j;
-      mean_j += delta / static_cast<double>(i + 1);
-      m2 += delta * (xx - mean_j);
-    }
-    out(j) = std::sqrt(m2 / static_cast<double>(std::max(nrow - 1, 1)));
-  }
-  return out;
-}
-
 List label_crossprod_scaled_cpp_impl(
   SEXP XtrainSEXP,
   Rcpp::IntegerVector y,
@@ -417,82 +400,6 @@ List label_crossprod_scaled_cpp_impl(
     Named("counts") = counts
   );
 }
-
-struct CenterScaleMatrixView {
-  const arma::mat& X;
-  arma::rowvec center;
-  arma::rowvec scale;
-
-  arma::mat times(const arma::mat& M) const {
-    arma::mat Mscaled = M;
-    Mscaled.each_col() /= scale.t();
-    arma::mat out = X * Mscaled;
-    arma::rowvec offset = (center / scale) * M;
-    out.each_row() -= offset;
-    return out;
-  }
-
-  arma::vec times(const arma::vec& v) const {
-    arma::vec vscaled = v / scale.t();
-    arma::vec out = X * vscaled;
-    const double offset = arma::as_scalar((center / scale) * v);
-    out -= offset;
-    return out;
-  }
-
-  arma::mat t_times(const arma::mat& M) const {
-    arma::mat out = X.t() * M;
-    arma::rowvec sums = arma::sum(M, 0);
-    out -= center.t() * sums;
-    out.each_col() /= scale.t();
-    return out;
-  }
-
-  arma::vec t_times(const arma::vec& v) const {
-    arma::vec out = X.t() * v;
-    out -= center.t() * arma::sum(v);
-    out /= scale.t();
-    return out;
-  }
-};
-
-struct CenterOnlyMatrixView {
-  const arma::mat& Y;
-  arma::rowvec center;
-
-  arma::mat times(const arma::mat& M) const {
-    arma::mat out = Y * M;
-    arma::rowvec offset = center * M;
-    out.each_row() -= offset;
-    return out;
-  }
-
-  arma::vec times(const arma::vec& v) const {
-    arma::vec out = Y * v;
-    const double offset = arma::as_scalar(center * v);
-    out -= offset;
-    return out;
-  }
-
-  arma::mat t_times(const arma::mat& M) const {
-    arma::mat out = Y.t() * M;
-    arma::rowvec sums = arma::sum(M, 0);
-    out -= center.t() * sums;
-    return out;
-  }
-
-  arma::vec t_times(const arma::vec& v) const {
-    arma::vec out = Y.t() * v;
-    out -= center.t() * arma::sum(v);
-    return out;
-  }
-
-  arma::mat centered_copy() const {
-    arma::mat out = Y;
-    out.each_row() -= center;
-    return out;
-  }
-};
 
 fastpls_svd::SVDResult finalize_rsvd_from_q_b_double(
   const arma::mat& Q,
@@ -730,60 +637,6 @@ fastpls_svd::SVDResult audited_rsvd_operator_double(
   );
 }
 
-fastpls_svd::SVDResult truncated_rsvd_crossprod_double_view(
-  const CenterScaleMatrixView& Xop,
-  const CenterOnlyMatrixView& Yop,
-  const int k,
-  const int rsvd_oversample,
-  const int rsvd_power,
-  const unsigned int seed,
-  const bool left_only,
-  const bool use_full_svd
-) {
-  const arma::uword p = Xop.X.n_cols;
-  const arma::uword m = Yop.Y.n_cols;
-  const arma::uword max_rank = std::min(p, m);
-  const arma::uword target = std::min<arma::uword>(
-    max_rank,
-    static_cast<arma::uword>(std::max(k, 1))
-  );
-  const arma::uword l = std::min<arma::uword>(
-    max_rank,
-    target + static_cast<arma::uword>(std::max(rsvd_oversample, 0))
-  );
-
-  if (target == 0) {
-    return fastpls_svd::SVDResult();
-  }
-
-  if (use_full_svd || l >= max_rank) {
-    arma::mat S = Xop.t_times(Yop.centered_copy());
-    return compute_truncated_svd_dispatch(
-      S,
-      static_cast<int>(target),
-      fastpls_svd::SVD_METHOD_CPU_RSVD,
-      rsvd_oversample,
-      rsvd_power,
-      0.0,
-      seed,
-      left_only,
-      true
-    );
-  }
-
-  auto a_times = [&](const arma::mat& M) -> arma::mat {
-    return Xop.t_times(Yop.times(M));
-  };
-  auto at_times = [&](const arma::mat& M) -> arma::mat {
-    return Yop.t_times(Xop.times(M));
-  };
-
-  return audited_rsvd_operator_double(
-    p, m, static_cast<int>(target), rsvd_oversample, rsvd_power, seed,
-    left_only, a_times, at_times
-  );
-}
-
 fastpls_svd::SVDResult truncated_rsvd_crossprod_double(
   const arma::mat& X,
   const arma::mat& Ymat,
@@ -922,81 +775,6 @@ bool refresh_deflated_crossprod_left_double(
   }
 
   // Propagate decomposition/allocation failures; do not substitute a solver.
-  fastpls_svd::SVDResult result = raw_rsvd_operator_double(
-    p, m, k_block, std::max(oversample, 0), power_iters, seed, true,
-    a_times, at_times
-  );
-  Ublock = result.U;
-  shat = result.s;
-  return Ublock.n_cols > 0;
-}
-
-bool refresh_deflated_crossprod_left_double_view(
-  const CenterScaleMatrixView& Xop,
-  const CenterOnlyMatrixView& Yop,
-  const arma::mat& V,
-  const int n_prev,
-  const int k_block,
-  const int oversample,
-  const int power_iters,
-  const unsigned int seed,
-  arma::mat& Ublock,
-  arma::vec& shat
-) {
-  const arma::uword p = Xop.X.n_cols;
-  const arma::uword m = Yop.Y.n_cols;
-  if (p < 1 || m < 1 || k_block < 1) {
-    return false;
-  }
-
-  auto a_times = [&](const arma::mat& M) -> arma::mat {
-    return project_deflated_left_double(Xop.t_times(Yop.times(M)), V, n_prev);
-  };
-  auto at_times = [&](const arma::mat& M) -> arma::mat {
-    arma::mat Mp = project_deflated_left_double(M, V, n_prev);
-    return Yop.t_times(Xop.times(Mp));
-  };
-
-  const double crosscov_bytes =
-    static_cast<double>(p) * static_cast<double>(m) * sizeof(double);
-  const bool use_rank_one_refresh =
-    k_block == 1 && crosscov_bytes > 512.0 * 1024.0 * 1024.0;
-  if (use_rank_one_refresh) {
-    std::mt19937 rng(seed);
-    std::normal_distribution<double> normal(0.0, 1.0);
-    arma::vec u(p);
-    for (arma::uword i = 0; i < p; ++i) u(i) = normal(rng);
-    u = project_deflated_left_double(u, V, n_prev);
-    double unorm = arma::norm(u, 2);
-    if (!std::isfinite(unorm) || unorm <= std::numeric_limits<double>::epsilon()) {
-      return false;
-    }
-    u /= unorm;
-    double sigma = 0.0;
-    for (int iteration = 0; iteration < std::max(power_iters, 1); ++iteration) {
-      arma::vec right = at_times(arma::mat(u));
-      const double right_norm = arma::norm(right, 2);
-      if (!std::isfinite(right_norm) ||
-          right_norm <= std::numeric_limits<double>::epsilon()) {
-        return false;
-      }
-      right /= right_norm;
-      u = a_times(arma::mat(right));
-      u = project_deflated_left_double(u, V, n_prev);
-      unorm = arma::norm(u, 2);
-      if (!std::isfinite(unorm) ||
-          unorm <= std::numeric_limits<double>::epsilon()) {
-        return false;
-      }
-      u /= unorm;
-      sigma = right_norm;
-    }
-    Ublock = arma::mat(u);
-    shat = arma::vec(1, arma::fill::value(sigma));
-    return true;
-  }
-
-  // Keep the operator implicit even on failure; no dense/IRLBA substitution.
   fastpls_svd::SVDResult result = raw_rsvd_operator_double(
     p, m, k_block, std::max(oversample, 0), power_iters, seed, true,
     a_times, at_times
@@ -1223,24 +1001,19 @@ List label_crossprod_scaled_cpp(
   return label_crossprod_scaled_cpp_impl(XtrainSEXP, y, n_classes, scaling);
 }
 
-// [[Rcpp::export]]
-double RQ(arma::mat yData,arma::mat yPred){
-
-  double TSS=0,PRESS=0;
-  for(unsigned int i=0;i<yData.n_cols;i++){
-    double my=mean(yData.col(i));
-    for(unsigned int j=0;j<yData.n_rows;j++){
-      double b1=yPred(j,i);
-      double c1=yData(j,i);
-      double d1=c1-my;
-      double arg_TR=(c1-b1);
-      PRESS+=arg_TR*arg_TR;
-      TSS+=d1*d1;  
-    }
-  }
-  
-  double R2Y=1-PRESS/TSS;
-  return R2Y;
+double RQ(const arma::mat& yData, const arma::mat& yPred) {
+  return fastpls::core::observed_mean_r2(
+    fastpls::core::make_const_view(
+      yData.memptr(), static_cast<std::size_t>(yData.n_rows),
+      static_cast<std::size_t>(yData.n_cols),
+      static_cast<std::size_t>(yData.n_rows)
+    ),
+    fastpls::core::make_const_view(
+      yPred.memptr(), static_cast<std::size_t>(yPred.n_rows),
+      static_cast<std::size_t>(yPred.n_cols),
+      static_cast<std::size_t>(yPred.n_rows)
+    )
+  );
 }
 
 
@@ -1266,20 +1039,6 @@ arma::mat variance(const arma::mat& x) {
   return out;
 }
 
-
-// [[Rcpp::export]]
-arma::mat transformy(arma::ivec y){
-  int n=y.size();
-  int nc=max(y);
-  arma::mat yy(n,nc);
-  yy.zeros();
-  for(int i=0;i<nc;i++){
-    for(int j=0;j<n;j++){
-      yy(j,i)=((i+1)==y(j));
-    }
-  }
-  return yy;
-}
 
 // [[Rcpp::export(rng = false)]]
 Rcpp::IntegerMatrix float32_sweep_cols_cpp(SEXP XSEXP, SEXP rowSEXP,
@@ -4018,11 +3777,6 @@ Rcpp::List lda_predict_float32_cuda(SEXP TtestSEXP, const Rcpp::List& lda, bool 
 #endif
 
 // [[Rcpp::export]]
-bool has_cuda() {
-  return fastpls_svd::has_cuda_backend();
-}
-
-// [[Rcpp::export]]
 bool lda_cuda_native_available() {
   return fastpls_svd::cuda_lda_native_available();
 }
@@ -4056,68 +3810,6 @@ using fastpls::native::LDACholeskyResult;
 using fastpls::native::lda_cholesky_solve;
 
 } // namespace
-
-Rcpp::List lda_train_cpp(const arma::mat& Ttrain,
-                         const Rcpp::IntegerVector& y,
-                         int n_classes,
-                         double ridge) {
-  (void)ridge; // Retained in the internal ABI; regularization is deterministic.
-  if (Ttrain.n_rows == 0 || Ttrain.n_cols == 0) {
-    stop("lda_train_cpp requires a non-empty score matrix");
-  }
-  if (static_cast<R_xlen_t>(Ttrain.n_rows) != y.size()) {
-    stop("lda_train_cpp requires one class label per training row");
-  }
-  if (n_classes < 2) {
-    stop("lda_train_cpp requires at least two classes");
-  }
-
-  const arma::uword n = Ttrain.n_rows;
-  const arma::uword k = Ttrain.n_cols;
-  arma::vec counts(n_classes, arma::fill::zeros);
-  arma::mat means(n_classes, k, arma::fill::zeros);
-
-  for (arma::uword i = 0; i < n; ++i) {
-    const int cls = y[i] - 1;
-    if (cls < 0 || cls >= n_classes) {
-      stop("lda_train_cpp labels must be encoded as 1..n_classes");
-    }
-    counts(cls) += 1.0;
-    means.row(cls) += Ttrain.row(i);
-  }
-
-  for (int c = 0; c < n_classes; ++c) {
-    if (counts(c) <= 0.0) {
-      stop("lda_train_cpp received an empty class");
-    }
-    means.row(c) /= counts(c);
-  }
-
-  arma::mat pooled = arma::symmatu(Ttrain.t() * Ttrain);
-  for (int c = 0; c < n_classes; ++c) {
-    pooled -= counts(c) * (means.row(c).t() * means.row(c));
-  }
-  const double df = std::max<double>(1.0, static_cast<double>(n) - static_cast<double>(n_classes));
-  pooled /= df;
-
-  const LDACholeskyResult solved = lda_cholesky_solve(pooled, means);
-  const arma::mat& linear = solved.linear;
-  arma::rowvec constants(n_classes, arma::fill::zeros);
-  for (int c = 0; c < n_classes; ++c) {
-    const double prior = std::max(counts(c) / static_cast<double>(n), std::numeric_limits<double>::min());
-    constants(c) = -0.5 * arma::as_scalar(means.row(c) * linear.row(c).t()) + std::log(prior);
-  }
-
-  return Rcpp::List::create(
-    Rcpp::Named("means") = means,
-    Rcpp::Named("inv_cov") = arma::mat(),
-    Rcpp::Named("linear") = linear,
-    Rcpp::Named("constants") = constants,
-    Rcpp::Named("priors") = counts / static_cast<double>(n),
-    Rcpp::Named("ridge") = solved.lambda,
-    Rcpp::Named("ridge_relative") = solved.relative_ridge
-  );
-}
 
 // [[Rcpp::export]]
 Rcpp::List lda_train_prefix_cpp(const arma::mat& Ttrain,
@@ -6798,16 +6490,6 @@ arma::mat opls_apply_filter_cpp(
 }
 
 
-int unic(arma::mat x){
-  int x_size=x.size();
-  for(int i=0;i<x_size;i++){
-    if(x(i)!=x(0))
-      return 2;
-  }
-  return 1;
-}
-
-
 // This function performs a random selection of the elements of a vector "yy".
 // The number of elements to select is defined by the variable "size".
 
@@ -7378,335 +7060,6 @@ List pls_model2_fast_metal_cv(
     Named("predict_latent_ok") = true
   );
   annotate_coefficient_storage(out, false);
-  return out;
-}
-
-List pls_model1_rsvd_xprod_precision_view_impl(
-  SEXP XtrainSEXP,
-  SEXP YtrainSEXP,
-  arma::ivec ncomp,
-  int scaling,
-  bool fit,
-  int rsvd_oversample,
-  int rsvd_power,
-  int seed
-) {
-  const arma::mat Xview = numeric_matrix_view(XtrainSEXP, "Xtrain");
-  const arma::mat Yview = numeric_matrix_view(YtrainSEXP, "Ytrain");
-  const int n = Xview.n_rows;
-  const int p = Xview.n_cols;
-  const int m = Yview.n_cols;
-  if (Yview.n_rows != static_cast<arma::uword>(n)) {
-    stop("Xtrain and Ytrain must have the same number of rows");
-  }
-
-  const int max_plssvd_rank = std::min(n, std::min(p, m));
-  const int length_ncomp = ncomp.n_elem;
-  for (arma::uword i = 0; i < ncomp.n_elem; ++i) {
-    if (ncomp(i) > max_plssvd_rank) ncomp(i) = max_plssvd_rank;
-    if (ncomp(i) < 1) ncomp(i) = 1;
-  }
-
-  const int max_ncomp = max(ncomp);
-  int max_ncomp_eff = std::min(max_ncomp, max_plssvd_rank);
-  if (max_ncomp_eff < 1) {
-    stop("plssvd effective rank is < 1");
-  }
-
-  arma::rowvec mX_row(p, fill::zeros);
-  if (scaling < 3) {
-    mX_row = mean(Xview, 0);
-  }
-  arma::rowvec vX_row(p, fill::ones);
-  if (scaling == 2) {
-    vX_row = variance_nocopy(Xview);
-  }
-  arma::rowvec mY_row = mean(Yview, 0);
-
-  CenterScaleMatrixView Xop{Xview, mX_row, vX_row};
-  CenterOnlyMatrixView Yop{Yview, mY_row};
-
-  fastpls_svd::SVDResult svd_res = truncated_rsvd_crossprod_double_view(
-    Xop,
-    Yop,
-    max_ncomp_eff,
-    rsvd_oversample,
-    rsvd_power,
-    static_cast<unsigned int>(seed),
-    false,
-    plssvd_use_small_exact_svd(max_plssvd_rank, fastpls_svd::SVD_METHOD_CPU_RSVD)
-  );
-
-  arma::mat svd_u = svd_res.U;
-  arma::vec svd_s = svd_res.s;
-  arma::mat svd_v = svd_res.Vt.t();
-
-  const bool store_B = should_store_coefficients(p, m, length_ncomp, true);
-  arma::cube B;
-  if (store_B) {
-    B.zeros(p, m, length_ncomp);
-  }
-  arma::cube Yfit;
-  if (fit) {
-    Yfit.set_size(n, m, length_ncomp);
-  }
-
-  max_ncomp_eff = std::min(max_ncomp_eff, static_cast<int>(svd_u.n_cols));
-  if (svd_v.n_cols > 0) {
-    max_ncomp_eff = std::min(max_ncomp_eff, static_cast<int>(svd_v.n_cols));
-  }
-  if (max_ncomp_eff < 1) {
-    stop("plssvd effective rank is < 1 after SVD");
-  }
-
-  svd_u = svd_u.cols(0, max_ncomp_eff - 1);
-  if (svd_v.n_cols > static_cast<arma::uword>(max_ncomp_eff)) {
-    svd_v = svd_v.cols(0, max_ncomp_eff - 1);
-  }
-
-  arma::mat T_eff = Xop.times(svd_u);
-  arma::mat G_full = T_eff.t() * T_eff;
-  arma::cube C_latent(max_ncomp_eff, max_ncomp_eff, length_ncomp, arma::fill::zeros);
-  arma::cube W_latent(max_ncomp_eff, m, length_ncomp, arma::fill::zeros);
-  arma::vec R2Y(length_ncomp, fill::zeros);
-  arma::mat Ycentered;
-  if (fit) {
-    Ycentered = Yop.centered_copy();
-  }
-
-  for (int a = 0; a < length_ncomp; ++a) {
-    const int mc_eff = std::min(static_cast<int>(ncomp(a)), max_ncomp_eff);
-    arma::mat svd_u_mc = svd_u.cols(0, mc_eff - 1);
-    arma::mat svd_v_mc = svd_v.cols(0, mc_eff - 1);
-    arma::mat T_a = T_eff.cols(0, mc_eff - 1);
-    arma::mat G_a = G_full.submat(0, 0, mc_eff - 1, mc_eff - 1);
-    arma::mat D_a(mc_eff, mc_eff, fill::zeros);
-    D_a.diag() = svd_s.subvec(0, mc_eff - 1);
-
-    arma::mat coeff_latent;
-    bool solved = arma::solve(coeff_latent, G_a, D_a, arma::solve_opts::likely_sympd);
-    if (!solved) solved = arma::solve(coeff_latent, G_a, D_a);
-    if (!solved) stop("plssvd latent solve failed");
-
-    C_latent.slice(a).submat(0, 0, mc_eff - 1, mc_eff - 1) = coeff_latent;
-    arma::mat W_a = coeff_latent * svd_v_mc.t();
-    W_latent.slice(a).submat(0, 0, mc_eff - 1, m - 1) = W_a;
-    if (store_B) {
-      B.slice(a) = svd_u_mc * W_a;
-    }
-    if (fit) {
-      arma::mat temp1 = T_a * W_a;
-      R2Y(a) = RQ(Ycentered, temp1);
-      temp1.each_row() += mY_row;
-      Yfit.slice(a) = temp1;
-    }
-  }
-
-  arma::mat mX(1, p); mX.row(0) = mX_row;
-  arma::mat vX(1, p); vX.row(0) = vX_row;
-  arma::mat mY(1, m); mY.row(0) = mY_row;
-  List out = List::create(
-    Named("C_latent") = C_latent,
-    Named("W_latent") = W_latent,
-    Named("Q")       = svd_v,
-    Named("Ttrain")  = T_eff,
-    Named("R")       = svd_u,
-    Named("mX")      = mX,
-    Named("vX")      = vX,
-    Named("mY")      = mY,
-    Named("p")       = p,
-    Named("m")       = m,
-    Named("ncomp")   = ncomp,
-    Named("Yfit")    = Yfit,
-    Named("R2Y")     = R2Y,
-    Named("xprod_precision") = 3,
-    Named("xprod_mode") = "implicit"
-  );
-  if (store_B) {
-    out["B"] = B;
-  }
-  annotate_coefficient_storage(out, store_B);
-  return out;
-}
-
-List pls_model2_fast_rsvd_xprod_precision_view_impl(
-  SEXP XtrainSEXP,
-  SEXP YtrainSEXP,
-  arma::ivec ncomp,
-  int scaling,
-  bool fit,
-  int rsvd_oversample,
-  int rsvd_power,
-  int seed
-) {
-  const arma::mat Xview = numeric_matrix_view(XtrainSEXP, "Xtrain");
-  const arma::mat Yview = numeric_matrix_view(YtrainSEXP, "Ytrain");
-  const int n = Xview.n_rows;
-  const int p = Xview.n_cols;
-  const int m = Yview.n_cols;
-  if (Yview.n_rows != static_cast<arma::uword>(n)) {
-    stop("Xtrain and Ytrain must have the same number of rows");
-  }
-
-  if (ncomp.n_elem < 1) {
-    stop("ncomp must contain at least one value");
-  }
-  for (arma::uword i = 0; i < ncomp.n_elem; ++i) {
-    if (ncomp(i) < 1) ncomp(i) = 1;
-  }
-
-  const int max_ncomp = max(ncomp);
-  const int length_ncomp = ncomp.n_elem;
-
-  arma::rowvec mX_row(p, fill::zeros);
-  if (scaling < 3) {
-    mX_row = mean(Xview, 0);
-  }
-  arma::rowvec vX_row(p, fill::ones);
-  if (scaling == 2) {
-    vX_row = variance_nocopy(Xview);
-  }
-  arma::rowvec mY_row = mean(Yview, 0);
-
-  CenterScaleMatrixView Xop{Xview, mX_row, vX_row};
-  CenterOnlyMatrixView Yop{Yview, mY_row};
-
-  arma::mat RR(p, max_ncomp, fill::zeros);
-  arma::mat QQ(m, max_ncomp, fill::zeros);
-  arma::mat VV(p, max_ncomp, fill::zeros);
-  const bool store_B = should_store_coefficients(p, m, length_ncomp, true);
-  arma::cube B;
-  if (store_B) {
-    B.zeros(p, m, length_ncomp);
-  }
-
-  arma::cube Yfit;
-  arma::vec R2Y(length_ncomp, fill::zeros);
-  arma::mat Yfit_cur;
-  arma::mat Ycentered;
-  if (fit) {
-    Yfit.set_size(n, m, length_ncomp);
-    Yfit_cur.zeros(n, m);
-    Ycentered = Yop.centered_copy();
-  }
-
-  arma::mat Bcur;
-  if (store_B) {
-    Bcur.zeros(p, m);
-  }
-  int i_out = 0;
-
-  const int center_t = env_int_or("FASTPLS_FAST_CENTER_T", 0, 0, 1);
-  const int reorth_v = env_int_or("FASTPLS_FAST_REORTH_V", 0, 0, 1);
-  const int incremental_coefficients = env_int_or("FASTPLS_INCREMENTAL_COEFFICIENTS", 1, 0, 1);
-  auto append_component = [&](arma::vec rr, const int a_idx) -> bool {
-    arma::vec tt = Xop.times(rr);
-    if (center_t == 1) {
-      tt -= arma::mean(tt);
-    }
-    const double tnorm = arma::norm(tt, 2);
-    if (!std::isfinite(tnorm) || tnorm <= 0.0) return false;
-    tt /= tnorm;
-    rr /= tnorm;
-    arma::vec pp = Xop.t_times(tt);
-    arma::vec qq = Yop.t_times(tt);
-
-    arma::vec vv = pp;
-    if (a_idx > 0) {
-      auto Vprev = VV.cols(0, a_idx - 1);
-      vv -= Vprev * (Vprev.t() * pp);
-      if (reorth_v == 1) {
-        vv -= Vprev * (Vprev.t() * vv);
-      }
-    }
-    const double vnorm = arma::norm(vv, 2);
-    if (!std::isfinite(vnorm) || vnorm <= 0.0) return false;
-    vv /= vnorm;
-
-    RR.col(a_idx) = rr;
-    QQ.col(a_idx) = qq;
-    VV.col(a_idx) = vv;
-    if (store_B && incremental_coefficients == 1) {
-      Bcur += rr * qq.t();
-    }
-    if (fit) {
-      Yfit_cur += tt * qq.t();
-    }
-
-    while (i_out < length_ncomp && a_idx == (ncomp(i_out) - 1)) {
-      if (store_B) {
-        B.slice(i_out) = incremental_coefficients == 1 ?
-          Bcur :
-          RR.cols(0, a_idx) * QQ.cols(0, a_idx).t();
-      }
-      if (fit) {
-        R2Y(i_out) = RQ(Ycentered, Yfit_cur);
-        arma::mat yf = Yfit_cur;
-        yf.each_row() += mY_row;
-        Yfit.slice(i_out) = yf;
-      }
-      ++i_out;
-    }
-    return true;
-  };
-
-  int a = 0;
-  while (a < max_ncomp) {
-    const int k_block = accelerated_simpls_block_size(
-      max_ncomp - a, p, m
-    );
-    arma::mat Ublock;
-    arma::vec shat_block;
-    if (!refresh_deflated_crossprod_left_double_view(
-          Xop,
-          Yop,
-          VV,
-          a,
-          k_block,
-          rsvd_oversample,
-          std::max(rsvd_power, 0),
-          static_cast<unsigned int>(seed + a),
-          Ublock,
-          shat_block
-        )) {
-      break;
-    }
-    if (Ublock.n_cols < 1) break;
-
-    const int use_cols = std::min(static_cast<int>(Ublock.n_cols), k_block);
-    bool stop_now = false;
-    for (int j = 0; j < use_cols && a < max_ncomp; ++j, ++a) {
-      if (!append_component(Ublock.col(j), a)) {
-        stop_now = true;
-        break;
-      }
-    }
-    if (stop_now) break;
-  }
-
-  arma::mat mX(1, p); mX.row(0) = mX_row;
-  arma::mat vX(1, p); vX.row(0) = vX_row;
-  arma::mat mY(1, m); mY.row(0) = mY_row;
-  List out = List::create(
-    Named("P")       = arma::mat(),
-    Named("Q")       = QQ,
-    Named("Ttrain")  = arma::mat(),
-    Named("R")       = RR,
-    Named("mX")      = mX,
-    Named("vX")      = vX,
-    Named("mY")      = mY,
-    Named("p")       = p,
-    Named("m")       = m,
-    Named("ncomp")   = ncomp,
-    Named("Yfit")    = Yfit,
-    Named("R2Y")     = R2Y,
-    Named("xprod_precision") = 3,
-    Named("xprod_mode") = "implicit"
-  );
-  if (store_B) {
-    out["B"] = B;
-  }
-  annotate_coefficient_storage(out, store_B);
   return out;
 }
 

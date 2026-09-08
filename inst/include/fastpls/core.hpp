@@ -6,5 +6,6 @@
 #include <fastpls/core/classification.hpp>
 #include <fastpls/core/linalg.hpp>
 #include <fastpls/core/matrix.hpp>
+#include <fastpls/core/statistics.hpp>
 
 #endif

@@ -84,11 +84,6 @@ Rcpp::List metal_xprod_rsvd_cpp(const arma::mat& X, const arma::mat& Y,
 }
 
 // [[Rcpp::export]]
-bool has_metal() {
-  return fastpls_svd::has_metal_backend();
-}
-
-// [[Rcpp::export]]
 arma::mat metal_matrix_multiply_cpp(const arma::mat& A, const arma::mat& B) {
   return fastpls_svd::metal_matrix_multiply(A, B);
 }

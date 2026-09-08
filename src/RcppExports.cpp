@@ -4,6 +4,7 @@
 #include "../inst/include/fastPLS.h"
 #include <RcppArmadillo.h>
 #include <Rcpp.h>
+#include "r_api.h"
 
 using namespace Rcpp;
 
@@ -195,29 +196,6 @@ BEGIN_RCPP
     Rcpp::traits::input_parameter< int >::type n_classes(n_classesSEXP);
     Rcpp::traits::input_parameter< int >::type scaling(scalingSEXP);
     rcpp_result_gen = Rcpp::wrap(label_crossprod_scaled_cpp(XtrainSEXP, y, n_classes, scaling));
-    return rcpp_result_gen;
-END_RCPP
-}
-// RQ
-double RQ(arma::mat yData, arma::mat yPred);
-RcppExport SEXP _fastPLS_RQ(SEXP yDataSEXP, SEXP yPredSEXP) {
-BEGIN_RCPP
-    Rcpp::RObject rcpp_result_gen;
-    Rcpp::RNGScope rcpp_rngScope_gen;
-    Rcpp::traits::input_parameter< arma::mat >::type yData(yDataSEXP);
-    Rcpp::traits::input_parameter< arma::mat >::type yPred(yPredSEXP);
-    rcpp_result_gen = Rcpp::wrap(RQ(yData, yPred));
-    return rcpp_result_gen;
-END_RCPP
-}
-// transformy
-arma::mat transformy(arma::ivec y);
-RcppExport SEXP _fastPLS_transformy(SEXP ySEXP) {
-BEGIN_RCPP
-    Rcpp::RObject rcpp_result_gen;
-    Rcpp::RNGScope rcpp_rngScope_gen;
-    Rcpp::traits::input_parameter< arma::ivec >::type y(ySEXP);
-    rcpp_result_gen = Rcpp::wrap(transformy(y));
     return rcpp_result_gen;
 END_RCPP
 }
@@ -532,16 +510,6 @@ BEGIN_RCPP
     Rcpp::traits::input_parameter< SEXP >::type scoresSEXP(scoresSEXPSEXP);
     Rcpp::traits::input_parameter< int >::type top(topSEXP);
     rcpp_result_gen = Rcpp::wrap(float32_topk_cpp(scoresSEXP, top));
-    return rcpp_result_gen;
-END_RCPP
-}
-// has_cuda
-bool has_cuda();
-RcppExport SEXP _fastPLS_has_cuda() {
-BEGIN_RCPP
-    Rcpp::RObject rcpp_result_gen;
-    Rcpp::RNGScope rcpp_rngScope_gen;
-    rcpp_result_gen = Rcpp::wrap(has_cuda());
     return rcpp_result_gen;
 END_RCPP
 }
@@ -1296,17 +1264,6 @@ BEGIN_RCPP
     return rcpp_result_gen;
 END_RCPP
 }
-// spearman_correlation_cpp
-double spearman_correlation_cpp(Rcpp::NumericVector observed, Rcpp::NumericVector predicted);
-RcppExport SEXP _fastPLS_spearman_correlation_cpp(SEXP observedSEXP, SEXP predictedSEXP) {
-BEGIN_RCPP
-    Rcpp::RObject rcpp_result_gen;
-    Rcpp::traits::input_parameter< Rcpp::NumericVector >::type observed(observedSEXP);
-    Rcpp::traits::input_parameter< Rcpp::NumericVector >::type predicted(predictedSEXP);
-    rcpp_result_gen = Rcpp::wrap(spearman_correlation_cpp(observed, predicted));
-    return rcpp_result_gen;
-END_RCPP
-}
 // metal_xprod_workspace_cpp
 SEXP metal_xprod_workspace_cpp(const arma::mat& X, const arma::mat& Y);
 RcppExport SEXP _fastPLS_metal_xprod_workspace_cpp(SEXP XSEXP, SEXP YSEXP) {
@@ -1351,16 +1308,6 @@ BEGIN_RCPP
     Rcpp::traits::input_parameter< int >::type power(powerSEXP);
     Rcpp::traits::input_parameter< bool >::type left_only(left_onlySEXP);
     rcpp_result_gen = Rcpp::wrap(metal_xprod_rsvd_cpp(X, Y, omega, target, power, left_only));
-    return rcpp_result_gen;
-END_RCPP
-}
-// has_metal
-bool has_metal();
-RcppExport SEXP _fastPLS_has_metal() {
-BEGIN_RCPP
-    Rcpp::RObject rcpp_result_gen;
-    Rcpp::RNGScope rcpp_rngScope_gen;
-    rcpp_result_gen = Rcpp::wrap(has_metal());
     return rcpp_result_gen;
 END_RCPP
 }
@@ -1418,8 +1365,6 @@ static const R_CallMethodDef CallEntries[] = {
     {"_fastPLS_rsvd_audit_reset_debug", (DL_FUNC) &_fastPLS_rsvd_audit_reset_debug, 0},
     {"_fastPLS_rsvd_audit_summary_debug", (DL_FUNC) &_fastPLS_rsvd_audit_summary_debug, 0},
     {"_fastPLS_label_crossprod_scaled_cpp", (DL_FUNC) &_fastPLS_label_crossprod_scaled_cpp, 4},
-    {"_fastPLS_RQ", (DL_FUNC) &_fastPLS_RQ, 2},
-    {"_fastPLS_transformy", (DL_FUNC) &_fastPLS_transformy, 1},
     {"_fastPLS_float32_sweep_cols_cpp", (DL_FUNC) &_fastPLS_float32_sweep_cols_cpp, 3},
     {"_fastPLS_float32_standardize_cpp", (DL_FUNC) &_fastPLS_float32_standardize_cpp, 3},
     {"_fastPLS_kernel_matrix_float32_cpp", (DL_FUNC) &_fastPLS_kernel_matrix_float32_cpp, 7},

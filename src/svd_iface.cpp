@@ -441,14 +441,6 @@ SVDResult truncated_svd(const Mat& A, int k, const SVDOptions& opt, Backend back
   return truncated_svd_cpu_exact(A, k, opt);
 }
 
-bool has_cuda_build() {
-#ifdef FASTPLS_HAS_CUDA
-  return true;
-#else
-  return false;
-#endif
-}
-
 bool has_cuda_backend() {
 #ifdef FASTPLS_HAS_CUDA
   return cuda_runtime_available();

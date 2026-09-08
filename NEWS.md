@@ -1,3 +1,16 @@
+# fastPLS 0.99.45
+
+* Moved capability detection and Spearman correlation from generated Rcpp
+  adapters to a small hand-written R C-API layer. R2 and dummy-response
+  helpers now use dependency-free C++ or R implementations.
+
+* Added dependency-free C++17 statistics primitives and tests to the public
+  core, and removed obsolete matrix-view fits, unused LDA helpers, and stale
+  CUDA/Metal capability wrappers.
+
+* Preserved the tested SIMPLS/rSVD component path and CIFAR-100 predictions
+  while reducing the transitional Rcpp interface by five native wrappers.
+
 # fastPLS 0.99.44
 
 * Introduced a dependency-free C++17 core interface with non-owning matrix

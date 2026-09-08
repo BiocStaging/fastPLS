@@ -7,10 +7,8 @@
 using namespace Rcpp;
 using namespace arma;
 
-double RQ(arma::mat yData, arma::mat yPred);
+double RQ(const arma::mat& yData, const arma::mat& yPred);
 arma::mat variance(const arma::mat& x);
-arma::mat transformy(arma::ivec y);
-bool has_cuda();
 
 Rcpp::List truncated_svd_debug(
   const arma::mat& A,

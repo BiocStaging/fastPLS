@@ -53,14 +53,6 @@ label_crossprod_scaled_cpp <- function(XtrainSEXP, y, n_classes, scaling) {
     .Call(`_fastPLS_label_crossprod_scaled_cpp`, XtrainSEXP, y, n_classes, scaling)
 }
 
-RQ <- function(yData, yPred) {
-    .Call(`_fastPLS_RQ`, yData, yPred)
-}
-
-transformy <- function(y) {
-    .Call(`_fastPLS_transformy`, y)
-}
-
 float32_sweep_cols_cpp <- function(XSEXP, rowSEXP, operation) {
     .Call(`_fastPLS_float32_sweep_cols_cpp`, XSEXP, rowSEXP, operation)
 }
@@ -143,10 +135,6 @@ float32_argmax_cpp <- function(scoresSEXP) {
 
 float32_topk_cpp <- function(scoresSEXP, top) {
     .Call(`_fastPLS_float32_topk_cpp`, scoresSEXP, top)
-}
-
-has_cuda <- function() {
-    .Call(`_fastPLS_has_cuda`)
 }
 
 lda_cuda_native_available <- function() {
@@ -333,10 +321,6 @@ metal_resident_response_sums_cpp <- function(object, X, Y, labels, ncomp) {
     .Call(`_fastPLS_metal_resident_response_sums_cpp`, object, X, Y, labels, ncomp)
 }
 
-spearman_correlation_cpp <- function(observed, predicted) {
-    .Call(`_fastPLS_spearman_correlation_cpp`, observed, predicted)
-}
-
 metal_xprod_workspace_cpp <- function(X, Y) {
     .Call(`_fastPLS_metal_xprod_workspace_cpp`, X, Y)
 }
@@ -351,10 +335,6 @@ metal_xprod_workspace_release_cpp <- function(workspace) {
 
 metal_xprod_rsvd_cpp <- function(X, Y, omega, target, power, left_only) {
     .Call(`_fastPLS_metal_xprod_rsvd_cpp`, X, Y, omega, target, power, left_only)
-}
-
-has_metal <- function() {
-    .Call(`_fastPLS_has_metal`)
 }
 
 metal_matrix_multiply_cpp <- function(A, B) {

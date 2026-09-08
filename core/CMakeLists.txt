@@ -63,6 +63,10 @@ add_executable(test_core_linalg tests/test_core_linalg.cpp)
 target_link_libraries(test_core_linalg PRIVATE fastpls_core)
 add_test(NAME core_linalg COMMAND test_core_linalg)
 
+add_executable(test_core_statistics tests/test_core_statistics.cpp)
+target_link_libraries(test_core_statistics PRIVATE fastpls_core)
+add_test(NAME core_statistics COMMAND test_core_statistics)
+
 add_executable(test_native_rsvd tests/test_rsvd.cpp)
 target_link_libraries(test_native_rsvd PRIVATE fastpls_native)
 add_test(NAME native_rsvd COMMAND test_native_rsvd)

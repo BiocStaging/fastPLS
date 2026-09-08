@@ -89,7 +89,6 @@ SVDResult truncated_svd_cpu_rsvd(const Mat& A, int k, const SVDOptions& opt);
 // Shared post-processing for randomized range finder outputs.
 SVDResult finalize_rsvd_from_sample(const Mat& A, const Mat& Y, int k, bool left_only);
 
-bool has_cuda_build();
 bool has_cuda_backend();
 
 } // namespace fastpls_svd
