@@ -1095,118 +1095,17 @@ Rcpp::List rsvd_float32_operator_raw(Operator& A,
 }
 
 template<class Operator>
-Rcpp::List rsvd_float32_operator(Operator& A,
-                        int k,
-                        int oversample,
-                        int power_iters,
-                        unsigned int seed,
-                        bool left_only) {
-  const arma::uword max_rank = std::min(A.n_rows, A.n_cols);
-  const arma::uword target = std::min<arma::uword>(
-    max_rank,
-    static_cast<arma::uword>(std::max(k, 1))
-  );
-  const int audit_rank = std::min<int>(
-    static_cast<int>(max_rank),
-    static_cast<int>(target) + 1
-  );
-  const int oversamples[] = {
-    std::max(oversample, 20),
-    std::max(oversample, 32),
-    std::max(oversample, 48)
-  };
-  const int powers[] = {
-    std::max(power_iters, 2),
-    std::max(power_iters, 3),
-    std::max(power_iters, 4)
-  };
-
-  if (target == 0) Rcpp::stop("rSVD requires a nonempty operator");
-  fastpls::native::OperatorRsvdWorkspace<float> workspace;
-  fastpls::native::RsvdControls controls;
-  fastpls::native::SingularTriplets<float> candidate;
-  float max_residual = std::numeric_limits<float>::infinity();
-  float omitted_ratio = std::numeric_limits<float>::infinity();
-  auto check = [&](const fastpls::native::SingularTriplets<float>& value) {
-    const arma::fmat& U = value.U;
-    const arma::fvec& s = value.s;
-    const arma::fmat V = value.Vt.t();
-    if (U.n_cols < target || s.n_elem < target || V.n_cols < target ||
-        !U.is_finite() || !s.is_finite() || !V.is_finite()) return false;
-    max_residual = 0.0f;
-    const float scale = std::max(
-      s.n_elem > 0 ? std::abs(s(0)) : 0.0f,
-      1e-6f
-    );
-    for (arma::uword j = 0; j < target; ++j) {
-      const float left_residual = arma::norm(A.multiply(V.col(j)) - s(j) * U.col(j), 2) / scale;
-      const float right_residual = arma::norm(A.multiply(U.col(j), true) - s(j) * V.col(j), 2) / scale;
-      if (!std::isfinite(left_residual) || !std::isfinite(right_residual)) return false;
-      max_residual = std::max(max_residual, std::max(left_residual, right_residual));
-    }
-    omitted_ratio = target < s.n_elem && s(target - 1) > 0.0f ?
-      std::abs(s(target) / s(target - 1)) : 0.0f;
-    return std::isfinite(max_residual) && max_residual <= 1e-2f &&
-      std::isfinite(omitted_ratio) && omitted_ratio <= 1.01f;
-  };
-  bool accepted = false;
-  int attempts = 0;
-  for (int attempt = 0; attempt < 3; ++attempt) {
-    controls.oversample = oversamples[attempt];
-    controls.power = powers[attempt];
-    controls.seed = seed + static_cast<unsigned int>(104729 * attempt);
-    candidate = fastpls::native::operator_rsvd<float>(A, audit_rank, controls, workspace);
-    attempts = attempt + 1;
-    if (check(candidate)) {
-      accepted = true;
-      break;
-    }
-  }
-  if (!accepted) {
-    try {
-      auto recovered = fastpls::native::recover_operator_rsvd<float>(
-        A, audit_rank, controls, workspace, check
-      );
-      candidate = std::move(recovered.result);
-      controls = recovered.effective;
-      attempts += recovered.attempts;
-    } catch (...) {
-      fastpls_svd::record_rsvd_audit_result(fastpls_svd::SVDResult(), true);
-      throw;
-    }
-  }
-  fastpls_svd::SVDResult audit_record;
-  audit_record.randomized = true;
-  audit_record.case_audited = true;
-  audit_record.case_certified = true;
-  audit_record.audit_attempts = attempts;
-  audit_record.effective_oversample = controls.oversample;
-  audit_record.effective_power_iters = controls.power;
-  audit_record.effective_seed = controls.seed;
-  audit_record.audit_triplet_residual = max_residual;
-  audit_record.audit_omitted_direction_ratio = omitted_ratio;
-  fastpls_svd::record_rsvd_audit_result(audit_record);
-  return Rcpp::List::create(
-    Rcpp::Named("u") = candidate.U.head_cols(target),
-    Rcpp::Named("d") = candidate.s.head(target),
-    Rcpp::Named("v") = left_only ? arma::fmat() : arma::fmat(candidate.Vt.head_rows(target).t()),
-    Rcpp::Named("case_audited") = true,
-    Rcpp::Named("case_certified") = true,
-    Rcpp::Named("deterministic_fallback") = false,
-    Rcpp::Named("audit_attempts") = attempts,
-    Rcpp::Named("effective_oversample") = controls.oversample,
-    Rcpp::Named("effective_power") = controls.power,
-    Rcpp::Named("effective_seed") = static_cast<double>(controls.seed),
-    Rcpp::Named("audit_triplet_residual") = max_residual,
-    Rcpp::Named("audit_omitted_direction_ratio") = omitted_ratio
-  );
-}
-
-Rcpp::List rsvd_float32(const arma::fmat& A, int k, int oversample,
-                        int power_iters, unsigned int seed, bool left_only) {
-  const arma::uword max_rank = std::min(A.n_rows, A.n_cols);
-  const arma::uword target = std::min<arma::uword>(
-    max_rank, static_cast<arma::uword>(std::max(k, 1))
+Rcpp::List rsvd_float32_core_operator(
+    Operator& A,
+    fastpls::runtime::CpuLinearAlgebraF32& backend,
+    int k,
+    int oversample,
+    int power_iters,
+    unsigned int seed,
+    bool left_only) {
+  const std::size_t max_rank = std::min(A.rows(), A.columns());
+  const std::size_t target = std::min<std::size_t>(
+    max_rank, static_cast<std::size_t>(std::max(k, 1))
   );
   if (target == 0) Rcpp::stop("rSVD requires a nonempty matrix");
   const int audit_rank = std::min<int>(
@@ -1223,13 +1122,10 @@ Rcpp::List rsvd_float32(const arma::fmat& A, int k, int oversample,
     std::max(power_iters, 4)
   };
 
-  fastpls::runtime::CpuLinearAlgebraF32 backend;
-  const auto input = fastpls::core::make_const_view(
-    A.memptr(), A.n_rows, A.n_cols, A.n_rows
-  );
   fastpls::core::RsvdControls controls;
   controls.left_only = false;
   fastpls::core::SingularTriplets<float> candidate;
+  fastpls::core::OperatorRsvdWorkspace<float> workspace;
   float max_residual = std::numeric_limits<float>::infinity();
   float omitted_ratio = std::numeric_limits<float>::infinity();
   auto check = [&](const fastpls::core::SingularTriplets<float>& value) {
@@ -1244,26 +1140,26 @@ Rcpp::List rsvd_float32(const arma::fmat& A, int k, int oversample,
         std::abs(value.singular_values.front()),
       1e-6f
     );
-    fastpls::core::Matrix<float> left(A.n_rows, target);
-    fastpls::core::Matrix<float> right(A.n_cols, value.U.columns());
-    fastpls::core::Matrix<float> v(A.n_cols, target);
-    for (arma::uword column = 0; column < target; ++column) {
-      for (arma::uword row = 0; row < A.n_cols; ++row) {
+    fastpls::core::Matrix<float> left(A.rows(), target);
+    fastpls::core::Matrix<float> right(A.columns(), target);
+    fastpls::core::Matrix<float> v(A.columns(), target);
+    for (std::size_t column = 0; column < target; ++column) {
+      for (std::size_t row = 0; row < A.columns(); ++row) {
         v(row, column) = value.Vt(column, row);
       }
     }
-    backend.gemm(input, v.view(), false, false, left.view());
-    backend.gemm(input, value.U.view(), true, false, right.view());
-    for (arma::uword column = 0; column < target; ++column) {
+    A.multiply(v.view(), false, left);
+    A.multiply(value.U.view(), true, right);
+    for (std::size_t column = 0; column < target; ++column) {
       float left_ss = 0.0f;
       float right_ss = 0.0f;
       const float singular = value.singular_values[column];
-      for (arma::uword row = 0; row < A.n_rows; ++row) {
+      for (std::size_t row = 0; row < A.rows(); ++row) {
         const float residual = left(row, column) -
           singular * value.U(row, column);
         left_ss += residual * residual;
       }
-      for (arma::uword row = 0; row < A.n_cols; ++row) {
+      for (std::size_t row = 0; row < A.columns(); ++row) {
         const float residual = right(row, column) -
           singular * v(row, column);
         right_ss += residual * residual;
@@ -1287,8 +1183,8 @@ Rcpp::List rsvd_float32(const arma::fmat& A, int k, int oversample,
     controls.oversample = oversamples[attempt];
     controls.power = powers[attempt];
     controls.seed = seed + static_cast<unsigned int>(104729 * attempt);
-    candidate = fastpls::core::randomized_svd(
-      input, audit_rank, controls, backend
+    candidate = fastpls::core::randomized_operator_svd<float>(
+      A, audit_rank, controls, backend, workspace
     );
     attempts = attempt + 1;
     if (check(candidate)) {
@@ -1310,8 +1206,8 @@ Rcpp::List rsvd_float32(const arma::fmat& A, int k, int oversample,
     controls.oversample = enlarged_width - audit_rank;
     controls.power = std::max(controls.power, 6) + 2 * recovery;
     controls.seed += 104729U * static_cast<unsigned int>(recovery + 1);
-    candidate = fastpls::core::randomized_svd(
-      input, audit_rank, controls, backend
+    candidate = fastpls::core::randomized_operator_svd<float>(
+      A, audit_rank, controls, backend, workspace
     );
     ++attempts;
     accepted = check(candidate);
@@ -1328,9 +1224,9 @@ Rcpp::List rsvd_float32(const arma::fmat& A, int k, int oversample,
   arma::fvec d(candidate.singular_values.data(), target);
   arma::fmat v;
   if (!left_only) {
-    v.set_size(A.n_cols, target);
-    for (arma::uword column = 0; column < target; ++column) {
-      for (arma::uword row = 0; row < A.n_cols; ++row) {
+    v.set_size(A.columns(), target);
+    for (std::size_t column = 0; column < target; ++column) {
+      for (std::size_t row = 0; row < A.columns(); ++row) {
         v(row, column) = candidate.Vt(column, row);
       }
     }
@@ -1360,6 +1256,22 @@ Rcpp::List rsvd_float32(const arma::fmat& A, int k, int oversample,
     Rcpp::Named("effective_seed") = static_cast<double>(controls.seed),
     Rcpp::Named("audit_triplet_residual") = max_residual,
     Rcpp::Named("audit_omitted_direction_ratio") = omitted_ratio
+  );
+}
+
+Rcpp::List rsvd_float32(const arma::fmat& A, int k, int oversample,
+                        int power_iters, unsigned int seed, bool left_only) {
+  fastpls::runtime::CpuLinearAlgebraF32 backend;
+  fastpls::core::ExplicitOperator<
+    float, fastpls::runtime::CpuLinearAlgebraF32
+  > input(
+    fastpls::core::make_const_view(
+      A.memptr(), A.n_rows, A.n_cols, A.n_rows
+    ),
+    backend
+  );
+  return rsvd_float32_core_operator(
+    input, backend, k, oversample, power_iters, seed, left_only
   );
 }
 
@@ -2194,7 +2106,9 @@ Rcpp::List crosscov_svd_float32(fastpls_svd::FloatCrosscovOperator& op,
     Rcpp::stop("float32 supports rSVD only; IRLBA is not part of fastPLS");
   }
   if (backend == 0) {
-    return rsvd_float32_operator(op, k, oversample, power, seed, left_only);
+    return rsvd_float32_core_operator(
+      op, op.cpu_backend(), k, oversample, power, seed, left_only
+    );
   }
   if (backend == 3 && k > 1) {
     oversample = std::max(oversample, 32);

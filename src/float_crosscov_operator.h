@@ -4,6 +4,7 @@
 #include "svd_cuda_rsvd.h"
 #include "svd_metal_backend.h"
 #include "core_cpu_backend.h"
+#include <fastpls/core/operator_rsvd.hpp>
 #include <fastpls/core/operators.hpp>
 #include <fastpls/native/operators.hpp>
 #include <stdexcept>
@@ -40,6 +41,28 @@ class FloatCrosscovOperator {
     else throw std::runtime_error("Invalid float32 cross-product backend");
   }
   arma::uword workspace_rows() const { return Y_.n_rows; }
+  std::size_t rows() const noexcept { return n_rows; }
+  std::size_t columns() const noexcept { return n_cols; }
+
+  void multiply(fastpls::core::ConstMatrixView<float> right,
+                bool transpose,
+                fastpls::core::Matrix<float>& output) {
+    if (!cpu_) {
+      throw std::runtime_error(
+        "Direct core products are available only for the CPU operator"
+      );
+    }
+    cpu_->multiply(right, transpose, output);
+  }
+
+  fastpls::runtime::CpuLinearAlgebraF32& cpu_backend() {
+    if (!cpu_) {
+      throw std::runtime_error(
+        "The float32 CPU linear-algebra backend is not active"
+      );
+    }
+    return cpu_backend_;
+  }
 
   arma::fmat multiply(const arma::fmat& B, bool transpose = false) {
     if (B.n_rows != (transpose ? n_rows : n_cols)) {
