@@ -2,9 +2,9 @@
 // Generator token: 10BE3573-1514-4C36-9D1C-5A225CD40393
 
 #include "../inst/include/fastPLS.h"
+#include "r_api.h"
 #include <RcppArmadillo.h>
 #include <Rcpp.h>
-#include "r_api.h"
 
 using namespace Rcpp;
 
@@ -773,51 +773,43 @@ BEGIN_RCPP
 END_RCPP
 }
 
+RcppExport SEXP _fastPLS_center_kernel_test_cpp(SEXP, SEXP, SEXP);
+RcppExport SEXP _fastPLS_center_kernel_test_float32_cpp(SEXP, SEXP, SEXP);
+RcppExport SEXP _fastPLS_center_kernel_train_cpp(SEXP);
+RcppExport SEXP _fastPLS_center_kernel_train_float32_cpp(SEXP);
+RcppExport SEXP _fastPLS_cuda_resident_classify_cpp(SEXP, SEXP, SEXP, SEXP, SEXP);
+RcppExport SEXP _fastPLS_cuda_resident_classify_path_cpp(SEXP, SEXP, SEXP, SEXP, SEXP);
+RcppExport SEXP _fastPLS_cuda_resident_classify_response_path_cpp(SEXP, SEXP, SEXP, SEXP, SEXP);
+RcppExport SEXP _fastPLS_cuda_resident_compact_cpp(SEXP, SEXP);
+RcppExport SEXP _fastPLS_cuda_resident_export_cpp(SEXP, SEXP, SEXP, SEXP);
+RcppExport SEXP _fastPLS_cuda_resident_predict_path_cpp(SEXP, SEXP, SEXP, SEXP);
+RcppExport SEXP _fastPLS_cuda_resident_project_cpp(SEXP, SEXP, SEXP);
+RcppExport SEXP _fastPLS_cuda_resident_response_sums_cpp(SEXP, SEXP, SEXP, SEXP, SEXP);
+RcppExport SEXP _fastPLS_cuda_resident_simpls_fit_cpp(SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP);
+RcppExport SEXP _fastPLS_cuda_resident_simpls_predict_cpp(SEXP, SEXP, SEXP, SEXP);
+RcppExport SEXP _fastPLS_float32_argmax_cpp(SEXP);
+RcppExport SEXP _fastPLS_float32_standardize_cpp(SEXP, SEXP, SEXP);
+RcppExport SEXP _fastPLS_float32_sweep_cols_cpp(SEXP, SEXP, SEXP);
+RcppExport SEXP _fastPLS_float32_topk_cpp(SEXP, SEXP);
+RcppExport SEXP _fastPLS_has_cuda(void);
+RcppExport SEXP _fastPLS_has_metal(void);
+RcppExport SEXP _fastPLS_kernel_matrix_cpp(SEXP, SEXP, SEXP, SEXP, SEXP, SEXP);
+RcppExport SEXP _fastPLS_label_crossprod_scaled_cpp(SEXP, SEXP, SEXP, SEXP);
+RcppExport SEXP _fastPLS_lda_cuda_native_available(void);
+RcppExport SEXP _fastPLS_rsvd_audit_reset_debug(void);
+RcppExport SEXP _fastPLS_rsvd_audit_summary_debug(void);
+RcppExport SEXP _fastPLS_spearman_correlation_cpp(SEXP, SEXP);
+
 static const R_CallMethodDef CallEntries[] = {
-    {"_fastPLS_cuda_resident_project_cpp", (DL_FUNC) &_fastPLS_cuda_resident_project_cpp, 3},
-    {"_fastPLS_cuda_resident_response_sums_cpp", (DL_FUNC) &_fastPLS_cuda_resident_response_sums_cpp, 5},
-    {"_fastPLS_cuda_resident_simpls_fit_cpp", (DL_FUNC) &_fastPLS_cuda_resident_simpls_fit_cpp, 17},
-    {"_fastPLS_cuda_resident_export_cpp", (DL_FUNC) &_fastPLS_cuda_resident_export_cpp, 4},
-    {"_fastPLS_cuda_resident_compact_cpp", (DL_FUNC) &_fastPLS_cuda_resident_compact_cpp, 2},
-    {"_fastPLS_cuda_resident_classify_cpp", (DL_FUNC) &_fastPLS_cuda_resident_classify_cpp, 5},
-    {"_fastPLS_cuda_resident_classify_path_cpp", (DL_FUNC) &_fastPLS_cuda_resident_classify_path_cpp, 5},
-    {"_fastPLS_cuda_resident_classify_response_path_cpp", (DL_FUNC) &_fastPLS_cuda_resident_classify_response_path_cpp, 5},
-    {"_fastPLS_cuda_resident_simpls_predict_cpp", (DL_FUNC) &_fastPLS_cuda_resident_simpls_predict_cpp, 4},
-    {"_fastPLS_cuda_resident_predict_path_cpp", (DL_FUNC) &_fastPLS_cuda_resident_predict_path_cpp, 4},
-    {"_fastPLS_rsvd_audit_reset_debug", (DL_FUNC) &_fastPLS_rsvd_audit_reset_debug, 0},
-    {"_fastPLS_rsvd_audit_summary_debug", (DL_FUNC) &_fastPLS_rsvd_audit_summary_debug, 0},
-    {"_fastPLS_label_crossprod_scaled_cpp", (DL_FUNC) &_fastPLS_label_crossprod_scaled_cpp, 4},
-    {"_fastPLS_float32_sweep_cols_cpp", (DL_FUNC) &_fastPLS_float32_sweep_cols_cpp, 3},
-    {"_fastPLS_float32_standardize_cpp", (DL_FUNC) &_fastPLS_float32_standardize_cpp, 3},
-    {"_fastPLS_kernel_matrix_float32_cpp", (DL_FUNC) &_fastPLS_kernel_matrix_float32_cpp, 7},
-    {"_fastPLS_center_kernel_train_float32_cpp", (DL_FUNC) &_fastPLS_center_kernel_train_float32_cpp, 1},
-    {"_fastPLS_center_kernel_test_float32_cpp", (DL_FUNC) &_fastPLS_center_kernel_test_float32_cpp, 3},
     {"_fastPLS_opls_filter_float32_cpp", (DL_FUNC) &_fastPLS_opls_filter_float32_cpp, 9},
     {"_fastPLS_opls_filter_float32_labels_cpp", (DL_FUNC) &_fastPLS_opls_filter_float32_labels_cpp, 10},
-    {"_fastPLS_opls_apply_filter_float32_cpp", (DL_FUNC) &_fastPLS_opls_apply_filter_float32_cpp, 6},
-    {"_fastPLS_lda_train_prefix_float32_cpp", (DL_FUNC) &_fastPLS_lda_train_prefix_float32_cpp, 4},
-    {"_fastPLS_lda_predict_float32_cpp", (DL_FUNC) &_fastPLS_lda_predict_float32_cpp, 3},
     {"_fastPLS_lda_train_prefix_float32_cuda", (DL_FUNC) &_fastPLS_lda_train_prefix_float32_cuda, 4},
     {"_fastPLS_lda_predict_float32_cuda", (DL_FUNC) &_fastPLS_lda_predict_float32_cuda, 3},
-    {"_fastPLS_cpu_float32_matrix_multiply_cpp", (DL_FUNC) &_fastPLS_cpu_float32_matrix_multiply_cpp, 4},
-    {"_fastPLS_metal_float32_matrix_multiply_cpp", (DL_FUNC) &_fastPLS_metal_float32_matrix_multiply_cpp, 4},
     {"_fastPLS_fastsvd_float32_cpp", (DL_FUNC) &_fastPLS_fastsvd_float32_cpp, 8},
     {"_fastPLS_pls_float32_cpu_cpp", (DL_FUNC) &_fastPLS_pls_float32_cpu_cpp, 11},
     {"_fastPLS_pls_float32_labels_cpp", (DL_FUNC) &_fastPLS_pls_float32_labels_cpp, 12},
-    {"_fastPLS_float32_argmax_cpp", (DL_FUNC) &_fastPLS_float32_argmax_cpp, 1},
-    {"_fastPLS_float32_topk_cpp", (DL_FUNC) &_fastPLS_float32_topk_cpp, 2},
-    {"_fastPLS_has_cuda", (DL_FUNC) &_fastPLS_has_cuda, 0},
-    {"_fastPLS_cpu_backend_description", (DL_FUNC) &_fastPLS_cpu_backend_description, 0},
-    {"_fastPLS_lda_cuda_native_available", (DL_FUNC) &_fastPLS_lda_cuda_native_available, 0},
-    {"_fastPLS_cuda_matrix_multiply", (DL_FUNC) &_fastPLS_cuda_matrix_multiply, 2},
-    {"_fastPLS_lda_train_prefix_cpp", (DL_FUNC) &_fastPLS_lda_train_prefix_cpp, 5},
-    {"_fastPLS_lda_train_moments_prefix_cpp", (DL_FUNC) &_fastPLS_lda_train_moments_prefix_cpp, 5},
-    {"_fastPLS_lda_project_train_prefix_cpp", (DL_FUNC) &_fastPLS_lda_project_train_prefix_cpp, 7},
     {"_fastPLS_lda_train_prefix_cuda", (DL_FUNC) &_fastPLS_lda_train_prefix_cuda, 5},
     {"_fastPLS_lda_project_train_prefix_cuda", (DL_FUNC) &_fastPLS_lda_project_train_prefix_cuda, 7},
-    {"_fastPLS_lda_predict_cpp", (DL_FUNC) &_fastPLS_lda_predict_cpp, 2},
-    {"_fastPLS_lda_predict_labels_cpp", (DL_FUNC) &_fastPLS_lda_predict_labels_cpp, 2},
-    {"_fastPLS_lda_project_predict_labels_cpp", (DL_FUNC) &_fastPLS_lda_project_predict_labels_cpp, 4},
     {"_fastPLS_lda_predict_cuda", (DL_FUNC) &_fastPLS_lda_predict_cuda, 2},
     {"_fastPLS_lda_predict_labels_cuda", (DL_FUNC) &_fastPLS_lda_predict_labels_cuda, 2},
     {"_fastPLS_lda_project_predict_cuda", (DL_FUNC) &_fastPLS_lda_project_predict_cuda, 5},
@@ -831,12 +823,8 @@ static const R_CallMethodDef CallEntries[] = {
     {"_fastPLS_pls_predict_flash_cpu", (DL_FUNC) &_fastPLS_pls_predict_flash_cpu, 4},
     {"_fastPLS_pls_class_predict_topk_cpp", (DL_FUNC) &_fastPLS_pls_class_predict_topk_cpp, 5},
     {"_fastPLS_pls_class_predict_topk_cuda", (DL_FUNC) &_fastPLS_pls_class_predict_topk_cuda, 4},
-    {"_fastPLS_kernel_matrix_cpp", (DL_FUNC) &_fastPLS_kernel_matrix_cpp, 6},
-    {"_fastPLS_center_kernel_train_cpp", (DL_FUNC) &_fastPLS_center_kernel_train_cpp, 1},
-    {"_fastPLS_center_kernel_test_cpp", (DL_FUNC) &_fastPLS_center_kernel_test_cpp, 3},
     {"_fastPLS_opls_filter_cpp", (DL_FUNC) &_fastPLS_opls_filter_cpp, 4},
     {"_fastPLS_opls_filter_labels_cpp", (DL_FUNC) &_fastPLS_opls_filter_labels_cpp, 5},
-    {"_fastPLS_opls_apply_filter_cpp", (DL_FUNC) &_fastPLS_opls_apply_filter_cpp, 5},
     {"_fastPLS_pls_model1", (DL_FUNC) &_fastPLS_pls_model1, 10},
     {"_fastPLS_pls_model1_rsvd_xprod_precision", (DL_FUNC) &_fastPLS_pls_model1_rsvd_xprod_precision, 10},
     {"_fastPLS_pls_model2_fast_rsvd_xprod_precision", (DL_FUNC) &_fastPLS_pls_model2_fast_rsvd_xprod_precision, 10},
@@ -852,15 +840,53 @@ static const R_CallMethodDef CallEntries[] = {
     {"_fastPLS_metal_resident_classify_path_cpp", (DL_FUNC) &_fastPLS_metal_resident_classify_path_cpp, 5},
     {"_fastPLS_metal_resident_classify_response_path_cpp", (DL_FUNC) &_fastPLS_metal_resident_classify_response_path_cpp, 5},
     {"_fastPLS_metal_resident_response_sums_cpp", (DL_FUNC) &_fastPLS_metal_resident_response_sums_cpp, 5},
-    {"_fastPLS_spearman_correlation_cpp", (DL_FUNC) &_fastPLS_spearman_correlation_cpp, 2},
     {"_fastPLS_metal_xprod_workspace_cpp", (DL_FUNC) &_fastPLS_metal_xprod_workspace_cpp, 2},
     {"_fastPLS_metal_xprod_workspace_multiply_cpp", (DL_FUNC) &_fastPLS_metal_xprod_workspace_multiply_cpp, 3},
     {"_fastPLS_metal_xprod_workspace_release_cpp", (DL_FUNC) &_fastPLS_metal_xprod_workspace_release_cpp, 1},
     {"_fastPLS_metal_xprod_rsvd_cpp", (DL_FUNC) &_fastPLS_metal_xprod_rsvd_cpp, 6},
-    {"_fastPLS_has_metal", (DL_FUNC) &_fastPLS_has_metal, 0},
     {"_fastPLS_metal_matrix_multiply_cpp", (DL_FUNC) &_fastPLS_metal_matrix_multiply_cpp, 2},
     {"_fastPLS_metal_crossprod_cpp", (DL_FUNC) &_fastPLS_metal_crossprod_cpp, 2},
     {"_fastPLS_metal_simpls_resident_cpp", (DL_FUNC) &_fastPLS_metal_simpls_resident_cpp, 5},
+    {"_fastPLS_center_kernel_test_cpp",                   (DL_FUNC) &_fastPLS_center_kernel_test_cpp,                    3},
+    {"_fastPLS_center_kernel_test_float32_cpp",           (DL_FUNC) &_fastPLS_center_kernel_test_float32_cpp,            3},
+    {"_fastPLS_center_kernel_train_cpp",                  (DL_FUNC) &_fastPLS_center_kernel_train_cpp,                   1},
+    {"_fastPLS_center_kernel_train_float32_cpp",          (DL_FUNC) &_fastPLS_center_kernel_train_float32_cpp,           1},
+    {"_fastPLS_cuda_resident_classify_cpp",               (DL_FUNC) &_fastPLS_cuda_resident_classify_cpp,                5},
+    {"_fastPLS_cuda_resident_classify_path_cpp",          (DL_FUNC) &_fastPLS_cuda_resident_classify_path_cpp,           5},
+    {"_fastPLS_cuda_resident_classify_response_path_cpp", (DL_FUNC) &_fastPLS_cuda_resident_classify_response_path_cpp,  5},
+    {"_fastPLS_cuda_resident_compact_cpp",                (DL_FUNC) &_fastPLS_cuda_resident_compact_cpp,                 2},
+    {"_fastPLS_cuda_resident_export_cpp",                 (DL_FUNC) &_fastPLS_cuda_resident_export_cpp,                  4},
+    {"_fastPLS_cuda_resident_predict_path_cpp",           (DL_FUNC) &_fastPLS_cuda_resident_predict_path_cpp,            4},
+    {"_fastPLS_cuda_resident_project_cpp",                (DL_FUNC) &_fastPLS_cuda_resident_project_cpp,                 3},
+    {"_fastPLS_cuda_resident_response_sums_cpp",          (DL_FUNC) &_fastPLS_cuda_resident_response_sums_cpp,           5},
+    {"_fastPLS_cuda_resident_simpls_fit_cpp",             (DL_FUNC) &_fastPLS_cuda_resident_simpls_fit_cpp,             17},
+    {"_fastPLS_cuda_resident_simpls_predict_cpp",         (DL_FUNC) &_fastPLS_cuda_resident_simpls_predict_cpp,          4},
+    {"_fastPLS_float32_argmax_cpp",                       (DL_FUNC) &_fastPLS_float32_argmax_cpp,                        1},
+    {"_fastPLS_float32_standardize_cpp",                  (DL_FUNC) &_fastPLS_float32_standardize_cpp,                   3},
+    {"_fastPLS_float32_sweep_cols_cpp",                   (DL_FUNC) &_fastPLS_float32_sweep_cols_cpp,                    3},
+    {"_fastPLS_float32_topk_cpp",                         (DL_FUNC) &_fastPLS_float32_topk_cpp,                          2},
+    {"_fastPLS_has_cuda",                                 (DL_FUNC) &_fastPLS_has_cuda,                                  0},
+    {"_fastPLS_has_metal",                                (DL_FUNC) &_fastPLS_has_metal,                                 0},
+    {"_fastPLS_kernel_matrix_cpp",                        (DL_FUNC) &_fastPLS_kernel_matrix_cpp,                         6},
+    {"_fastPLS_label_crossprod_scaled_cpp",               (DL_FUNC) &_fastPLS_label_crossprod_scaled_cpp,                4},
+    {"_fastPLS_lda_cuda_native_available",                (DL_FUNC) &_fastPLS_lda_cuda_native_available,                 0},
+    {"_fastPLS_rsvd_audit_reset_debug",                   (DL_FUNC) &_fastPLS_rsvd_audit_reset_debug,                    0},
+    {"_fastPLS_rsvd_audit_summary_debug",                 (DL_FUNC) &_fastPLS_rsvd_audit_summary_debug,                  0},
+    {"_fastPLS_spearman_correlation_cpp",                 (DL_FUNC) &_fastPLS_spearman_correlation_cpp,                  2},
+    {"_fastPLS_lda_train_prefix_cpp",                     (DL_FUNC) &_fastPLS_lda_train_prefix_cpp,                      5},
+    {"_fastPLS_lda_train_moments_prefix_cpp",             (DL_FUNC) &_fastPLS_lda_train_moments_prefix_cpp,              5},
+    {"_fastPLS_lda_project_train_prefix_cpp",             (DL_FUNC) &_fastPLS_lda_project_train_prefix_cpp,              7},
+    {"_fastPLS_lda_predict_cpp",                          (DL_FUNC) &_fastPLS_lda_predict_cpp,                           2},
+    {"_fastPLS_lda_predict_labels_cpp",                   (DL_FUNC) &_fastPLS_lda_predict_labels_cpp,                    2},
+    {"_fastPLS_lda_project_predict_labels_cpp",           (DL_FUNC) &_fastPLS_lda_project_predict_labels_cpp,            4},
+    {"_fastPLS_lda_train_prefix_float32_cpp",             (DL_FUNC) &_fastPLS_lda_train_prefix_float32_cpp,              4},
+    {"_fastPLS_lda_predict_float32_cpp",                  (DL_FUNC) &_fastPLS_lda_predict_float32_cpp,                   3},
+    {"_fastPLS_cpu_backend_description",                  (DL_FUNC) &_fastPLS_cpu_backend_description,                   0},
+    {"_fastPLS_cpu_float32_matrix_multiply_cpp",          (DL_FUNC) &_fastPLS_cpu_float32_matrix_multiply_cpp,           4},
+    {"_fastPLS_metal_float32_matrix_multiply_cpp",        (DL_FUNC) &_fastPLS_metal_float32_matrix_multiply_cpp,         4},
+    {"_fastPLS_kernel_matrix_float32_cpp",                (DL_FUNC) &_fastPLS_kernel_matrix_float32_cpp,                 7},
+    {"_fastPLS_opls_apply_filter_float32_cpp",            (DL_FUNC) &_fastPLS_opls_apply_filter_float32_cpp,             6},
+    {"_fastPLS_opls_apply_filter_cpp",                    (DL_FUNC) &_fastPLS_opls_apply_filter_cpp,                     5},
     {NULL, NULL, 0}
 };
 

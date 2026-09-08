@@ -1,5 +1,114 @@
 # Hand-written R C-API entry points used during the dependency-free migration.
 
+cpu_backend_description_cpp <- function() {
+    .Call("_fastPLS_cpu_backend_description", PACKAGE = "fastPLS")
+}
+
+lda_train_prefix_cpp <- function(scores, labels, class_count, components,
+                                 ridge) {
+    .Call(
+        "_fastPLS_lda_train_prefix_cpp", scores, labels, class_count,
+        components, ridge, PACKAGE = "fastPLS"
+    )
+}
+
+lda_train_moments_prefix_cpp <- function(
+    gram, class_sums, counts, sample_count, components
+) {
+    .Call(
+        "_fastPLS_lda_train_moments_prefix_cpp", gram, class_sums, counts,
+        sample_count, components, PACKAGE = "fastPLS"
+    )
+}
+
+lda_project_train_prefix_cpp <- function(
+    predictors, projection, offset, labels, class_count, components, ridge
+) {
+    .Call(
+        "_fastPLS_lda_project_train_prefix_cpp", predictors, projection,
+        offset, labels, class_count, components, ridge, PACKAGE = "fastPLS"
+    )
+}
+
+lda_predict_cpp <- function(scores, model) {
+    .Call("_fastPLS_lda_predict_cpp", scores, model, PACKAGE = "fastPLS")
+}
+
+lda_predict_labels_cpp <- function(scores, model) {
+    .Call(
+        "_fastPLS_lda_predict_labels_cpp", scores, model,
+        PACKAGE = "fastPLS"
+    )
+}
+
+lda_project_predict_labels_cpp <- function(
+    predictors, projection, offset, model
+) {
+    .Call(
+        "_fastPLS_lda_project_predict_labels_cpp", predictors, projection,
+        offset, model, PACKAGE = "fastPLS"
+    )
+}
+
+lda_train_prefix_float32_cpp <- function(
+    scores, labels, class_count, components
+) {
+    .Call(
+        "_fastPLS_lda_train_prefix_float32_cpp", scores, labels,
+        class_count, components, PACKAGE = "fastPLS"
+    )
+}
+
+lda_predict_float32_cpp <- function(scores, model, return_scores = TRUE) {
+    .Call(
+        "_fastPLS_lda_predict_float32_cpp", scores, model, return_scores,
+        PACKAGE = "fastPLS"
+    )
+}
+
+cpu_float32_matrix_multiply_cpp <- function(
+    left, right, transpose_left = FALSE, transpose_right = FALSE
+) {
+    .Call(
+        "_fastPLS_cpu_float32_matrix_multiply_cpp", left, right,
+        transpose_left, transpose_right, PACKAGE = "fastPLS"
+    )
+}
+
+metal_float32_matrix_multiply_cpp <- function(
+    left, right, transpose_left = FALSE, transpose_right = FALSE
+) {
+    .Call(
+        "_fastPLS_metal_float32_matrix_multiply_cpp", left, right,
+        transpose_left, transpose_right, PACKAGE = "fastPLS"
+    )
+}
+
+kernel_matrix_float32_cpp <- function(
+    left, right, kernel, gamma, degree, offset, backend
+) {
+    .Call(
+        "_fastPLS_kernel_matrix_float32_cpp", left, right, kernel, gamma,
+        degree, offset, backend, PACKAGE = "fastPLS"
+    )
+}
+
+opls_apply_filter_float32_cpp <- function(
+    matrix, center, scale, weights, loadings, backend
+) {
+    .Call(
+        "_fastPLS_opls_apply_filter_float32_cpp", matrix, center, scale,
+        weights, loadings, backend, PACKAGE = "fastPLS"
+    )
+}
+
+opls_apply_filter_cpp <- function(matrix, center, scale, weights, loadings) {
+    .Call(
+        "_fastPLS_opls_apply_filter_cpp", matrix, center, scale, weights,
+        loadings, PACKAGE = "fastPLS"
+    )
+}
+
 cuda_resident_project_cpp <- function(object, X, ncomp) {
     .Call(
         "_fastPLS_cuda_resident_project_cpp",
