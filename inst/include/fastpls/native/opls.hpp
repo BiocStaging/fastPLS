@@ -2,6 +2,7 @@
 // Copyright (c) 2026 Stefano Cacciatore
 #ifndef FASTPLS_NATIVE_OPLS_HPP
 #define FASTPLS_NATIVE_OPLS_HPP
+#include <fastpls/native/operator_rsvd.hpp>
 #include <fastpls/native/simpls.hpp>
 
 namespace fastpls { namespace native {
@@ -139,10 +140,12 @@ OplsFilter<T> fit_opls_filter_with_solver(arma::Mat<T> X, arma::Mat<T> Y,
 template<class T>
 OplsFilter<T> fit_opls_filter(arma::Mat<T> X, arma::Mat<T> Y, int north,
                              int scaling = 1, RsvdControls controls = {}) {
+  OperatorRsvdWorkspace<T> workspace;
   auto solve = [&](const arma::Mat<T>& S, int component, arma::Col<T>& w) {
     RsvdControls current = controls;
     current.seed += static_cast<unsigned int>(component);
-    auto result = rsvd(S, 1, current);
+    MatrixOperator<T> op(S);
+    auto result = operator_rsvd(op, 1, current, workspace);
     if (result.U.n_cols == 0) return false;
     w = result.U.col(0);
     return true;

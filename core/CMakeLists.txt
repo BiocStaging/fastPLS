@@ -85,10 +85,6 @@ if(BUILD_TESTING)
   add_test(NAME core_statistics COMMAND test_core_statistics)
 
   if(FASTPLS_BUILD_TRANSITIONAL_NATIVE)
-    add_executable(test_native_rsvd tests/test_rsvd.cpp)
-    target_link_libraries(test_native_rsvd PRIVATE fastpls_native)
-    add_test(NAME native_rsvd COMMAND test_native_rsvd)
-
     add_executable(test_native_simpls tests/test_simpls.cpp)
     target_link_libraries(test_native_simpls PRIVATE fastpls_native)
     add_test(NAME native_simpls COMMAND test_native_simpls)

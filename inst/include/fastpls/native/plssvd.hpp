@@ -2,6 +2,7 @@
 // Copyright (c) 2026 Stefano Cacciatore
 #ifndef FASTPLS_NATIVE_PLSSVD_HPP
 #define FASTPLS_NATIVE_PLSSVD_HPP
+#include <fastpls/native/operator_rsvd.hpp>
 #include <fastpls/native/simpls.hpp>
 
 namespace fastpls { namespace native {
@@ -212,8 +213,10 @@ template<typename Scalar>
 PlssvdModel<Scalar> fit_plssvd(
     arma::Mat<Scalar> X, arma::Mat<Scalar> Y, arma::ivec components,
     const PlssvdOptions& options = {}) {
+  OperatorRsvdWorkspace<Scalar> workspace;
   auto solver = [&](const arma::Mat<Scalar>& S, int rank, int) {
-    return rsvd(S, rank, options.svd);
+    MatrixOperator<Scalar> op(S);
+    return operator_rsvd(op, rank, options.svd, workspace);
   };
   return fit_plssvd_with_solver(X, Y, std::move(components), options, solver);
 }

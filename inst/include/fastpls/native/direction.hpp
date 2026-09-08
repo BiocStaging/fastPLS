@@ -2,7 +2,7 @@
 // Copyright (c) 2026 Stefano Cacciatore
 #ifndef FASTPLS_NATIVE_DIRECTION_HPP
 #define FASTPLS_NATIVE_DIRECTION_HPP
-#include <fastpls/native/rsvd.hpp>
+#include <fastpls/native/svd_types.hpp>
 
 namespace fastpls { namespace native {
 
