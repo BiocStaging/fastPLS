@@ -97,31 +97,3 @@ test_that("double CV accepts LOOCV for the outer grouped split", {
   fold_groups <- split(constrain, dcv$results[[1]]$fold)
   expect_true(all(vapply(fold_groups, function(z) length(unique(z)) == 1L, logical(1))))
 })
-
-test_that("compiled single CV also treats negative kfold as leave-one-constraint-group-out", {
-  set.seed(15)
-  X <- matrix(rnorm(18 * 4), 18, 4)
-  Y <- matrix(rnorm(18), 18, 1)
-  constrain <- rep(c(101L, 203L, 307L, 409L, 503L, 601L), each = 3L)
-
-  opt <- fastPLS:::single_pls_cv_cpp(
-    Xdata = X,
-    Ydata = Y,
-    constrain = as.integer(constrain),
-    ncomp = as.integer(1),
-    scaling = 1L,
-    kfold = -1L,
-    method = 1L,
-    svd_method = 3L,
-    rsvd_oversample = 5L,
-    rsvd_power = 1L,
-    svds_tol = 0,
-    seed = 15L
-  )
-
-  expect_equal(length(unique(opt$fold)), length(unique(constrain)))
-  group_folds <- split(opt$fold, constrain)
-  expect_true(all(vapply(group_folds, function(z) length(unique(z)) == 1L, logical(1))))
-  fold_groups <- split(constrain, opt$fold)
-  expect_true(all(vapply(fold_groups, function(z) length(unique(z)) == 1L, logical(1))))
-})

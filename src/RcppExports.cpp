@@ -409,28 +409,6 @@ BEGIN_RCPP
     return rcpp_result_gen;
 END_RCPP
 }
-// single_pls_cv_cpp
-List single_pls_cv_cpp(arma::mat Xdata, arma::mat Ydata, arma::ivec constrain, arma::ivec ncomp, int scaling, int kfold, int method, int svd_method, int rsvd_oversample, int rsvd_power, double svds_tol, int seed);
-RcppExport SEXP _fastPLS_single_pls_cv_cpp(SEXP XdataSEXP, SEXP YdataSEXP, SEXP constrainSEXP, SEXP ncompSEXP, SEXP scalingSEXP, SEXP kfoldSEXP, SEXP methodSEXP, SEXP svd_methodSEXP, SEXP rsvd_oversampleSEXP, SEXP rsvd_powerSEXP, SEXP svds_tolSEXP, SEXP seedSEXP) {
-BEGIN_RCPP
-    Rcpp::RObject rcpp_result_gen;
-    Rcpp::RNGScope rcpp_rngScope_gen;
-    Rcpp::traits::input_parameter< arma::mat >::type Xdata(XdataSEXP);
-    Rcpp::traits::input_parameter< arma::mat >::type Ydata(YdataSEXP);
-    Rcpp::traits::input_parameter< arma::ivec >::type constrain(constrainSEXP);
-    Rcpp::traits::input_parameter< arma::ivec >::type ncomp(ncompSEXP);
-    Rcpp::traits::input_parameter< int >::type scaling(scalingSEXP);
-    Rcpp::traits::input_parameter< int >::type kfold(kfoldSEXP);
-    Rcpp::traits::input_parameter< int >::type method(methodSEXP);
-    Rcpp::traits::input_parameter< int >::type svd_method(svd_methodSEXP);
-    Rcpp::traits::input_parameter< int >::type rsvd_oversample(rsvd_oversampleSEXP);
-    Rcpp::traits::input_parameter< int >::type rsvd_power(rsvd_powerSEXP);
-    Rcpp::traits::input_parameter< double >::type svds_tol(svds_tolSEXP);
-    Rcpp::traits::input_parameter< int >::type seed(seedSEXP);
-    rcpp_result_gen = Rcpp::wrap(single_pls_cv_cpp(Xdata, Ydata, constrain, ncomp, scaling, kfold, method, svd_method, rsvd_oversample, rsvd_power, svds_tol, seed));
-    return rcpp_result_gen;
-END_RCPP
-}
 // pls_model1
 List pls_model1(arma::mat Xtrain, arma::mat Ytrain, arma::ivec ncomp, int scaling, bool fit, int svd_method, int rsvd_oversample, int rsvd_power, double svds_tol, int seed);
 RcppExport SEXP _fastPLS_pls_model1(SEXP XtrainSEXP, SEXP YtrainSEXP, SEXP ncompSEXP, SEXP scalingSEXP, SEXP fitSEXP, SEXP svd_methodSEXP, SEXP rsvd_oversampleSEXP, SEXP rsvd_powerSEXP, SEXP svds_tolSEXP, SEXP seedSEXP) {
@@ -859,7 +837,6 @@ static const R_CallMethodDef CallEntries[] = {
     {"_fastPLS_opls_filter_cpp", (DL_FUNC) &_fastPLS_opls_filter_cpp, 4},
     {"_fastPLS_opls_filter_labels_cpp", (DL_FUNC) &_fastPLS_opls_filter_labels_cpp, 5},
     {"_fastPLS_opls_apply_filter_cpp", (DL_FUNC) &_fastPLS_opls_apply_filter_cpp, 5},
-    {"_fastPLS_single_pls_cv_cpp", (DL_FUNC) &_fastPLS_single_pls_cv_cpp, 12},
     {"_fastPLS_pls_model1", (DL_FUNC) &_fastPLS_pls_model1, 10},
     {"_fastPLS_pls_model1_rsvd_xprod_precision", (DL_FUNC) &_fastPLS_pls_model1_rsvd_xprod_precision, 10},
     {"_fastPLS_pls_model2_fast_rsvd_xprod_precision", (DL_FUNC) &_fastPLS_pls_model2_fast_rsvd_xprod_precision, 10},

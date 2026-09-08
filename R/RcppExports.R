@@ -157,10 +157,6 @@ opls_apply_filter_cpp <- function(X, mX, vX, W_orth, P_orth) {
     .Call(`_fastPLS_opls_apply_filter_cpp`, X, mX, vX, W_orth, P_orth)
 }
 
-single_pls_cv_cpp <- function(Xdata, Ydata, constrain, ncomp, scaling, kfold, method, svd_method, rsvd_oversample, rsvd_power, svds_tol, seed) {
-    .Call(`_fastPLS_single_pls_cv_cpp`, Xdata, Ydata, constrain, ncomp, scaling, kfold, method, svd_method, rsvd_oversample, rsvd_power, svds_tol, seed)
-}
-
 pls_model1 <- function(Xtrain, Ytrain, ncomp, scaling, fit, svd_method, rsvd_oversample, rsvd_power, svds_tol, seed) {
     .Call(`_fastPLS_pls_model1`, Xtrain, Ytrain, ncomp, scaling, fit, svd_method, rsvd_oversample, rsvd_power, svds_tol, seed)
 }
