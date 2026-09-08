@@ -5,6 +5,7 @@
 
 namespace {
 
+#ifdef FASTPLS_HAS_METAL
 arma::fmat float_bits_to_matrix(SEXP value, const char* name) {
   if (TYPEOF(value) != INTSXP || !Rf_isMatrix(value)) {
     Rcpp::stop("%s must be a float32 integer-bit matrix", name);
@@ -57,6 +58,7 @@ Rcpp::XPtr<MetalResidentRModel> checked_model(Rcpp::List object) {
   }
   return state;
 }
+#endif
 
 }  // namespace
 

@@ -23,6 +23,27 @@ void cpu_gemm_f64(core::ConstMatrixView<double> left,
                   bool transpose_right,
                   core::MatrixView<double> output);
 
+class CpuLinearAlgebraF32 {
+ public:
+  void gemm(core::ConstMatrixView<float> left,
+            core::ConstMatrixView<float> right,
+            bool transpose_left,
+            bool transpose_right,
+            core::MatrixView<float> output) const;
+
+  bool qr_economy(core::ConstMatrixView<float> input,
+                  core::Matrix<float>& q) const;
+
+  bool symmetric_eigen(core::Matrix<float>& matrix,
+                       std::vector<float>& eigenvalues) const;
+
+  bool svd_economy(core::ConstMatrixView<float> input,
+                   bool left_only,
+                   core::Matrix<float>& u,
+                   std::vector<float>& singular_values,
+                   core::Matrix<float>& vt) const;
+};
+
 class CpuLinearAlgebraF64 {
  public:
   void gemm(core::ConstMatrixView<double> left,

@@ -4,6 +4,6 @@ PKG_CXXFLAGS = -I../inst/include/ -IANN -DRANN -DARMA_64BIT_WORD=1 @FASTPLS_PKG_
 PKG_CPPFLAGS = @FASTPLS_PKG_CPPFLAGS@
 PKG_LIBS = @FASTPLS_PKG_LIBS@ $(FLIBS)
 
-OBJECTS = RcppExports.o core_cpu_backend.o core_cpu_lapack.o r_api.o fastPLS.o cuda_resident_r.o metal_resident_r.o \
+OBJECTS = RcppExports.o core_cpu_backend.o core_cpu_lapack.o core_cpu_lapack_f32.o r_api.o fastPLS.o cuda_resident_r.o metal_resident_r.o \
 	svd_iface.o svd_cpu_exact.o svd_cpu_rsvd.o svd_cuda_rsvd.o \
 	svd_metal_api.o@FASTPLS_METAL_OBJECTS@@FASTPLS_CUDA_OBJECTS@
