@@ -1,3 +1,14 @@
+# fastPLS 0.99.49
+
+* Made the CMake `fastpls::core` target independently configurable, testable
+  and installable without Armadillo, BLAS or LAPACK. The current
+  Armadillo-based model layer is now an explicitly optional transitional
+  target.
+
+* Added an installed-consumer test that compiles against only the public
+  dependency-free headers and `fastpls::core`, providing a direct ABI and
+  packaging gate for the future standalone library.
+
 # fastPLS 0.99.48
 
 * Moved float64 kernel-matrix construction from the generated

@@ -32,6 +32,21 @@ no previous latent direction initializes the next sketch.
 | `models.hpp` | Standalone CPU composition of the shared OPLS/kernel and SIMPLS stages |
 | `lda.hpp` | CPU float64 and non-Windows CPU float32 LDA Cholesky/triangular solves |
 
+The dependency-free target can be configured and tested without discovering
+Armadillo, BLAS, or LAPACK:
+
+```sh
+cmake -S core -B /tmp/fastpls-core \
+  -DFASTPLS_BUILD_TRANSITIONAL_NATIVE=OFF
+cmake --build /tmp/fastpls-core
+ctest --test-dir /tmp/fastpls-core --output-on-failure
+cmake --install /tmp/fastpls-core --prefix /tmp/fastpls-core-install
+cmake -S core/tests/core_consumer -B /tmp/fastpls-core-consumer \
+  -DCMAKE_PREFIX_PATH=/tmp/fastpls-core-install
+cmake --build /tmp/fastpls-core-consumer
+ctest --test-dir /tmp/fastpls-core-consumer --output-on-failure
+```
+
 The generic solver callbacks permit separate solver adapters without copying
 the PLS engines. They do not load or depend on IRLBA. IRLBA integration has
 moved to the GPL companion; the main package no longer bundles that solver.
