@@ -62,6 +62,42 @@ float32_standardize_cpp <- function(XSEXP, centerSEXP, scaleSEXP) {
     )
 }
 
+center_kernel_train_float32_cpp <- function(KSEXP) {
+    .Call(
+        "_fastPLS_center_kernel_train_float32_cpp",
+        KSEXP,
+        PACKAGE = "fastPLS"
+    )
+}
+
+center_kernel_test_float32_cpp <- function(
+    KtestSEXP,
+    trainColMeansSEXP,
+    train_grand_mean
+) {
+    .Call(
+        "_fastPLS_center_kernel_test_float32_cpp",
+        KtestSEXP,
+        trainColMeansSEXP,
+        train_grand_mean,
+        PACKAGE = "fastPLS"
+    )
+}
+
+center_kernel_train_cpp <- function(K) {
+    .Call("_fastPLS_center_kernel_train_cpp", K, PACKAGE = "fastPLS")
+}
+
+center_kernel_test_cpp <- function(Ktest, train_col_means, train_grand_mean) {
+    .Call(
+        "_fastPLS_center_kernel_test_cpp",
+        Ktest,
+        train_col_means,
+        train_grand_mean,
+        PACKAGE = "fastPLS"
+    )
+}
+
 label_crossprod_scaled_cpp <- function(
     XtrainSEXP,
     y,

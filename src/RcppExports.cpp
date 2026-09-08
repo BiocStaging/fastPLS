@@ -183,30 +183,6 @@ BEGIN_RCPP
     return rcpp_result_gen;
 END_RCPP
 }
-// center_kernel_train_float32_cpp
-Rcpp::List center_kernel_train_float32_cpp(SEXP KSEXP);
-RcppExport SEXP _fastPLS_center_kernel_train_float32_cpp(SEXP KSEXPSEXP) {
-BEGIN_RCPP
-    Rcpp::RObject rcpp_result_gen;
-    Rcpp::RNGScope rcpp_rngScope_gen;
-    Rcpp::traits::input_parameter< SEXP >::type KSEXP(KSEXPSEXP);
-    rcpp_result_gen = Rcpp::wrap(center_kernel_train_float32_cpp(KSEXP));
-    return rcpp_result_gen;
-END_RCPP
-}
-// center_kernel_test_float32_cpp
-Rcpp::List center_kernel_test_float32_cpp(SEXP KtestSEXP, SEXP trainColMeansSEXP, double train_grand_mean);
-RcppExport SEXP _fastPLS_center_kernel_test_float32_cpp(SEXP KtestSEXPSEXP, SEXP trainColMeansSEXPSEXP, SEXP train_grand_meanSEXP) {
-BEGIN_RCPP
-    Rcpp::RObject rcpp_result_gen;
-    Rcpp::RNGScope rcpp_rngScope_gen;
-    Rcpp::traits::input_parameter< SEXP >::type KtestSEXP(KtestSEXPSEXP);
-    Rcpp::traits::input_parameter< SEXP >::type trainColMeansSEXP(trainColMeansSEXPSEXP);
-    Rcpp::traits::input_parameter< double >::type train_grand_mean(train_grand_meanSEXP);
-    rcpp_result_gen = Rcpp::wrap(center_kernel_test_float32_cpp(KtestSEXP, trainColMeansSEXP, train_grand_mean));
-    return rcpp_result_gen;
-END_RCPP
-}
 // opls_filter_float32_cpp
 Rcpp::List opls_filter_float32_cpp(SEXP XSEXP, SEXP YSEXP, int north, int scaling, int backend, int svd_method, int rsvd_oversample, int rsvd_power, int seed);
 RcppExport SEXP _fastPLS_opls_filter_float32_cpp(SEXP XSEXPSEXP, SEXP YSEXPSEXP, SEXP northSEXP, SEXP scalingSEXP, SEXP backendSEXP, SEXP svd_methodSEXP, SEXP rsvd_oversampleSEXP, SEXP rsvd_powerSEXP, SEXP seedSEXP) {
@@ -804,30 +780,6 @@ BEGIN_RCPP
     Rcpp::traits::input_parameter< const int >::type degree(degreeSEXP);
     Rcpp::traits::input_parameter< const double >::type coef0(coef0SEXP);
     rcpp_result_gen = Rcpp::wrap(kernel_matrix_cpp(X1, X2, kernel, gamma, degree, coef0));
-    return rcpp_result_gen;
-END_RCPP
-}
-// center_kernel_train_cpp
-Rcpp::List center_kernel_train_cpp(const arma::mat& K);
-RcppExport SEXP _fastPLS_center_kernel_train_cpp(SEXP KSEXP) {
-BEGIN_RCPP
-    Rcpp::RObject rcpp_result_gen;
-    Rcpp::RNGScope rcpp_rngScope_gen;
-    Rcpp::traits::input_parameter< const arma::mat& >::type K(KSEXP);
-    rcpp_result_gen = Rcpp::wrap(center_kernel_train_cpp(K));
-    return rcpp_result_gen;
-END_RCPP
-}
-// center_kernel_test_cpp
-arma::mat center_kernel_test_cpp(const arma::mat& Ktest, const arma::rowvec& train_col_means, const double train_grand_mean);
-RcppExport SEXP _fastPLS_center_kernel_test_cpp(SEXP KtestSEXP, SEXP train_col_meansSEXP, SEXP train_grand_meanSEXP) {
-BEGIN_RCPP
-    Rcpp::RObject rcpp_result_gen;
-    Rcpp::RNGScope rcpp_rngScope_gen;
-    Rcpp::traits::input_parameter< const arma::mat& >::type Ktest(KtestSEXP);
-    Rcpp::traits::input_parameter< const arma::rowvec& >::type train_col_means(train_col_meansSEXP);
-    Rcpp::traits::input_parameter< const double >::type train_grand_mean(train_grand_meanSEXP);
-    rcpp_result_gen = Rcpp::wrap(center_kernel_test_cpp(Ktest, train_col_means, train_grand_mean));
     return rcpp_result_gen;
 END_RCPP
 }

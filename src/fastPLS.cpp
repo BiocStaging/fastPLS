@@ -1652,30 +1652,6 @@ Rcpp::List kernel_matrix_float32_cpp(SEXP X1SEXP,
 }
 
 // [[Rcpp::export]]
-Rcpp::List center_kernel_train_float32_cpp(SEXP KSEXP) {
-  arma::fmat K = float32_bits_to_fmat(KSEXP, "K");
-  auto centered = fastpls::native::center_kernel_train(std::move(K));
-  return Rcpp::List::create(
-    Rcpp::Named("K") = fmat_to_float32_bits(centered.K),
-    Rcpp::Named("col_means") = fmat_to_float32_bits(arma::fmat(centered.column_means)),
-    Rcpp::Named("grand_mean") = centered.grand_mean
-  );
-}
-
-// [[Rcpp::export]]
-Rcpp::List center_kernel_test_float32_cpp(SEXP KtestSEXP,
-                                          SEXP trainColMeansSEXP,
-                                          double train_grand_mean) {
-  arma::fmat Ktest = float32_bits_to_fmat(KtestSEXP, "Ktest");
-  const arma::fmat means_matrix = float32_bits_to_fmat(
-    trainColMeansSEXP, "train_col_means");
-  const arma::frowvec train_col_means = arma::vectorise(means_matrix, 1);
-  arma::fmat centered = fastpls::native::center_kernel_test(
-    std::move(Ktest), train_col_means, static_cast<float>(train_grand_mean));
-  return Rcpp::List::create(Rcpp::Named("K") = fmat_to_float32_bits(centered));
-}
-
-// [[Rcpp::export]]
 Rcpp::List opls_filter_float32_cpp(SEXP XSEXP,
                                    SEXP YSEXP,
                                    int north,
@@ -3383,69 +3359,6 @@ Rcpp::List kernel_matrix_float32_cpp(SEXP X1SEXP, SEXP X2SEXP, int kernel, doubl
         Rcpp::stop("Unknown kernel id");
       }
       out(i, j) = windows_float_to_bits(value);
-    }
-  }
-  return Rcpp::List::create(Rcpp::Named("K") = out);
-}
-
-Rcpp::List center_kernel_train_float32_cpp(SEXP KSEXP) {
-  const Rcpp::IntegerMatrix K = windows_float32_bits(KSEXP, "K");
-  Rcpp::IntegerMatrix out(K.nrow(), K.ncol());
-  std::vector<float> row_means(static_cast<std::size_t>(K.nrow()), 0.0f);
-  std::vector<float> col_means(static_cast<std::size_t>(K.ncol()), 0.0f);
-  float grand_mean = 0.0f;
-  for (int row = 0; row < K.nrow(); ++row) {
-    for (int col = 0; col < K.ncol(); ++col) {
-      const float value = windows_bits_to_float(K(row, col));
-      row_means[static_cast<std::size_t>(row)] += value;
-      col_means[static_cast<std::size_t>(col)] += value;
-      grand_mean += value;
-    }
-  }
-  for (float& value : row_means) value /= static_cast<float>(K.ncol());
-  for (float& value : col_means) value /= static_cast<float>(K.nrow());
-  grand_mean /= static_cast<float>(K.nrow() * K.ncol());
-  for (int row = 0; row < K.nrow(); ++row) {
-    for (int col = 0; col < K.ncol(); ++col) {
-      const float value = windows_bits_to_float(K(row, col)) -
-        row_means[static_cast<std::size_t>(row)] -
-        col_means[static_cast<std::size_t>(col)] + grand_mean;
-      out(row, col) = windows_float_to_bits(value);
-    }
-  }
-  Rcpp::IntegerMatrix means(1, K.ncol());
-  for (int col = 0; col < K.ncol(); ++col) {
-    means(0, col) = windows_float_to_bits(
-      col_means[static_cast<std::size_t>(col)]
-    );
-  }
-  return Rcpp::List::create(
-    Rcpp::Named("K") = out,
-    Rcpp::Named("col_means") = means,
-    Rcpp::Named("grand_mean") = grand_mean
-  );
-}
-
-Rcpp::List center_kernel_test_float32_cpp(SEXP KtestSEXP, SEXP trainColMeansSEXP, double train_grand_mean) {
-  const Rcpp::IntegerMatrix K = windows_float32_bits(KtestSEXP, "Ktest");
-  const Rcpp::IntegerMatrix means = windows_float32_bits(
-    trainColMeansSEXP, "train_col_means"
-  );
-  if (means.nrow() != 1 || means.ncol() != K.ncol()) {
-    Rcpp::stop("Ktest columns must match the training kernel size");
-  }
-  Rcpp::IntegerMatrix out(K.nrow(), K.ncol());
-  for (int row = 0; row < K.nrow(); ++row) {
-    float row_mean = 0.0f;
-    for (int col = 0; col < K.ncol(); ++col) {
-      row_mean += windows_bits_to_float(K(row, col));
-    }
-    row_mean /= static_cast<float>(K.ncol());
-    for (int col = 0; col < K.ncol(); ++col) {
-      const float value = windows_bits_to_float(K(row, col)) - row_mean -
-        windows_bits_to_float(means(0, col)) +
-        static_cast<float>(train_grand_mean);
-      out(row, col) = windows_float_to_bits(value);
     }
   }
   return Rcpp::List::create(Rcpp::Named("K") = out);
@@ -6116,25 +6029,6 @@ arma::mat kernel_matrix_cpp(
   const double coef0
 ) {
   return fastpls::native::kernel_matrix(X1, X2, kernel, gamma, degree, coef0);
-}
-
-// [[Rcpp::export]]
-Rcpp::List center_kernel_train_cpp(const arma::mat& K) {
-  auto centered = fastpls::native::center_kernel_train(K);
-  return Rcpp::List::create(
-    Rcpp::Named("K") = centered.K,
-    Rcpp::Named("col_means") = centered.column_means,
-    Rcpp::Named("grand_mean") = centered.grand_mean
-  );
-}
-
-// [[Rcpp::export]]
-arma::mat center_kernel_test_cpp(
-  const arma::mat& Ktest,
-  const arma::rowvec& train_col_means,
-  const double train_grand_mean
-) {
-  return fastpls::native::center_kernel_test(Ktest, train_col_means, train_grand_mean);
 }
 
 // [[Rcpp::export]]

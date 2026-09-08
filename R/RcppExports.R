@@ -45,14 +45,6 @@ kernel_matrix_float32_cpp <- function(X1SEXP, X2SEXP, kernel, gamma, degree, coe
     .Call(`_fastPLS_kernel_matrix_float32_cpp`, X1SEXP, X2SEXP, kernel, gamma, degree, coef0, backend)
 }
 
-center_kernel_train_float32_cpp <- function(KSEXP) {
-    .Call(`_fastPLS_center_kernel_train_float32_cpp`, KSEXP)
-}
-
-center_kernel_test_float32_cpp <- function(KtestSEXP, trainColMeansSEXP, train_grand_mean) {
-    .Call(`_fastPLS_center_kernel_test_float32_cpp`, KtestSEXP, trainColMeansSEXP, train_grand_mean)
-}
-
 opls_filter_float32_cpp <- function(XSEXP, YSEXP, north, scaling, backend, svd_method, rsvd_oversample, rsvd_power, seed) {
     .Call(`_fastPLS_opls_filter_float32_cpp`, XSEXP, YSEXP, north, scaling, backend, svd_method, rsvd_oversample, rsvd_power, seed)
 }
@@ -203,14 +195,6 @@ pls_class_predict_topk_cuda <- function(model, Xtest, top_k, proj) {
 
 kernel_matrix_cpp <- function(X1, X2, kernel, gamma, degree, coef0) {
     .Call(`_fastPLS_kernel_matrix_cpp`, X1, X2, kernel, gamma, degree, coef0)
-}
-
-center_kernel_train_cpp <- function(K) {
-    .Call(`_fastPLS_center_kernel_train_cpp`, K)
-}
-
-center_kernel_test_cpp <- function(Ktest, train_col_means, train_grand_mean) {
-    .Call(`_fastPLS_center_kernel_test_cpp`, Ktest, train_col_means, train_grand_mean)
 }
 
 opls_filter_cpp <- function(X, Y, north, scaling) {

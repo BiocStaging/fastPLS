@@ -3,6 +3,7 @@
 #include <R_ext/Error.h>
 #include <fastpls/core/classification.hpp>
 #include <fastpls/core/diagnostics.hpp>
+#include <fastpls/core/kernels.hpp>
 #include <fastpls/core/matrix.hpp>
 #include <fastpls/core/statistics.hpp>
 
@@ -67,6 +68,52 @@ fastpls::core::Matrix<float> float_matrix_from_s4(SEXP object,
   }
   UNPROTECT(1);
   return values;
+}
+
+fastpls::core::Matrix<double> numeric_matrix_from_sexp(SEXP object,
+                                                       const char* name) {
+  if (!Rf_isMatrix(object) ||
+      (TYPEOF(object) != REALSXP && TYPEOF(object) != INTSXP)) {
+    throw std::invalid_argument(std::string(name) + " must be a numeric matrix");
+  }
+  const SEXP dimensions = Rf_getAttrib(object, R_DimSymbol);
+  const std::size_t rows = static_cast<std::size_t>(INTEGER(dimensions)[0]);
+  const std::size_t columns = static_cast<std::size_t>(INTEGER(dimensions)[1]);
+  if (rows < 1 || columns < 1) {
+    throw std::invalid_argument(std::string(name) + " must be non-empty");
+  }
+  fastpls::core::Matrix<double> values(rows, columns);
+  if (TYPEOF(object) == REALSXP) {
+    std::copy(REAL(object), REAL(object) + values.size(), values.data());
+  } else {
+    for (std::size_t index = 0; index < values.size(); ++index) {
+      const int value = INTEGER(object)[index];
+      if (value == NA_INTEGER) {
+        values.data()[index] = NA_REAL;
+      } else {
+        values.data()[index] = static_cast<double>(value);
+      }
+    }
+  }
+  return values;
+}
+
+SEXP float_bits_matrix(const fastpls::core::Matrix<float>& values) {
+  SEXP result = Rf_allocMatrix(
+    INTSXP, static_cast<int>(values.rows()), static_cast<int>(values.columns())
+  );
+  for (std::size_t index = 0; index < values.size(); ++index) {
+    INTEGER(result)[index] = encode_float32(values.data()[index]);
+  }
+  return result;
+}
+
+SEXP numeric_matrix(const fastpls::core::Matrix<double>& values) {
+  SEXP result = Rf_allocMatrix(
+    REALSXP, static_cast<int>(values.rows()), static_cast<int>(values.columns())
+  );
+  std::copy(values.data(), values.data() + values.size(), REAL(result));
+  return result;
 }
 
 }  // namespace
@@ -312,6 +359,101 @@ extern "C" SEXP _fastPLS_float32_standardize_cpp(SEXP matrix,
   }
   UNPROTECT(4);
   return result;
+}
+
+extern "C" SEXP _fastPLS_center_kernel_train_float32_cpp(SEXP kernel) {
+  try {
+    fastpls::core::Matrix<float> values = float_matrix_from_s4(kernel, "K");
+    const auto centered = fastpls::core::center_kernel_train(values.view());
+    SEXP result = PROTECT(Rf_allocVector(VECSXP, 3));
+    SEXP centered_matrix = PROTECT(float_bits_matrix(values));
+    fastpls::core::Matrix<float> means(1, centered.column_means.size());
+    std::copy(centered.column_means.begin(), centered.column_means.end(),
+              means.data());
+    SEXP mean_matrix = PROTECT(float_bits_matrix(means));
+    SET_VECTOR_ELT(result, 0, centered_matrix);
+    SET_VECTOR_ELT(result, 1, mean_matrix);
+    SET_VECTOR_ELT(result, 2, Rf_ScalarReal(centered.grand_mean));
+    SEXP names = PROTECT(Rf_allocVector(STRSXP, 3));
+    SET_STRING_ELT(names, 0, Rf_mkChar("K"));
+    SET_STRING_ELT(names, 1, Rf_mkChar("col_means"));
+    SET_STRING_ELT(names, 2, Rf_mkChar("grand_mean"));
+    Rf_setAttrib(result, R_NamesSymbol, names);
+    UNPROTECT(4);
+    return result;
+  } catch (const std::exception& exception) {
+    Rf_error("%s", exception.what());
+  }
+  return R_NilValue;
+}
+
+extern "C" SEXP _fastPLS_center_kernel_test_float32_cpp(
+    SEXP kernel, SEXP training_means, SEXP training_grand_mean) {
+  try {
+    fastpls::core::Matrix<float> values =
+      float_matrix_from_s4(kernel, "Ktest");
+    const fastpls::core::Matrix<float> means =
+      float_matrix_from_s4(training_means, "train_col_means");
+    fastpls::core::center_kernel_test(
+      values.view(), means.data(), means.size(),
+      static_cast<float>(Rf_asReal(training_grand_mean))
+    );
+    SEXP output = PROTECT(Rf_allocVector(VECSXP, 1));
+    SEXP centered = PROTECT(float_bits_matrix(values));
+    SET_VECTOR_ELT(output, 0, centered);
+    SEXP names = PROTECT(Rf_allocVector(STRSXP, 1));
+    SET_STRING_ELT(names, 0, Rf_mkChar("K"));
+    Rf_setAttrib(output, R_NamesSymbol, names);
+    UNPROTECT(3);
+    return output;
+  } catch (const std::exception& exception) {
+    Rf_error("%s", exception.what());
+  }
+  return R_NilValue;
+}
+
+extern "C" SEXP _fastPLS_center_kernel_train_cpp(SEXP kernel) {
+  try {
+    fastpls::core::Matrix<double> values = numeric_matrix_from_sexp(kernel, "K");
+    const auto centered = fastpls::core::center_kernel_train(values.view());
+    SEXP result = PROTECT(Rf_allocVector(VECSXP, 3));
+    SEXP centered_matrix = PROTECT(numeric_matrix(values));
+    SEXP means = PROTECT(Rf_allocMatrix(
+      REALSXP, 1, static_cast<int>(centered.column_means.size())
+    ));
+    std::copy(centered.column_means.begin(), centered.column_means.end(),
+              REAL(means));
+    SET_VECTOR_ELT(result, 0, centered_matrix);
+    SET_VECTOR_ELT(result, 1, means);
+    SET_VECTOR_ELT(result, 2, Rf_ScalarReal(centered.grand_mean));
+    SEXP names = PROTECT(Rf_allocVector(STRSXP, 3));
+    SET_STRING_ELT(names, 0, Rf_mkChar("K"));
+    SET_STRING_ELT(names, 1, Rf_mkChar("col_means"));
+    SET_STRING_ELT(names, 2, Rf_mkChar("grand_mean"));
+    Rf_setAttrib(result, R_NamesSymbol, names);
+    UNPROTECT(4);
+    return result;
+  } catch (const std::exception& exception) {
+    Rf_error("%s", exception.what());
+  }
+  return R_NilValue;
+}
+
+extern "C" SEXP _fastPLS_center_kernel_test_cpp(
+    SEXP kernel, SEXP training_means, SEXP training_grand_mean) {
+  try {
+    fastpls::core::Matrix<double> values =
+      numeric_matrix_from_sexp(kernel, "Ktest");
+    const fastpls::core::Matrix<double> means =
+      numeric_matrix_from_sexp(training_means, "train_col_means");
+    fastpls::core::center_kernel_test(
+      values.view(), means.data(), means.size(), Rf_asReal(training_grand_mean)
+    );
+    return numeric_matrix(values);
+  } catch (const std::exception& exception) {
+    Rf_error("%s", exception.what());
+  }
+  return R_NilValue;
 }
 
 extern "C" SEXP _fastPLS_label_crossprod_scaled_cpp(SEXP predictors,

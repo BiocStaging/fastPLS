@@ -18,6 +18,13 @@ SEXP _fastPLS_float32_topk_cpp(SEXP scores, SEXP top);
 SEXP _fastPLS_float32_sweep_cols_cpp(SEXP matrix, SEXP statistics,
                                      SEXP operation);
 SEXP _fastPLS_float32_standardize_cpp(SEXP matrix, SEXP center, SEXP scale);
+SEXP _fastPLS_center_kernel_train_float32_cpp(SEXP kernel);
+SEXP _fastPLS_center_kernel_test_float32_cpp(SEXP kernel,
+                                             SEXP training_means,
+                                             SEXP training_grand_mean);
+SEXP _fastPLS_center_kernel_train_cpp(SEXP kernel);
+SEXP _fastPLS_center_kernel_test_cpp(SEXP kernel, SEXP training_means,
+                                     SEXP training_grand_mean);
 SEXP _fastPLS_label_crossprod_scaled_cpp(SEXP predictors, SEXP labels,
                                          SEXP class_count, SEXP scaling);
 }

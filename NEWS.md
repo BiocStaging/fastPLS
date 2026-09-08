@@ -1,3 +1,17 @@
+# fastPLS 0.99.47
+
+* Added a dependency-free, templated C++17 implementation of linear,
+  polynomial and radial-basis kernel transformations and train/test kernel
+  centering for the future standalone core.
+
+* Routed the transitional Armadillo kernel layer through the shared MIT core
+  and moved float32 and float64 kernel-centering entry points to the hand-written
+  R C-API bridge, removing four more generated Rcpp wrappers and the duplicated
+  Windows implementation.
+
+* Preserved all kernel-PLS and OPLS tests and the fixed CIFAR-100 SIMPLS/rSVD
+  accuracy and prediction checksum.
+
 # fastPLS 0.99.46
 
 * Migrated float32 argmax, top-rank selection, column operations and

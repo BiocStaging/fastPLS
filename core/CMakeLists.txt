@@ -63,6 +63,10 @@ add_executable(test_core_linalg tests/test_core_linalg.cpp)
 target_link_libraries(test_core_linalg PRIVATE fastpls_core)
 add_test(NAME core_linalg COMMAND test_core_linalg)
 
+add_executable(test_core_kernels tests/test_core_kernels.cpp)
+target_link_libraries(test_core_kernels PRIVATE fastpls_core)
+add_test(NAME core_kernels COMMAND test_core_kernels)
+
 add_executable(test_core_statistics tests/test_core_statistics.cpp)
 target_link_libraries(test_core_statistics PRIVATE fastpls_core)
 add_test(NAME core_statistics COMMAND test_core_statistics)
