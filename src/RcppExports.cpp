@@ -555,15 +555,6 @@ BEGIN_RCPP
     return rcpp_result_gen;
 END_RCPP
 }
-// cuda_reset_workspace
-void cuda_reset_workspace();
-RcppExport SEXP _fastPLS_cuda_reset_workspace() {
-BEGIN_RCPP
-    Rcpp::RNGScope rcpp_rngScope_gen;
-    cuda_reset_workspace();
-    return R_NilValue;
-END_RCPP
-}
 // cuda_matrix_multiply
 arma::mat cuda_matrix_multiply(const arma::mat& A, const arma::mat& B);
 RcppExport SEXP _fastPLS_cuda_matrix_multiply(SEXP ASEXP, SEXP BSEXP) {
@@ -573,17 +564,6 @@ BEGIN_RCPP
     Rcpp::traits::input_parameter< const arma::mat& >::type A(ASEXP);
     Rcpp::traits::input_parameter< const arma::mat& >::type B(BSEXP);
     rcpp_result_gen = Rcpp::wrap(cuda_matrix_multiply(A, B));
-    return rcpp_result_gen;
-END_RCPP
-}
-// cuda_thin_qr
-arma::mat cuda_thin_qr(const arma::mat& A);
-RcppExport SEXP _fastPLS_cuda_thin_qr(SEXP ASEXP) {
-BEGIN_RCPP
-    Rcpp::RObject rcpp_result_gen;
-    Rcpp::RNGScope rcpp_rngScope_gen;
-    Rcpp::traits::input_parameter< const arma::mat& >::type A(ASEXP);
-    rcpp_result_gen = Rcpp::wrap(cuda_thin_qr(A));
     return rcpp_result_gen;
 END_RCPP
 }
@@ -1244,20 +1224,6 @@ BEGIN_RCPP
     return R_NilValue;
 END_RCPP
 }
-// metal_resident_predict_cpp
-SEXP metal_resident_predict_cpp(Rcpp::List object, SEXP X, int ncomp, int classifier);
-RcppExport SEXP _fastPLS_metal_resident_predict_cpp(SEXP objectSEXP, SEXP XSEXP, SEXP ncompSEXP, SEXP classifierSEXP) {
-BEGIN_RCPP
-    Rcpp::RObject rcpp_result_gen;
-    Rcpp::RNGScope rcpp_rngScope_gen;
-    Rcpp::traits::input_parameter< Rcpp::List >::type object(objectSEXP);
-    Rcpp::traits::input_parameter< SEXP >::type X(XSEXP);
-    Rcpp::traits::input_parameter< int >::type ncomp(ncompSEXP);
-    Rcpp::traits::input_parameter< int >::type classifier(classifierSEXP);
-    rcpp_result_gen = Rcpp::wrap(metal_resident_predict_cpp(object, X, ncomp, classifier));
-    return rcpp_result_gen;
-END_RCPP
-}
 // metal_resident_predict_path_cpp
 SEXP metal_resident_predict_path_cpp(Rcpp::List object, SEXP X, Rcpp::IntegerVector ncomp, int classifier);
 RcppExport SEXP _fastPLS_metal_resident_predict_path_cpp(SEXP objectSEXP, SEXP XSEXP, SEXP ncompSEXP, SEXP classifierSEXP) {
@@ -1282,21 +1248,6 @@ BEGIN_RCPP
     Rcpp::traits::input_parameter< SEXP >::type X(XSEXP);
     Rcpp::traits::input_parameter< int >::type ncomp(ncompSEXP);
     rcpp_result_gen = Rcpp::wrap(metal_resident_project_cpp(object, X, ncomp));
-    return rcpp_result_gen;
-END_RCPP
-}
-// metal_resident_classify_cpp
-Rcpp::IntegerMatrix metal_resident_classify_cpp(Rcpp::List object, SEXP X, int ncomp, int top, int classifier);
-RcppExport SEXP _fastPLS_metal_resident_classify_cpp(SEXP objectSEXP, SEXP XSEXP, SEXP ncompSEXP, SEXP topSEXP, SEXP classifierSEXP) {
-BEGIN_RCPP
-    Rcpp::RObject rcpp_result_gen;
-    Rcpp::RNGScope rcpp_rngScope_gen;
-    Rcpp::traits::input_parameter< Rcpp::List >::type object(objectSEXP);
-    Rcpp::traits::input_parameter< SEXP >::type X(XSEXP);
-    Rcpp::traits::input_parameter< int >::type ncomp(ncompSEXP);
-    Rcpp::traits::input_parameter< int >::type top(topSEXP);
-    Rcpp::traits::input_parameter< int >::type classifier(classifierSEXP);
-    rcpp_result_gen = Rcpp::wrap(metal_resident_classify_cpp(object, X, ncomp, top, classifier));
     return rcpp_result_gen;
 END_RCPP
 }
@@ -1492,9 +1443,7 @@ static const R_CallMethodDef CallEntries[] = {
     {"_fastPLS_float32_topk_cpp", (DL_FUNC) &_fastPLS_float32_topk_cpp, 2},
     {"_fastPLS_has_cuda", (DL_FUNC) &_fastPLS_has_cuda, 0},
     {"_fastPLS_lda_cuda_native_available", (DL_FUNC) &_fastPLS_lda_cuda_native_available, 0},
-    {"_fastPLS_cuda_reset_workspace", (DL_FUNC) &_fastPLS_cuda_reset_workspace, 0},
     {"_fastPLS_cuda_matrix_multiply", (DL_FUNC) &_fastPLS_cuda_matrix_multiply, 2},
-    {"_fastPLS_cuda_thin_qr", (DL_FUNC) &_fastPLS_cuda_thin_qr, 1},
     {"_fastPLS_lda_train_prefix_cpp", (DL_FUNC) &_fastPLS_lda_train_prefix_cpp, 5},
     {"_fastPLS_lda_train_moments_prefix_cpp", (DL_FUNC) &_fastPLS_lda_train_moments_prefix_cpp, 5},
     {"_fastPLS_lda_project_train_prefix_cpp", (DL_FUNC) &_fastPLS_lda_project_train_prefix_cpp, 7},
@@ -1534,10 +1483,8 @@ static const R_CallMethodDef CallEntries[] = {
     {"_fastPLS_metal_resident_simpls_fit_cpp", (DL_FUNC) &_fastPLS_metal_resident_simpls_fit_cpp, 15},
     {"_fastPLS_metal_resident_export_cpp", (DL_FUNC) &_fastPLS_metal_resident_export_cpp, 2},
     {"_fastPLS_metal_resident_compact_cpp", (DL_FUNC) &_fastPLS_metal_resident_compact_cpp, 2},
-    {"_fastPLS_metal_resident_predict_cpp", (DL_FUNC) &_fastPLS_metal_resident_predict_cpp, 4},
     {"_fastPLS_metal_resident_predict_path_cpp", (DL_FUNC) &_fastPLS_metal_resident_predict_path_cpp, 4},
     {"_fastPLS_metal_resident_project_cpp", (DL_FUNC) &_fastPLS_metal_resident_project_cpp, 3},
-    {"_fastPLS_metal_resident_classify_cpp", (DL_FUNC) &_fastPLS_metal_resident_classify_cpp, 5},
     {"_fastPLS_metal_resident_classify_path_cpp", (DL_FUNC) &_fastPLS_metal_resident_classify_path_cpp, 5},
     {"_fastPLS_metal_resident_classify_response_path_cpp", (DL_FUNC) &_fastPLS_metal_resident_classify_response_path_cpp, 5},
     {"_fastPLS_metal_resident_response_sums_cpp", (DL_FUNC) &_fastPLS_metal_resident_response_sums_cpp, 5},

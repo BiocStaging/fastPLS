@@ -95,7 +95,6 @@ arma::fmat cuda_matrix_multiply_float(
   bool transpose_left = false,
   bool transpose_right = false
 );
-Mat cuda_thin_qr(const Mat& A);
 std::vector<LDAGPUModel> cuda_lda_train_prefix(
   const Mat& Ttrain,
   const arma::ivec& y,
@@ -140,7 +139,6 @@ LDAFloatPrediction cuda_lda_predict_float(
 );
 bool cuda_lda_native_available();
 bool cuda_runtime_available();
-void cuda_reset_workspace();
 void cuda_rsvd_sample_y(
   const double* hA,
   int m,

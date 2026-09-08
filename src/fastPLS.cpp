@@ -14,13 +14,8 @@
 #include <utility>
 #include <vector>
 
-#ifdef FASTPLS_USE_OPENBLAS
-#include <cblas.h>
-#include <dlfcn.h>
-#include <openblas_config.h>
-#endif
-
 #include "fastPLS.h"
+#include "core_cpu_backend.h"
 #include "svd_iface.h"
 #include "svd_cuda_rsvd.h"
 #include "svd_metal_backend.h"
@@ -137,33 +132,6 @@ int env_int_or(const char* key, int fallback, int lo, int hi) {
   return static_cast<int>(v);
 }
 
-#ifdef FASTPLS_USE_OPENBLAS
-void configure_openblas_threads() {
-  using SetThreads = void (*)(int);
-#ifdef __APPLE__
-  constexpr const char* openblas_library = "libopenblas.dylib";
-#else
-  constexpr const char* openblas_library = "libopenblas.so.0";
-#endif
-  static void* handle = dlopen(openblas_library, RTLD_NOW | RTLD_LOCAL);
-  if (handle == nullptr) {
-    Rcpp::stop("The configured OpenBLAS runtime could not be loaded");
-  }
-  static SetThreads set_threads = reinterpret_cast<SetThreads>(
-    dlsym(handle, "openblas_set_num_threads")
-  );
-  if (set_threads == nullptr) {
-    Rcpp::stop("The configured OpenBLAS runtime lacks openblas_set_num_threads");
-  }
-  const int requested = env_int_or("OPENBLAS_NUM_THREADS", 1, 1, 1024);
-  static int configured = -1;
-  if (configured != requested) {
-    set_threads(requested);
-    configured = requested;
-  }
-}
-#endif
-
 arma::fmat float_matrix_multiply_cpu(
   const arma::fmat& left,
   const arma::fmat& right,
@@ -178,53 +146,24 @@ arma::fmat float_matrix_multiply_cpu(
     Rcpp::stop("Internal float32 matrix-product dimensions are inconsistent");
   }
   arma::fmat output(rows, columns, arma::fill::none);
-#ifdef FASTPLS_USE_OPENBLAS
-  using Sgemm = void (*)(
-    CBLAS_LAYOUT, CBLAS_TRANSPOSE, CBLAS_TRANSPOSE,
-    int, int, int, float, const float*, int, const float*, int,
-    float, float*, int
+  fastpls::runtime::cpu_gemm_f32(
+    fastpls::core::make_const_view(
+      left.memptr(), static_cast<std::size_t>(left.n_rows),
+      static_cast<std::size_t>(left.n_cols),
+      static_cast<std::size_t>(left.n_rows)
+    ),
+    fastpls::core::make_const_view(
+      right.memptr(), static_cast<std::size_t>(right.n_rows),
+      static_cast<std::size_t>(right.n_cols),
+      static_cast<std::size_t>(right.n_rows)
+    ),
+    transpose_left, transpose_right,
+    fastpls::core::make_view(
+      output.memptr(), static_cast<std::size_t>(output.n_rows),
+      static_cast<std::size_t>(output.n_cols),
+      static_cast<std::size_t>(output.n_rows)
+    )
   );
-#ifdef __APPLE__
-  constexpr const char* openblas_library = "libopenblas.dylib";
-#else
-  constexpr const char* openblas_library = "libopenblas.so.0";
-#endif
-  static void* handle = dlopen(openblas_library, RTLD_NOW | RTLD_LOCAL);
-  if (handle == nullptr) {
-    Rcpp::stop("The configured OpenBLAS runtime could not be loaded");
-  }
-  static Sgemm sgemm = reinterpret_cast<Sgemm>(dlsym(handle, "cblas_sgemm"));
-  if (sgemm == nullptr) {
-    Rcpp::stop("The configured OpenBLAS runtime lacks cblas_sgemm");
-  }
-  configure_openblas_threads();
-  sgemm(
-    CblasColMajor,
-    transpose_left ? CblasTrans : CblasNoTrans,
-    transpose_right ? CblasTrans : CblasNoTrans,
-    static_cast<int>(rows),
-    static_cast<int>(columns),
-    static_cast<int>(inner_left),
-    1.0f,
-    left.memptr(),
-    static_cast<int>(left.n_rows),
-    right.memptr(),
-    static_cast<int>(right.n_rows),
-    0.0f,
-    output.memptr(),
-    static_cast<int>(rows)
-  );
-#else
-  if (transpose_left && transpose_right) {
-    output = left.t() * right.t();
-  } else if (transpose_left) {
-    output = left.t() * right;
-  } else if (transpose_right) {
-    output = left * right.t();
-  } else {
-    output = left * right;
-  }
-#endif
   return output;
 }
 
@@ -4089,18 +4028,8 @@ bool lda_cuda_native_available() {
 }
 
 // [[Rcpp::export]]
-void cuda_reset_workspace() {
-  fastpls_svd::cuda_reset_workspace();
-}
-
-// [[Rcpp::export]]
 arma::mat cuda_matrix_multiply(const arma::mat& A, const arma::mat& B) {
   return fastpls_svd::cuda_matrix_multiply(A, B);
-}
-
-// [[Rcpp::export]]
-arma::mat cuda_thin_qr(const arma::mat& A) {
-  return fastpls_svd::cuda_thin_qr(A);
 }
 
 static Rcpp::IntegerVector lda_labels_from_scores(const arma::mat& scores,

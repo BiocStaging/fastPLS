@@ -10,6 +10,14 @@ find_path(ARMADILLO_INCLUDE_DIR armadillo REQUIRED)
 find_package(BLAS REQUIRED)
 find_package(LAPACK REQUIRED)
 
+add_library(fastpls_core INTERFACE)
+add_library(fastpls::core ALIAS fastpls_core)
+set_target_properties(fastpls_core PROPERTIES EXPORT_NAME core)
+target_include_directories(fastpls_core INTERFACE
+  "$<BUILD_INTERFACE:${CMAKE_CURRENT_LIST_DIR}/../inst/include>"
+  "$<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>")
+target_compile_features(fastpls_core INTERFACE cxx_std_17)
+
 add_library(fastpls_native INTERFACE)
 add_library(fastpls::native ALIAS fastpls_native)
 set_target_properties(fastpls_native PROPERTIES EXPORT_NAME native)
@@ -19,9 +27,15 @@ target_include_directories(fastpls_native INTERFACE
   "$<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>")
 target_compile_features(fastpls_native INTERFACE cxx_std_17)
 target_compile_definitions(fastpls_native INTERFACE ARMA_DONT_USE_WRAPPER)
-target_link_libraries(fastpls_native INTERFACE LAPACK::LAPACK BLAS::BLAS)
+target_link_libraries(fastpls_native INTERFACE
+  fastpls_core LAPACK::LAPACK BLAS::BLAS)
 
-install(TARGETS fastpls_native EXPORT fastplsNativeTargets)
+install(TARGETS fastpls_core fastpls_native EXPORT fastplsNativeTargets)
+install(DIRECTORY "${CMAKE_CURRENT_LIST_DIR}/../inst/include/fastpls/core"
+  DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/fastpls"
+  FILES_MATCHING PATTERN "*.hpp")
+install(FILES "${CMAKE_CURRENT_LIST_DIR}/../inst/include/fastpls/core.hpp"
+  DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/fastpls")
 install(DIRECTORY "${CMAKE_CURRENT_LIST_DIR}/../inst/include/fastpls/native"
   DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/fastpls"
   FILES_MATCHING PATTERN "*.hpp")
@@ -41,6 +55,14 @@ install(FILES "${CMAKE_CURRENT_BINARY_DIR}/fastpls_nativeConfig.cmake"
   DESTINATION "${FASTPLS_CONFIG_DIR}")
 
 if(BUILD_TESTING)
+add_executable(test_core_classification tests/test_core_classification.cpp)
+target_link_libraries(test_core_classification PRIVATE fastpls_core)
+add_test(NAME core_classification COMMAND test_core_classification)
+
+add_executable(test_core_linalg tests/test_core_linalg.cpp)
+target_link_libraries(test_core_linalg PRIVATE fastpls_core)
+add_test(NAME core_linalg COMMAND test_core_linalg)
+
 add_executable(test_native_rsvd tests/test_rsvd.cpp)
 target_link_libraries(test_native_rsvd PRIVATE fastpls_native)
 add_test(NAME native_rsvd COMMAND test_native_rsvd)

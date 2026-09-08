@@ -156,26 +156,6 @@ void metal_resident_compact_cpp(Rcpp::List object, bool prepare_lda = false) {
 }
 
 // [[Rcpp::export]]
-SEXP metal_resident_predict_cpp(Rcpp::List object, SEXP X, int ncomp,
-                                int classifier = 0) {
-#ifdef FASTPLS_HAS_METAL
-  auto state = checked_model(object);
-  arma::fmat x = float_bits_to_matrix(X, "X");
-  if (static_cast<int>(x.n_cols) != state->model->predictors()) {
-    Rcpp::stop("test predictor dimension differs from the fitted model");
-  }
-  if (classifier < 0 || classifier > 1) {
-    Rcpp::stop("invalid resident Metal classifier");
-  }
-  return matrix_to_float_bits(
-      state->model->predict(x, ncomp, classifier == 1));
-#else
-  Rcpp::stop(
-      "Resident Metal prediction is unavailable in this build; no CPU fallback is performed");
-#endif
-}
-
-// [[Rcpp::export]]
 SEXP metal_resident_predict_path_cpp(
     Rcpp::List object, SEXP X, Rcpp::IntegerVector ncomp,
     int classifier = 0) {
@@ -208,26 +188,6 @@ SEXP metal_resident_project_cpp(Rcpp::List object, SEXP X, int ncomp) {
 #else
   Rcpp::stop(
       "Resident Metal projection is unavailable in this build; no CPU fallback is performed");
-#endif
-}
-
-// [[Rcpp::export]]
-Rcpp::IntegerMatrix metal_resident_classify_cpp(
-    Rcpp::List object, SEXP X, int ncomp, int top, int classifier = 0) {
-#ifdef FASTPLS_HAS_METAL
-  auto state = checked_model(object);
-  arma::fmat x = float_bits_to_matrix(X, "X");
-  if (static_cast<int>(x.n_cols) != state->model->predictors()) {
-    Rcpp::stop("test predictor dimension differs from the fitted model");
-  }
-  if (classifier < 0 || classifier > 1) {
-    Rcpp::stop("invalid resident Metal classifier");
-  }
-  return Rcpp::wrap(
-      state->model->classify(x, ncomp, top, classifier == 1));
-#else
-  Rcpp::stop(
-      "Resident Metal classification is unavailable in this build; no CPU fallback is performed");
 #endif
 }
 

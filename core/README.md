@@ -1,5 +1,19 @@
 # Native numerical-core extraction
 
+Two CMake targets separate the stable interface from transitional numerical
+code:
+
+| Target | Contract |
+| --- | --- |
+| `fastpls::core` | Dependency-free C++17 matrix views, owned buffers, reference products, and label-aware response products; no R or third-party types cross the interface. |
+| `fastpls::native` | Current optimized model algorithms using Armadillo privately; retained while algorithms are migrated behind the core interface. |
+
+New standalone-facing APIs should use `fastpls::core` types. This keeps memory
+layout and ABI under fastPLS control and allows BLAS, CUDA, Metal, or portable
+kernels to remain private backend details. The R adapter is being migrated
+incrementally so each step can be checked against fixed prediction and runtime
+gates.
+
 The shared numerical headers implement native rSVD, SIMPLS, PLS-SVD and
 matrix-free cross-covariance products in float32 and float64. These are
 extractions of the current optimized implementation, not replacements with the

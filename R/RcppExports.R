@@ -153,16 +153,8 @@ lda_cuda_native_available <- function() {
     .Call(`_fastPLS_lda_cuda_native_available`)
 }
 
-cuda_reset_workspace <- function() {
-    invisible(.Call(`_fastPLS_cuda_reset_workspace`))
-}
-
 cuda_matrix_multiply <- function(A, B) {
     .Call(`_fastPLS_cuda_matrix_multiply`, A, B)
-}
-
-cuda_thin_qr <- function(A) {
-    .Call(`_fastPLS_cuda_thin_qr`, A)
 }
 
 lda_train_prefix_cpp <- function(Ttrain, y, n_classes, ncomp, ridge) {
@@ -321,20 +313,12 @@ metal_resident_compact_cpp <- function(object, prepare_lda = FALSE) {
     invisible(.Call(`_fastPLS_metal_resident_compact_cpp`, object, prepare_lda))
 }
 
-metal_resident_predict_cpp <- function(object, X, ncomp, classifier = 0L) {
-    .Call(`_fastPLS_metal_resident_predict_cpp`, object, X, ncomp, classifier)
-}
-
 metal_resident_predict_path_cpp <- function(object, X, ncomp, classifier = 0L) {
     .Call(`_fastPLS_metal_resident_predict_path_cpp`, object, X, ncomp, classifier)
 }
 
 metal_resident_project_cpp <- function(object, X, ncomp) {
     .Call(`_fastPLS_metal_resident_project_cpp`, object, X, ncomp)
-}
-
-metal_resident_classify_cpp <- function(object, X, ncomp, top, classifier = 0L) {
-    .Call(`_fastPLS_metal_resident_classify_cpp`, object, X, ncomp, top, classifier)
 }
 
 metal_resident_classify_path_cpp <- function(object, X, ncomp, top, classifier = 0L) {

@@ -2,6 +2,7 @@
 // Copyright (c) 2026 Stefano Cacciatore
 #ifndef FASTPLS_NATIVE_SIMPLS_HPP
 #define FASTPLS_NATIVE_SIMPLS_HPP
+#include <fastpls/core/classification.hpp>
 #include <fastpls/native/direction.hpp>
 #include <chrono>
 #include <functional>
@@ -187,20 +188,20 @@ arma::Mat<Scalar> dummy_crossprod(
     return out;
   }
 
-  std::vector<Scalar> class_sums(center_offset.n_elem);
-  for (arma::uword col = 0; col < X.n_cols; ++col) {
-    std::fill(class_sums.begin(), class_sums.end(), 0.0);
-    const Scalar* x_col = X.colptr(col);
-    Scalar total = 0.0;
-    for (arma::uword row = 0; row < X.n_rows; ++row) {
-      const Scalar value = x_col[row];
-      total += value;
-      class_sums[labels(row)] += value;
-    }
-    for (arma::uword response = 0; response < center_offset.n_elem; ++response) {
-      out(col, response) = class_sums[response] + total * center_offset(response);
-    }
-  }
+  core::centered_label_crossprod(
+    core::make_const_view(
+      X.memptr(), static_cast<std::size_t>(X.n_rows),
+      static_cast<std::size_t>(X.n_cols),
+      static_cast<std::size_t>(X.n_rows)
+    ),
+    labels.memptr(), static_cast<std::size_t>(labels.n_elem),
+    center_offset.memptr(), static_cast<std::size_t>(center_offset.n_elem),
+    core::make_view(
+      out.memptr(), static_cast<std::size_t>(out.n_rows),
+      static_cast<std::size_t>(out.n_cols),
+      static_cast<std::size_t>(out.n_rows)
+    )
+  );
   return out;
 }
 

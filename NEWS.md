@@ -1,3 +1,20 @@
+# fastPLS 0.99.44
+
+* Introduced a dependency-free C++17 core interface with non-owning matrix
+  views, owned buffers, reference matrix products, and label-aware response
+  cross-products. The interface contains no R, Rcpp, RcppArmadillo, or
+  Armadillo types and provides the ABI-neutral foundation for the ongoing
+  standalone-core migration.
+
+* Routed the production float32 CPU matrix-product bridge through the new core
+  interface while retaining Apple Accelerate, configured OpenBLAS, and the
+  portable reference implementation as private execution details.
+
+* Removed four unreachable CUDA and Metal entry points and their generated R
+  wrappers. CIFAR-100 predictions remain bit-for-bit stable after these
+  changes, and the native CMake suite now tests both the independent core and
+  the transitional Armadillo-based numerical layer.
+
 # fastPLS 0.99.43
 
 * Accelerated the float32 CPU sample-matrix products used by SIMPLS and

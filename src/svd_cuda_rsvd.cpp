@@ -2524,12 +2524,6 @@ void CudaFloatCrossproduct::orthonormalize(arma::fmat& B) {
   check_cuda(cudaStreamSynchronize(ws.stream()), "synchronize float32 cross-product QR");
 }
 
-void cuda_reset_workspace() {
-  g_workspace.reset();
-  g_float_workspace.reset();
-  g_lda_float_workspace.reset();
-}
-
 Mat cuda_matrix_multiply(const Mat& A, const Mat& B) {
   if (!cuda_runtime_available()) {
     throw std::runtime_error("CUDA runtime not available");
@@ -2683,88 +2677,6 @@ arma::fmat cuda_matrix_multiply_float(const arma::fmat& A,
     "cudaStreamSynchronize(cuda_matrix_multiply_float)"
   );
   return C;
-}
-
-Mat cuda_thin_qr(const Mat& A) {
-  if (!cuda_runtime_available()) {
-    throw std::runtime_error("CUDA runtime not available");
-  }
-  if (A.n_rows < A.n_cols) {
-    throw std::runtime_error("cuda_thin_qr: expected nrow(A) >= ncol(A)");
-  }
-  if (A.n_rows > static_cast<arma::uword>(std::numeric_limits<int>::max()) ||
-      A.n_cols > static_cast<arma::uword>(std::numeric_limits<int>::max())) {
-    throw std::runtime_error("cuda_thin_qr: matrix dimension exceeds CUDA int limits");
-  }
-
-  const int m = static_cast<int>(A.n_rows);
-  const int n = static_cast<int>(A.n_cols);
-  if (m < 1 || n < 1) {
-    return Mat(A.n_rows, A.n_cols, arma::fill::zeros);
-  }
-
-  double* dA = nullptr;
-  double* dTau = nullptr;
-  double* dWork = nullptr;
-  int* dInfo = nullptr;
-  cusolverDnHandle_t solver = nullptr;
-
-  auto cleanup = [&]() {
-    if (dA) cudaFree(dA);
-    if (dTau) cudaFree(dTau);
-    if (dWork) cudaFree(dWork);
-    if (dInfo) cudaFree(dInfo);
-    if (solver) cusolverDnDestroy(solver);
-  };
-
-  try {
-    const size_t bytes_A = sizeof(double) * static_cast<size_t>(m) * static_cast<size_t>(n);
-    Mat Q(A.n_rows, A.n_cols, arma::fill::none);
-    check_cusolver(cusolverDnCreate(&solver), "cusolverDnCreate(cuda_thin_qr)");
-    check_cuda(cudaMalloc(&dA, bytes_A), "cudaMalloc(cuda_thin_qr A)");
-    check_cuda(cudaMalloc(&dTau, sizeof(double) * static_cast<size_t>(n)), "cudaMalloc(cuda_thin_qr tau)");
-    check_cuda(cudaMalloc(&dInfo, sizeof(int)), "cudaMalloc(cuda_thin_qr info)");
-    check_cuda(cudaMemcpy(dA, A.memptr(), bytes_A, cudaMemcpyHostToDevice), "cudaMemcpy(cuda_thin_qr A)");
-
-    int lwork_geqrf = 0;
-    int lwork_orgqr = 0;
-    check_cusolver(
-      cusolverDnDgeqrf_bufferSize(solver, m, n, dA, m, &lwork_geqrf),
-      "cusolverDnDgeqrf_bufferSize(cuda_thin_qr)"
-    );
-    check_cusolver(
-      cusolverDnDorgqr_bufferSize(solver, m, n, n, dA, m, dTau, &lwork_orgqr),
-      "cusolverDnDorgqr_bufferSize(cuda_thin_qr)"
-    );
-    const int lwork = std::max(lwork_geqrf, lwork_orgqr);
-    check_cuda(cudaMalloc(&dWork, sizeof(double) * static_cast<size_t>(std::max(lwork, 1))), "cudaMalloc(cuda_thin_qr work)");
-
-    check_cusolver(
-      cusolverDnDgeqrf(solver, m, n, dA, m, dTau, dWork, lwork, dInfo),
-      "cusolverDnDgeqrf(cuda_thin_qr)"
-    );
-    int info = 0;
-    check_cuda(cudaMemcpy(&info, dInfo, sizeof(int), cudaMemcpyDeviceToHost), "cudaMemcpy(cuda_thin_qr geqrf info)");
-    if (info != 0) {
-      throw std::runtime_error("cuda_thin_qr: geqrf failed");
-    }
-
-    check_cusolver(
-      cusolverDnDorgqr(solver, m, n, n, dA, m, dTau, dWork, lwork, dInfo),
-      "cusolverDnDorgqr(cuda_thin_qr)"
-    );
-    check_cuda(cudaMemcpy(&info, dInfo, sizeof(int), cudaMemcpyDeviceToHost), "cudaMemcpy(cuda_thin_qr orgqr info)");
-    if (info != 0) {
-      throw std::runtime_error("cuda_thin_qr: orgqr failed");
-    }
-    check_cuda(cudaMemcpy(Q.memptr(), dA, bytes_A, cudaMemcpyDeviceToHost), "cudaMemcpy(cuda_thin_qr Q)");
-
-    cleanup();
-    return Q;
-  } catch (...) {
-    cleanup();
-    throw;
-  }
 }
 
 bool cuda_rsvd_prefer_block_gpu(int m, int n, int l, int power_iters) {
@@ -4757,10 +4669,6 @@ arma::fmat cuda_matrix_multiply_float(const arma::fmat&,
   throw std::runtime_error("CUDA backend not compiled");
 }
 
-Mat cuda_thin_qr(const Mat&) {
-  throw std::runtime_error("CUDA backend not compiled");
-}
-
 std::vector<LDAGPUModel> cuda_lda_train_prefix(
   const Mat&,
   const arma::ivec&,
@@ -4827,9 +4735,6 @@ bool cuda_lda_native_available() {
 
 bool cuda_runtime_available() {
   return false;
-}
-
-void cuda_reset_workspace() {
 }
 
 void cuda_rsvd_sample_y(
