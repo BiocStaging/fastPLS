@@ -1,3 +1,10 @@
+# fastPLS 0.99.51
+
+* Replaced the resident CUDA Rcpp marshalling layer with direct R C-API
+  entry points while preserving the existing CUDA C ABI, model fields and
+  explicit no-fallback behavior. This removes ten generated Rcpp wrappers
+  from the package boundary.
+
 # fastPLS 0.99.50
 
 * Revalidated the source package with BiocCheck 1.49.30 before the

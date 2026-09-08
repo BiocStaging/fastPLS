@@ -1,5 +1,100 @@
 # Hand-written R C-API entry points used during the dependency-free migration.
 
+cuda_resident_project_cpp <- function(object, X, ncomp) {
+    .Call(
+        "_fastPLS_cuda_resident_project_cpp",
+        object, X, ncomp,
+        PACKAGE = "fastPLS"
+    )
+}
+
+cuda_resident_response_sums_cpp <- function(object, X, Y, labels, ncomp) {
+    .Call(
+        "_fastPLS_cuda_resident_response_sums_cpp",
+        object, X, Y, labels, ncomp,
+        PACKAGE = "fastPLS"
+    )
+}
+
+cuda_resident_simpls_fit_cpp <- function(
+    X, Y, labels, classes, precision, ncomp, scaling, oversample, power, seed,
+    retain_scores = TRUE, method = 3L, north = 1L, kernel = 2L, gamma = 1,
+    degree = 3L, coef0 = 1
+) {
+    .Call(
+        "_fastPLS_cuda_resident_simpls_fit_cpp",
+        X, Y, labels, classes, precision, ncomp, scaling, oversample, power,
+        seed, retain_scores, method, north, kernel, gamma, degree, coef0,
+        PACKAGE = "fastPLS"
+    )
+}
+
+cuda_resident_export_cpp <- function(
+    object, loadings = FALSE, variance = FALSE, scores = TRUE
+) {
+    .Call(
+        "_fastPLS_cuda_resident_export_cpp",
+        object, loadings, variance, scores,
+        PACKAGE = "fastPLS"
+    )
+}
+
+cuda_resident_compact_cpp <- function(object, prepare_lda = FALSE) {
+    invisible(.Call(
+        "_fastPLS_cuda_resident_compact_cpp",
+        object, prepare_lda,
+        PACKAGE = "fastPLS"
+    ))
+}
+
+cuda_resident_classify_cpp <- function(object, X, ncomp, classifier, top) {
+    .Call(
+        "_fastPLS_cuda_resident_classify_cpp",
+        object, X, ncomp, classifier, top,
+        PACKAGE = "fastPLS"
+    )
+}
+
+cuda_resident_classify_path_cpp <- function(
+    object, X, ncomp, classifier, top
+) {
+    .Call(
+        "_fastPLS_cuda_resident_classify_path_cpp",
+        object, X, ncomp, classifier, top,
+        PACKAGE = "fastPLS"
+    )
+}
+
+cuda_resident_classify_response_path_cpp <- function(
+    object, X, ncomp, classifier, top
+) {
+    .Call(
+        "_fastPLS_cuda_resident_classify_response_path_cpp",
+        object, X, ncomp, classifier, top,
+        PACKAGE = "fastPLS"
+    )
+}
+
+cuda_resident_simpls_predict_cpp <- function(
+    object, X, ncomp, classifier = 0L
+) {
+    .Call(
+        "_fastPLS_cuda_resident_simpls_predict_cpp",
+        object, X, ncomp, classifier,
+        PACKAGE = "fastPLS"
+    )
+}
+
+cuda_resident_predict_path_cpp <- function(
+    object, X, ncomp, classifier = 0L
+) {
+    .Call(
+        "_fastPLS_cuda_resident_predict_path_cpp",
+        object, X, ncomp, classifier,
+        PACKAGE = "fastPLS"
+    )
+}
+
 has_cuda <- function() {
     .Call("_fastPLS_has_cuda", PACKAGE = "fastPLS")
 }

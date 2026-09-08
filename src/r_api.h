@@ -7,6 +7,35 @@
 #include <Rinternals.h>
 
 extern "C" {
+SEXP _fastPLS_cuda_resident_project_cpp(SEXP object, SEXP predictors,
+                                        SEXP components);
+SEXP _fastPLS_cuda_resident_response_sums_cpp(SEXP object, SEXP predictors,
+                                              SEXP response, SEXP labels,
+                                              SEXP components);
+SEXP _fastPLS_cuda_resident_simpls_fit_cpp(
+  SEXP predictors, SEXP response, SEXP labels, SEXP classes, SEXP precision,
+  SEXP components, SEXP scaling, SEXP oversample, SEXP power, SEXP seed,
+  SEXP retain_scores, SEXP method, SEXP north, SEXP kernel, SEXP gamma,
+  SEXP degree, SEXP coefficient
+);
+SEXP _fastPLS_cuda_resident_export_cpp(SEXP object, SEXP loadings,
+                                       SEXP variance, SEXP scores);
+SEXP _fastPLS_cuda_resident_compact_cpp(SEXP object, SEXP prepare_lda);
+SEXP _fastPLS_cuda_resident_classify_cpp(SEXP object, SEXP predictors,
+                                         SEXP components, SEXP classifier,
+                                         SEXP top);
+SEXP _fastPLS_cuda_resident_classify_path_cpp(
+  SEXP object, SEXP predictors, SEXP components, SEXP classifier, SEXP top
+);
+SEXP _fastPLS_cuda_resident_classify_response_path_cpp(
+  SEXP object, SEXP predictors, SEXP components, SEXP classifier, SEXP top
+);
+SEXP _fastPLS_cuda_resident_simpls_predict_cpp(
+  SEXP object, SEXP predictors, SEXP components, SEXP classifier
+);
+SEXP _fastPLS_cuda_resident_predict_path_cpp(
+  SEXP object, SEXP predictors, SEXP components, SEXP classifier
+);
 SEXP _fastPLS_has_cuda();
 SEXP _fastPLS_has_metal();
 SEXP _fastPLS_lda_cuda_native_available();
