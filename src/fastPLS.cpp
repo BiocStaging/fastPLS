@@ -4284,64 +4284,6 @@ List pls_model2_fast_gpu(
   );
 }
 
-// [[Rcpp::export]]
-List pls_model2_fast_gpu_labels(
-  SEXP XtrainSEXP,
-  Rcpp::IntegerVector y,
-  int n_classes,
-  arma::ivec ncomp,
-  int scaling,
-  bool fit,
-  int svd_method,
-  int rsvd_oversample,
-  int rsvd_power,
-  double svds_tol,
-  int seed
-) {
-  if (!fastpls_svd::has_cuda_backend()) {
-    stop(
-      "pls_model2_fast_gpu_labels requires an available CUDA backend. "
-      "No CPU fallback is performed."
-    );
-  }
-  if (svd_method != fastpls_svd::SVD_METHOD_CUDA_RSVD) {
-    stop("pls_model2_fast_gpu_labels requires svd.method='cuda_rsvd'");
-  }
-  const arma::mat Xview = numeric_matrix_view(XtrainSEXP, "Xtrain");
-  const int n = static_cast<int>(Xview.n_rows);
-  if (y.size() != n) {
-    stop("pls_model2_fast_gpu_labels requires one label per training row");
-  }
-  if (n_classes < 2) {
-    stop("pls_model2_fast_gpu_labels requires at least two classes");
-  }
-  arma::mat Ytrain(
-    static_cast<arma::uword>(n),
-    static_cast<arma::uword>(n_classes),
-    arma::fill::zeros
-  );
-  for (int i = 0; i < n; ++i) {
-    const int cls = y[i];
-    if (IntegerVector::is_na(cls) || cls < 1 || cls > n_classes) {
-      stop("pls_model2_fast_gpu_labels requires labels encoded as 1..n_classes");
-    }
-    Ytrain(static_cast<arma::uword>(i), static_cast<arma::uword>(cls - 1)) = 1.0;
-  }
-  return pls_model2_fast_gpu_impl(
-    Xview,
-    std::move(Ytrain),
-    ncomp,
-    scaling,
-    fit,
-    svd_method,
-    rsvd_oversample,
-    rsvd_power,
-    svds_tol,
-    seed
-  );
-}
-
-
 List pls_predict_impl(List& model, const arma::mat& Xinput, bool proj) {
 
   // columns of Ytrain

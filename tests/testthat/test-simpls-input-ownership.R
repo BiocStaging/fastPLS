@@ -18,19 +18,3 @@ test_that("SIMPLS fitting and prediction leave shared input matrices unchanged",
         }
     }
 })
-
-test_that("CUDA classification batches fit inside a narrow sketch", {
-    skip_if_not(has_cuda(), "CUDA backend is unavailable")
-    set.seed(74)
-    X <- matrix(rnorm(5000 * 1000), 5000, 1000)
-    labels <- rep(seq_len(100L), length.out = nrow(X))
-    fit <- fastPLS:::.with_fastpls_fast_options(
-        fastPLS:::pls_model2_fast_gpu_labels(
-            X, labels, 100L, 50L, 3L, FALSE,
-            fastPLS:::.svd_method_id("cuda_rsvd"), 0L, 2L, 0, 17L
-        )
-    )
-    expect_equal(ncol(fit$R), 50L)
-    expect_true(all(is.finite(fit$R)))
-    expect_true(all(is.finite(fit$Q)))
-})

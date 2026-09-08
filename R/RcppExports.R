@@ -125,10 +125,6 @@ pls_model2_fast_gpu <- function(XtrainSEXP, YtrainSEXP, ncomp, scaling, fit, svd
     .Call(`_fastPLS_pls_model2_fast_gpu`, XtrainSEXP, YtrainSEXP, ncomp, scaling, fit, svd_method, rsvd_oversample, rsvd_power, svds_tol, seed)
 }
 
-pls_model2_fast_gpu_labels <- function(XtrainSEXP, y, n_classes, ncomp, scaling, fit, svd_method, rsvd_oversample, rsvd_power, svds_tol, seed) {
-    .Call(`_fastPLS_pls_model2_fast_gpu_labels`, XtrainSEXP, y, n_classes, ncomp, scaling, fit, svd_method, rsvd_oversample, rsvd_power, svds_tol, seed)
-}
-
 pls_predict <- function(model, XtestSEXP, proj) {
     .Call(`_fastPLS_pls_predict`, model, XtestSEXP, proj)
 }
