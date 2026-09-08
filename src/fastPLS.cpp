@@ -20,11 +20,11 @@
 #include "svd_cuda_rsvd.h"
 #include "svd_metal_backend.h"
 #include "float_crosscov_operator.h"
+#include <fastpls/core/lda.hpp>
 #include <fastpls/core/statistics.hpp>
 #include <fastpls/native/simpls.hpp>
 #include <fastpls/native/opls.hpp>
 #include <fastpls/native/kernels.hpp>
-#include <fastpls/native/lda.hpp>
 #include <fastpls/native/plssvd.hpp>
 #include <fastpls/native/operator_rsvd.hpp>
 
@@ -3300,8 +3300,73 @@ static Rcpp::IntegerVector lda_labels_from_scores(const arma::mat& scores,
 
 namespace {
 
-using fastpls::native::LDACholeskyResult;
-using fastpls::native::lda_cholesky_solve;
+fastpls::core::ConstMatrixView<double> lda_core_view(
+    const arma::mat& values) {
+  return fastpls::core::make_const_view(
+    values.memptr(), static_cast<std::size_t>(values.n_rows),
+    static_cast<std::size_t>(values.n_cols),
+    static_cast<std::size_t>(values.n_rows)
+  );
+}
+
+arma::mat lda_arma_matrix(const fastpls::core::Matrix<double>& values) {
+  arma::mat output(values.rows(), values.columns());
+  std::copy(values.data(), values.data() + values.size(), output.memptr());
+  return output;
+}
+
+arma::rowvec lda_arma_row(const std::vector<double>& values) {
+  arma::rowvec output(values.size());
+  std::copy(values.begin(), values.end(), output.memptr());
+  return output;
+}
+
+arma::vec lda_arma_column(const std::vector<double>& values) {
+  arma::vec output(values.size());
+  std::copy(values.begin(), values.end(), output.memptr());
+  return output;
+}
+
+Rcpp::List lda_core_model_to_list(
+    const fastpls::core::LdaModel<double>& model) {
+  return Rcpp::List::create(
+    Rcpp::Named("means") = lda_arma_matrix(model.means),
+    Rcpp::Named("inv_cov") = arma::mat(),
+    Rcpp::Named("linear") = lda_arma_matrix(model.linear),
+    Rcpp::Named("constants") = lda_arma_row(model.constants),
+    Rcpp::Named("priors") = lda_arma_column(model.priors),
+    Rcpp::Named("ridge") = model.ridge,
+    Rcpp::Named("ridge_relative") = model.relative_ridge
+  );
+}
+
+Rcpp::List lda_core_models_to_list(
+    const std::vector<fastpls::core::LdaModel<double>>& models,
+    const Rcpp::IntegerVector& components) {
+  Rcpp::List output(models.size());
+  Rcpp::CharacterVector names(models.size());
+  for (std::size_t index = 0; index < models.size(); ++index) {
+    output[static_cast<R_xlen_t>(index)] =
+      lda_core_model_to_list(models[index]);
+    names[static_cast<R_xlen_t>(index)] =
+      std::to_string(components[static_cast<R_xlen_t>(index)]);
+  }
+  output.attr("names") = names;
+  return output;
+}
+
+Rcpp::List lda_train_moments_core(
+    const arma::mat& gram, const arma::mat& class_sums,
+    const arma::vec& counts, int sample_count,
+    const Rcpp::IntegerVector& components) {
+  const auto models = fastpls::core::train_lda_prefixes_from_moments<double>(
+    lda_core_view(gram), lda_core_view(class_sums), counts.memptr(),
+    static_cast<std::size_t>(counts.n_elem),
+    static_cast<std::size_t>(sample_count), components.begin(),
+    static_cast<std::size_t>(components.size())
+  );
+  return lda_core_models_to_list(models, components);
+}
 
 } // namespace
 
@@ -3311,7 +3376,7 @@ Rcpp::List lda_train_prefix_cpp(const arma::mat& Ttrain,
                                 int n_classes,
                                 const Rcpp::IntegerVector& ncomp,
                                 double ridge) {
-  (void)ridge; // Retained in the internal ABI; regularization is deterministic.
+  (void)ridge;  // Retained in the internal ABI; regularization is deterministic.
   if (Ttrain.n_rows == 0 || Ttrain.n_cols == 0) {
     stop("lda_train_prefix_cpp requires a non-empty score matrix");
   }
@@ -3333,7 +3398,6 @@ Rcpp::List lda_train_prefix_cpp(const arma::mat& Ttrain,
     stop("lda_train_prefix_cpp component counts must be in 1..ncol(Ttrain)");
   }
 
-  const arma::uword n = Ttrain.n_rows;
   const arma::uword kmax = static_cast<arma::uword>(kmax_i);
   arma::mat Tk_storage;
   const arma::mat* Tk_ptr = &Ttrain;
@@ -3343,62 +3407,21 @@ Rcpp::List lda_train_prefix_cpp(const arma::mat& Ttrain,
   }
   const arma::mat& Tk = *Tk_ptr;
   arma::vec counts(n_classes, arma::fill::zeros);
-  arma::mat means(n_classes, kmax, arma::fill::zeros);
+  arma::mat class_sums(n_classes, kmax, arma::fill::zeros);
 
-  for (arma::uword i = 0; i < n; ++i) {
+  for (arma::uword i = 0; i < Ttrain.n_rows; ++i) {
     const int cls = y[i] - 1;
     if (cls < 0 || cls >= n_classes) {
       stop("lda_train_prefix_cpp labels must be encoded as 1..n_classes");
     }
     counts(cls) += 1.0;
-    means.row(cls) += Tk.row(i);
-  }
-  for (int c = 0; c < n_classes; ++c) {
-    if (counts(c) <= 0.0) {
-      stop("lda_train_prefix_cpp received an empty class");
-    }
-    means.row(c) /= counts(c);
+    class_sums.row(cls) += Tk.row(i);
   }
 
-  arma::mat pooled_full = arma::symmatu(Tk.t() * Tk);
-  for (int c = 0; c < n_classes; ++c) {
-    pooled_full -= counts(c) * (means.row(c).t() * means.row(c));
-  }
-  const double df = std::max<double>(1.0, static_cast<double>(n) - static_cast<double>(n_classes));
-  pooled_full /= df;
-
-  Rcpp::List models(ncomp.size());
-  Rcpp::CharacterVector model_names(ncomp.size());
-  for (R_xlen_t idx = 0; idx < ncomp.size(); ++idx) {
-    const int kk_i = ncomp[idx];
-    if (kk_i < 1 || kk_i > kmax_i) {
-      stop("lda_train_prefix_cpp component counts must be in 1..max(ncomp)");
-    }
-    const arma::uword kk = static_cast<arma::uword>(kk_i);
-    arma::mat pooled = pooled_full.submat(0, 0, kk - 1, kk - 1);
-    arma::mat means_k = means.cols(0, kk - 1);
-
-    const LDACholeskyResult solved = lda_cholesky_solve(pooled, means_k);
-    const arma::mat& linear = solved.linear;
-    arma::rowvec constants(n_classes, arma::fill::zeros);
-    for (int c = 0; c < n_classes; ++c) {
-      const double prior = std::max(counts(c) / static_cast<double>(n), std::numeric_limits<double>::min());
-      constants(c) = -0.5 * arma::as_scalar(means_k.row(c) * linear.row(c).t()) + std::log(prior);
-    }
-
-    models[idx] = Rcpp::List::create(
-      Rcpp::Named("means") = means_k,
-      Rcpp::Named("inv_cov") = arma::mat(),
-      Rcpp::Named("linear") = linear,
-      Rcpp::Named("constants") = constants,
-      Rcpp::Named("priors") = counts / static_cast<double>(n),
-      Rcpp::Named("ridge") = solved.lambda,
-      Rcpp::Named("ridge_relative") = solved.relative_ridge
-    );
-    model_names[idx] = std::to_string(kk_i);
-  }
-  models.attr("names") = model_names;
-  return models;
+  const arma::mat gram = arma::symmatu(Tk.t() * Tk);
+  return lda_train_moments_core(
+    gram, class_sums, counts, static_cast<int>(Ttrain.n_rows), ncomp
+  );
 }
 
 // [[Rcpp::export]]
@@ -3407,79 +3430,7 @@ Rcpp::List lda_train_moments_prefix_cpp(const arma::mat& gram,
                                         const arma::vec& counts,
                                         int n,
                                         const Rcpp::IntegerVector& ncomp) {
-  if (n < 1 || gram.n_rows < 1 || gram.n_rows != gram.n_cols) {
-    stop("lda_train_moments_prefix_cpp requires a square, non-empty score Gram matrix");
-  }
-  if (class_sums.n_rows < 2 || class_sums.n_cols != gram.n_cols ||
-      counts.n_elem != class_sums.n_rows) {
-    stop("lda_train_moments_prefix_cpp received inconsistent class moments");
-  }
-  if (ncomp.size() < 1) {
-    stop("lda_train_moments_prefix_cpp requires at least one component count");
-  }
-  if (!gram.is_finite() || !class_sums.is_finite() || !counts.is_finite()) {
-    stop("lda_train_moments_prefix_cpp requires finite moments");
-  }
-
-  const arma::uword n_classes = class_sums.n_rows;
-  const arma::uword kmax = gram.n_cols;
-  arma::mat means = class_sums;
-  double total_count = 0.0;
-  for (arma::uword cls = 0; cls < n_classes; ++cls) {
-    if (counts(cls) <= 0.0) {
-      stop("lda_train_moments_prefix_cpp received an empty class");
-    }
-    means.row(cls) /= counts(cls);
-    total_count += counts(cls);
-  }
-  if (std::abs(total_count - static_cast<double>(n)) >
-      1e-8 * std::max(1.0, static_cast<double>(n))) {
-    stop("lda_train_moments_prefix_cpp class counts do not sum to n");
-  }
-
-  arma::mat pooled_full = arma::symmatu(gram);
-  for (arma::uword cls = 0; cls < n_classes; ++cls) {
-    pooled_full -= counts(cls) *
-      (means.row(cls).t() * means.row(cls));
-  }
-  pooled_full /= std::max<double>(
-    1.0, static_cast<double>(n) - static_cast<double>(n_classes)
-  );
-
-  Rcpp::List models(ncomp.size());
-  Rcpp::CharacterVector model_names(ncomp.size());
-  for (R_xlen_t index = 0; index < ncomp.size(); ++index) {
-    const int kk_i = ncomp[index];
-    if (kk_i < 1 || kk_i > static_cast<int>(kmax)) {
-      stop("lda_train_moments_prefix_cpp component counts must be in 1..ncol(gram)");
-    }
-    const arma::uword kk = static_cast<arma::uword>(kk_i);
-    const arma::mat pooled = pooled_full.submat(0, 0, kk - 1, kk - 1);
-    const arma::mat means_k = means.cols(0, kk - 1);
-    const LDACholeskyResult solved = lda_cholesky_solve(pooled, means_k);
-    arma::rowvec constants(n_classes, arma::fill::zeros);
-    for (arma::uword cls = 0; cls < n_classes; ++cls) {
-      const double prior = std::max(
-        counts(cls) / static_cast<double>(n),
-        std::numeric_limits<double>::min()
-      );
-      constants(cls) = -0.5 * arma::dot(
-        means_k.row(cls), solved.linear.row(cls)
-      ) + std::log(prior);
-    }
-    models[index] = Rcpp::List::create(
-      Rcpp::Named("means") = means_k,
-      Rcpp::Named("inv_cov") = arma::mat(),
-      Rcpp::Named("linear") = solved.linear,
-      Rcpp::Named("constants") = constants,
-      Rcpp::Named("priors") = counts / static_cast<double>(n),
-      Rcpp::Named("ridge") = solved.lambda,
-      Rcpp::Named("ridge_relative") = solved.relative_ridge
-    );
-    model_names[index] = std::to_string(kk_i);
-  }
-  models.attr("names") = model_names;
-  return models;
+  return lda_train_moments_core(gram, class_sums, counts, n, ncomp);
 }
 
 // [[Rcpp::export]]

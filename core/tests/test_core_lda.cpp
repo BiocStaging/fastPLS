@@ -37,6 +37,36 @@ int main() {
     assert(std::isfinite(discriminants.data()[index]));
   }
 
+  fastpls::core::Matrix<float> gram(3, 3);
+  fastpls::core::Matrix<float> class_sums(2, 3);
+  const float counts[] = {4.0f, 4.0f};
+  for (std::size_t column = 0; column < 3; ++column) {
+    for (std::size_t row = 0; row < 3; ++row) {
+      for (std::size_t sample = 0; sample < 8; ++sample) {
+        gram(row, column) += scores(sample, row) * scores(sample, column);
+      }
+    }
+    for (std::size_t sample = 0; sample < 8; ++sample) {
+      class_sums(static_cast<std::size_t>(labels[sample] - 1), column) +=
+        scores(sample, column);
+    }
+  }
+  const auto moment_models =
+    fastpls::core::train_lda_prefixes_from_moments<float>(
+      gram.view(), class_sums.view(), counts, 2, 8, prefixes, 2
+    );
+  assert(moment_models.size() == models.size());
+  for (std::size_t model = 0; model < models.size(); ++model) {
+    assert(moment_models[model].linear.size() == models[model].linear.size());
+    for (std::size_t index = 0;
+         index < models[model].linear.size(); ++index) {
+      assert(std::abs(moment_models[model].linear.data()[index] -
+                      models[model].linear.data()[index]) < 1e-4f);
+    }
+  }
+  assert(fastpls::core::lda_predict(scores.view(), moment_models[1]) ==
+         predictions);
+
   bool rejected = false;
   const int invalid_labels[] = {1, 1, 1, 1, 3, 2, 2, 2};
   try {

@@ -83,6 +83,74 @@ bool lda_cholesky_solve(ConstMatrixView<T> pooled,
   return true;
 }
 
+template<class T>
+std::vector<LdaModel<T>> finalize_lda_prefixes(
+    ConstMatrixView<T> pooled, ConstMatrixView<T> means,
+    const std::vector<T>& counts, std::size_t sample_count,
+    const int* prefixes, std::size_t prefix_count) {
+  constexpr T ridge_grid[] = {
+    T(1e-8), T(1e-6), T(1e-5), T(1e-4), T(1e-3), T(1e-2)
+  };
+  std::vector<LdaModel<T>> models;
+  models.reserve(prefix_count);
+  for (std::size_t index = 0; index < prefix_count; ++index) {
+    const std::size_t retained = static_cast<std::size_t>(prefixes[index]);
+    LdaModel<T> model;
+    model.means.resize(means.rows(), retained);
+    Matrix<T> covariance(retained, retained);
+    T scale = T(0);
+    for (std::size_t component = 0; component < retained; ++component) {
+      scale += pooled(component, component);
+      for (std::size_t row = 0; row < retained; ++row) {
+        covariance(row, component) = pooled(row, component);
+      }
+      for (std::size_t class_index = 0;
+           class_index < means.rows(); ++class_index) {
+        model.means(class_index, component) =
+          means(class_index, component);
+      }
+    }
+    scale /= static_cast<T>(retained);
+    if (!std::isfinite(scale) || scale <= T(0)) scale = T(1);
+
+    bool solved = false;
+    for (const T relative : ridge_grid) {
+      const T ridge = relative * scale;
+      if (lda_cholesky_solve(
+          ConstMatrixView<T>(covariance.view()),
+          ConstMatrixView<T>(model.means.view()), ridge, model.linear)) {
+        model.ridge = ridge;
+        model.relative_ridge = relative;
+        solved = true;
+        break;
+      }
+    }
+    if (!solved) {
+      throw std::runtime_error(
+        "fastPLS LDA Cholesky factorization failed for every regularization level"
+      );
+    }
+
+    model.constants.resize(means.rows());
+    model.priors.resize(means.rows());
+    for (std::size_t class_index = 0;
+         class_index < means.rows(); ++class_index) {
+      model.priors[class_index] = counts[class_index] /
+        static_cast<T>(sample_count);
+      T product = T(0);
+      for (std::size_t component = 0; component < retained; ++component) {
+        product += model.means(class_index, component) *
+          model.linear(class_index, component);
+      }
+      model.constants[class_index] = T(-0.5) * product +
+        std::log(std::max(model.priors[class_index],
+                          std::numeric_limits<T>::min()));
+    }
+    models.push_back(std::move(model));
+  }
+  return models;
+}
+
 }  // namespace detail
 
 template<class T>
@@ -149,67 +217,9 @@ std::vector<LdaModel<T>> train_lda_prefixes(
     }
   }
 
-  constexpr T ridge_grid[] = {
-    T(1e-8), T(1e-6), T(1e-5), T(1e-4), T(1e-3), T(1e-2)
-  };
-  std::vector<LdaModel<T>> models;
-  models.reserve(prefix_count);
-  for (std::size_t index = 0; index < prefix_count; ++index) {
-    const std::size_t retained = static_cast<std::size_t>(prefixes[index]);
-    LdaModel<T> model;
-    model.means.resize(class_count, retained);
-    Matrix<T> covariance(retained, retained);
-    T scale = T(0);
-    for (std::size_t component = 0; component < retained; ++component) {
-      scale += pooled(component, component);
-      for (std::size_t row = 0; row < retained; ++row) {
-        covariance(row, component) = pooled(row, component);
-      }
-      for (std::size_t class_index = 0;
-           class_index < class_count; ++class_index) {
-        model.means(class_index, component) =
-          means(class_index, component);
-      }
-    }
-    scale /= static_cast<T>(retained);
-    if (!std::isfinite(scale) || scale <= T(0)) scale = T(1);
-
-    bool solved = false;
-    for (const T relative : ridge_grid) {
-      const T ridge = relative * scale;
-      if (detail::lda_cholesky_solve(
-          ConstMatrixView<T>(covariance.view()),
-          ConstMatrixView<T>(model.means.view()), ridge, model.linear)) {
-        model.ridge = ridge;
-        model.relative_ridge = relative;
-        solved = true;
-        break;
-      }
-    }
-    if (!solved) {
-      throw std::runtime_error(
-        "fastPLS LDA Cholesky factorization failed for every regularization level"
-      );
-    }
-
-    model.constants.resize(class_count);
-    model.priors.resize(class_count);
-    for (std::size_t class_index = 0;
-         class_index < class_count; ++class_index) {
-      model.priors[class_index] = counts[class_index] /
-        static_cast<T>(scores.rows());
-      T product = T(0);
-      for (std::size_t component = 0; component < retained; ++component) {
-        product += model.means(class_index, component) *
-          model.linear(class_index, component);
-      }
-      model.constants[class_index] = T(-0.5) * product +
-        std::log(std::max(model.priors[class_index],
-                          std::numeric_limits<T>::min()));
-    }
-    models.push_back(std::move(model));
-  }
-  return models;
+  return detail::finalize_lda_prefixes<T>(
+    pooled.view(), means.view(), counts, scores.rows(), prefixes, prefix_count
+  );
 }
 
 template<class T>
@@ -218,6 +228,78 @@ std::vector<LdaModel<T>> train_lda_prefixes(
     std::size_t class_count, const int* prefixes, std::size_t prefix_count) {
   return train_lda_prefixes(
     ConstMatrixView<T>(scores), labels, label_count, class_count,
+    prefixes, prefix_count
+  );
+}
+
+template<class T>
+std::vector<LdaModel<T>> train_lda_prefixes_from_moments(
+    ConstMatrixView<T> gram, ConstMatrixView<T> class_sums,
+    const T* counts, std::size_t count_size, std::size_t sample_count,
+    const int* prefixes, std::size_t prefix_count) {
+  if (gram.empty() || gram.rows() != gram.columns() || class_sums.empty() ||
+      class_sums.columns() != gram.columns() || class_sums.rows() < 2 ||
+      counts == nullptr || count_size != class_sums.rows() ||
+      sample_count < 1 || prefixes == nullptr || prefix_count < 1) {
+    throw std::invalid_argument("fastPLS LDA moment dimensions are invalid");
+  }
+  std::size_t maximum = 0;
+  for (std::size_t index = 0; index < prefix_count; ++index) {
+    if (prefixes[index] < 1 ||
+        static_cast<std::size_t>(prefixes[index]) > gram.columns()) {
+      throw std::invalid_argument(
+        "fastPLS LDA component counts must be within the moment dimension"
+      );
+    }
+    maximum = std::max(maximum, static_cast<std::size_t>(prefixes[index]));
+  }
+
+  std::vector<T> count_values(counts, counts + count_size);
+  Matrix<T> means(class_sums.rows(), maximum);
+  T total_count = T(0);
+  for (std::size_t class_index = 0;
+       class_index < class_sums.rows(); ++class_index) {
+    if (!std::isfinite(count_values[class_index]) ||
+        count_values[class_index] <= T(0)) {
+      throw std::invalid_argument("fastPLS LDA received an empty class");
+    }
+    total_count += count_values[class_index];
+    for (std::size_t component = 0; component < maximum; ++component) {
+      const T value = class_sums(class_index, component);
+      if (!std::isfinite(value)) {
+        throw std::invalid_argument("fastPLS LDA moments must be finite");
+      }
+      means(class_index, component) = value / count_values[class_index];
+    }
+  }
+  const T expected = static_cast<T>(sample_count);
+  if (std::abs(total_count - expected) >
+      T(1e-8) * std::max(T(1), expected)) {
+    throw std::invalid_argument("fastPLS LDA class counts do not sum to n");
+  }
+
+  Matrix<T> pooled(maximum, maximum);
+  const T denominator = static_cast<T>(std::max<std::size_t>(
+    1, sample_count > count_size ? sample_count - count_size : 1
+  ));
+  for (std::size_t column = 0; column < maximum; ++column) {
+    for (std::size_t row = 0; row <= column; ++row) {
+      T value = gram(row, column);
+      if (!std::isfinite(value)) {
+        throw std::invalid_argument("fastPLS LDA moments must be finite");
+      }
+      for (std::size_t class_index = 0;
+           class_index < class_sums.rows(); ++class_index) {
+        value -= count_values[class_index] * means(class_index, row) *
+          means(class_index, column);
+      }
+      value /= denominator;
+      pooled(row, column) = value;
+      pooled(column, row) = value;
+    }
+  }
+  return detail::finalize_lda_prefixes<T>(
+    pooled.view(), means.view(), count_values, sample_count,
     prefixes, prefix_count
   );
 }

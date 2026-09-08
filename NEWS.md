@@ -1,3 +1,14 @@
+# fastPLS 0.99.53
+
+* Consolidated double- and single-precision pooled-covariance LDA training in
+  the dependency-free MIT C++17 core, including a sufficient-statistics entry
+  point for compiled cross-validation.
+
+* Removed the superseded Armadillo LDA implementation and its duplicate test.
+  Double-precision coefficients and discriminant scores agree with the former
+  implementation to near machine precision, with identical predictions and
+  deterministic regularization selection.
+
 # fastPLS 0.99.52
 
 * Migrated the internal CUDA matrix-product bridge from RcppArmadillo to a
