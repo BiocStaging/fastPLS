@@ -88,6 +88,19 @@ center_kernel_train_cpp <- function(K) {
     .Call("_fastPLS_center_kernel_train_cpp", K, PACKAGE = "fastPLS")
 }
 
+kernel_matrix_cpp <- function(X1, X2, kernel, gamma, degree, coef0) {
+    .Call(
+        "_fastPLS_kernel_matrix_cpp",
+        X1,
+        X2,
+        kernel,
+        gamma,
+        degree,
+        coef0,
+        PACKAGE = "fastPLS"
+    )
+}
+
 center_kernel_test_cpp <- function(Ktest, train_col_means, train_grand_mean) {
     .Call(
         "_fastPLS_center_kernel_test_cpp",

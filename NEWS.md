@@ -1,3 +1,14 @@
+# fastPLS 0.99.48
+
+* Moved float64 kernel-matrix construction from the generated
+  RcppArmadillo interface to the hand-written R C-API and dependency-free
+  kernel core.
+
+* Added a narrow runtime BLAS adapter for double-precision matrix products,
+  using Accelerate or OpenBLAS where configured and R's portable BLAS ABI on
+  other package builds. This preserves optimized kernel construction without
+  exposing a BLAS implementation in the standalone core ABI.
+
 # fastPLS 0.99.47
 
 * Added a dependency-free, templated C++17 implementation of linear,

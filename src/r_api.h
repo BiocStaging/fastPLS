@@ -22,6 +22,8 @@ SEXP _fastPLS_center_kernel_train_float32_cpp(SEXP kernel);
 SEXP _fastPLS_center_kernel_test_float32_cpp(SEXP kernel,
                                              SEXP training_means,
                                              SEXP training_grand_mean);
+SEXP _fastPLS_kernel_matrix_cpp(SEXP left, SEXP right, SEXP kernel,
+                                SEXP gamma, SEXP degree, SEXP offset);
 SEXP _fastPLS_center_kernel_train_cpp(SEXP kernel);
 SEXP _fastPLS_center_kernel_test_cpp(SEXP kernel, SEXP training_means,
                                      SEXP training_grand_mean);

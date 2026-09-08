@@ -1,4 +1,5 @@
 #include "r_api.h"
+#include "core_cpu_backend.h"
 
 #include <R_ext/Error.h>
 #include <fastpls/core/classification.hpp>
@@ -433,6 +434,56 @@ extern "C" SEXP _fastPLS_center_kernel_train_cpp(SEXP kernel) {
     Rf_setAttrib(result, R_NamesSymbol, names);
     UNPROTECT(4);
     return result;
+  } catch (const std::exception& exception) {
+    Rf_error("%s", exception.what());
+  }
+  return R_NilValue;
+}
+
+extern "C" SEXP _fastPLS_kernel_matrix_cpp(SEXP left, SEXP right,
+                                             SEXP kernel, SEXP gamma,
+                                             SEXP degree, SEXP offset) {
+  try {
+    if (!Rf_isReal(left) || !Rf_isMatrix(left) ||
+        !Rf_isReal(right) || !Rf_isMatrix(right)) {
+      throw std::invalid_argument("Kernel inputs must be numeric matrices");
+    }
+    const SEXP left_dimensions = Rf_getAttrib(left, R_DimSymbol);
+    const SEXP right_dimensions = Rf_getAttrib(right, R_DimSymbol);
+    const std::size_t left_rows = INTEGER(left_dimensions)[0];
+    const std::size_t left_columns = INTEGER(left_dimensions)[1];
+    const std::size_t right_rows = INTEGER(right_dimensions)[0];
+    const std::size_t right_columns = INTEGER(right_dimensions)[1];
+    if (left_rows < 1 || right_rows < 1 || left_columns < 1 ||
+        left_columns != right_columns) {
+      throw std::invalid_argument(
+        "Kernel inputs must be non-empty and have matching columns"
+      );
+    }
+    const int kernel_code = Rf_asInteger(kernel);
+    if (kernel_code < 1 || kernel_code > 3 || kernel_code == NA_INTEGER) {
+      throw std::invalid_argument("Unknown kernel type");
+    }
+    const int polynomial_degree = Rf_asInteger(degree);
+    if (polynomial_degree == NA_INTEGER) {
+      throw std::invalid_argument("Polynomial degree must be an integer");
+    }
+    const auto left_view = fastpls::core::make_const_view(
+      REAL(left), left_rows, left_columns, left_rows
+    );
+    const auto right_view = fastpls::core::make_const_view(
+      REAL(right), right_rows, right_columns, right_rows
+    );
+    fastpls::core::Matrix<double> result(left_rows, right_rows);
+    fastpls::runtime::cpu_gemm_f64(
+      left_view, right_view, false, true, result.view()
+    );
+    fastpls::core::kernel_from_dots(
+      left_view, right_view, result.view(),
+      static_cast<fastpls::core::KernelType>(kernel_code), Rf_asReal(gamma),
+      polynomial_degree, Rf_asReal(offset)
+    );
+    return numeric_matrix(result);
   } catch (const std::exception& exception) {
     Rf_error("%s", exception.what());
   }

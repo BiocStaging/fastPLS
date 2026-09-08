@@ -193,10 +193,6 @@ pls_class_predict_topk_cuda <- function(model, Xtest, top_k, proj) {
     .Call(`_fastPLS_pls_class_predict_topk_cuda`, model, Xtest, top_k, proj)
 }
 
-kernel_matrix_cpp <- function(X1, X2, kernel, gamma, degree, coef0) {
-    .Call(`_fastPLS_kernel_matrix_cpp`, X1, X2, kernel, gamma, degree, coef0)
-}
-
 opls_filter_cpp <- function(X, Y, north, scaling) {
     .Call(`_fastPLS_opls_filter_cpp`, X, Y, north, scaling)
 }

@@ -6020,18 +6020,6 @@ arma::imat pls_predict_code_classes_compact_cuda(List& model, arma::mat Xtest, c
 }
 
 // [[Rcpp::export]]
-arma::mat kernel_matrix_cpp(
-  const arma::mat& X1,
-  const arma::mat& X2,
-  const int kernel,
-  const double gamma,
-  const int degree,
-  const double coef0
-) {
-  return fastpls::native::kernel_matrix(X1, X2, kernel, gamma, degree, coef0);
-}
-
-// [[Rcpp::export]]
 Rcpp::List opls_filter_cpp(arma::mat X, arma::mat Y, const int north, const int scaling) {
   auto solve = [](const arma::mat& S, int, arma::vec& w) {
     return fastpls::native::leading_left_from_smaller_gram(S, w);

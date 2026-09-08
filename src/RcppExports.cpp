@@ -767,22 +767,6 @@ BEGIN_RCPP
     return rcpp_result_gen;
 END_RCPP
 }
-// kernel_matrix_cpp
-arma::mat kernel_matrix_cpp(const arma::mat& X1, const arma::mat& X2, const int kernel, const double gamma, const int degree, const double coef0);
-RcppExport SEXP _fastPLS_kernel_matrix_cpp(SEXP X1SEXP, SEXP X2SEXP, SEXP kernelSEXP, SEXP gammaSEXP, SEXP degreeSEXP, SEXP coef0SEXP) {
-BEGIN_RCPP
-    Rcpp::RObject rcpp_result_gen;
-    Rcpp::RNGScope rcpp_rngScope_gen;
-    Rcpp::traits::input_parameter< const arma::mat& >::type X1(X1SEXP);
-    Rcpp::traits::input_parameter< const arma::mat& >::type X2(X2SEXP);
-    Rcpp::traits::input_parameter< const int >::type kernel(kernelSEXP);
-    Rcpp::traits::input_parameter< const double >::type gamma(gammaSEXP);
-    Rcpp::traits::input_parameter< const int >::type degree(degreeSEXP);
-    Rcpp::traits::input_parameter< const double >::type coef0(coef0SEXP);
-    rcpp_result_gen = Rcpp::wrap(kernel_matrix_cpp(X1, X2, kernel, gamma, degree, coef0));
-    return rcpp_result_gen;
-END_RCPP
-}
 // opls_filter_cpp
 Rcpp::List opls_filter_cpp(arma::mat X, arma::mat Y, const int north, const int scaling);
 RcppExport SEXP _fastPLS_opls_filter_cpp(SEXP XSEXP, SEXP YSEXP, SEXP northSEXP, SEXP scalingSEXP) {

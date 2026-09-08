@@ -14,6 +14,12 @@ void cpu_gemm_f32(core::ConstMatrixView<float> left,
                   bool transpose_right,
                   core::MatrixView<float> output);
 
+void cpu_gemm_f64(core::ConstMatrixView<double> left,
+                  core::ConstMatrixView<double> right,
+                  bool transpose_left,
+                  bool transpose_right,
+                  core::MatrixView<double> output);
+
 }  // namespace runtime
 }  // namespace fastpls
 
