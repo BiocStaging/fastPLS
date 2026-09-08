@@ -13,6 +13,35 @@ expected_float32_cpu_backend <- function() {
   }
 }
 
+test_that("float32 CPU products use the native R C boundary", {
+  skip_if_not_installed("float")
+  left_values <- matrix(seq_len(24), nrow = 6L, ncol = 4L)
+  right_values <- matrix(seq_len(12), nrow = 4L, ncol = 3L)
+  left <- float::fl(left_values)
+  right <- float::fl(right_values)
+
+  direct <- fastPLS:::cpu_float32_matrix_multiply_cpp(left, right)
+  expect_named(direct, "C")
+  expect_equal(
+    float::dbl(fastPLS:::.float32_from_bits(direct$C)),
+    left_values %*% right_values,
+    tolerance = 1e-5
+  )
+
+  transposed <- fastPLS:::cpu_float32_matrix_multiply_cpp(
+    left, left, transpose_left = TRUE
+  )
+  expect_equal(
+    float::dbl(fastPLS:::.float32_from_bits(transposed$C)),
+    crossprod(left_values),
+    tolerance = 1e-5
+  )
+  expect_error(
+    fastPLS:::cpu_float32_matrix_multiply_cpp(left, right, NA),
+    "transpose controls"
+  )
+})
+
 test_that("Windows float32 argmax uses the portable compiled entry point", {
   skip_if_not_installed("float")
   skip_if_not(.Platform$OS.type == "windows", "Windows-only implementation")

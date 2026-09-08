@@ -1011,6 +1011,52 @@ extern "C" SEXP _fastPLS_center_kernel_train_cpp(SEXP kernel) {
   return R_NilValue;
 }
 
+extern "C" SEXP _fastPLS_cpu_backend_description() {
+  try {
+    return Rf_mkString(fastpls::runtime::cpu_backend_description().c_str());
+  } catch (const std::exception& exception) {
+    Rf_error("%s", exception.what());
+  }
+  return R_NilValue;
+}
+
+extern "C" SEXP _fastPLS_cpu_float32_matrix_multiply_cpp(
+    SEXP left, SEXP right, SEXP transpose_left, SEXP transpose_right) {
+  try {
+    const int transpose_left_value = Rf_asLogical(transpose_left);
+    const int transpose_right_value = Rf_asLogical(transpose_right);
+    if (transpose_left_value == NA_LOGICAL ||
+        transpose_right_value == NA_LOGICAL) {
+      throw std::invalid_argument("transpose controls must be TRUE or FALSE");
+    }
+    const fastpls::core::Matrix<float> left_values =
+      float_matrix_from_s4(left, "A");
+    const fastpls::core::Matrix<float> right_values =
+      float_matrix_from_s4(right, "B");
+    const std::size_t rows = transpose_left_value ?
+      left_values.columns() : left_values.rows();
+    const std::size_t columns = transpose_right_value ?
+      right_values.rows() : right_values.columns();
+    fastpls::core::Matrix<float> product(rows, columns);
+    fastpls::runtime::cpu_gemm_f32(
+      left_values.view(), right_values.view(), transpose_left_value,
+      transpose_right_value, product.view()
+    );
+
+    SEXP output = PROTECT(Rf_allocVector(VECSXP, 1));
+    SEXP value = PROTECT(float_bits_matrix(product));
+    SET_VECTOR_ELT(output, 0, value);
+    SEXP names = PROTECT(Rf_allocVector(STRSXP, 1));
+    SET_STRING_ELT(names, 0, Rf_mkChar("C"));
+    Rf_setAttrib(output, R_NamesSymbol, names);
+    UNPROTECT(3);
+    return output;
+  } catch (const std::exception& exception) {
+    Rf_error("%s", exception.what());
+  }
+  return R_NilValue;
+}
+
 extern "C" SEXP _fastPLS_kernel_matrix_cpp(SEXP left, SEXP right,
                                              SEXP kernel, SEXP gamma,
                                              SEXP degree, SEXP offset) {

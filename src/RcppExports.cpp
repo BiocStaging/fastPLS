@@ -126,20 +126,6 @@ BEGIN_RCPP
     return rcpp_result_gen;
 END_RCPP
 }
-// cpu_float32_matrix_multiply_cpp
-Rcpp::List cpu_float32_matrix_multiply_cpp(SEXP ASEXP, SEXP BSEXP, bool transpose_left, bool transpose_right);
-RcppExport SEXP _fastPLS_cpu_float32_matrix_multiply_cpp(SEXP ASEXPSEXP, SEXP BSEXPSEXP, SEXP transpose_leftSEXP, SEXP transpose_rightSEXP) {
-BEGIN_RCPP
-    Rcpp::RObject rcpp_result_gen;
-    Rcpp::RNGScope rcpp_rngScope_gen;
-    Rcpp::traits::input_parameter< SEXP >::type ASEXP(ASEXPSEXP);
-    Rcpp::traits::input_parameter< SEXP >::type BSEXP(BSEXPSEXP);
-    Rcpp::traits::input_parameter< bool >::type transpose_left(transpose_leftSEXP);
-    Rcpp::traits::input_parameter< bool >::type transpose_right(transpose_rightSEXP);
-    rcpp_result_gen = Rcpp::wrap(cpu_float32_matrix_multiply_cpp(ASEXP, BSEXP, transpose_left, transpose_right));
-    return rcpp_result_gen;
-END_RCPP
-}
 // metal_float32_matrix_multiply_cpp
 Rcpp::List metal_float32_matrix_multiply_cpp(SEXP ASEXP, SEXP BSEXP, bool transpose_left, bool transpose_right);
 RcppExport SEXP _fastPLS_metal_float32_matrix_multiply_cpp(SEXP ASEXPSEXP, SEXP BSEXPSEXP, SEXP transpose_leftSEXP, SEXP transpose_rightSEXP) {
@@ -956,6 +942,7 @@ static const R_CallMethodDef CallEntries[] = {
     {"_fastPLS_float32_argmax_cpp", (DL_FUNC) &_fastPLS_float32_argmax_cpp, 1},
     {"_fastPLS_float32_topk_cpp", (DL_FUNC) &_fastPLS_float32_topk_cpp, 2},
     {"_fastPLS_has_cuda", (DL_FUNC) &_fastPLS_has_cuda, 0},
+    {"_fastPLS_cpu_backend_description", (DL_FUNC) &_fastPLS_cpu_backend_description, 0},
     {"_fastPLS_lda_cuda_native_available", (DL_FUNC) &_fastPLS_lda_cuda_native_available, 0},
     {"_fastPLS_cuda_matrix_multiply", (DL_FUNC) &_fastPLS_cuda_matrix_multiply, 2},
     {"_fastPLS_lda_train_prefix_cpp", (DL_FUNC) &_fastPLS_lda_train_prefix_cpp, 5},

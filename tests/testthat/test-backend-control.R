@@ -27,3 +27,12 @@ test_that("pls does not expose backend-control metadata in fitted objects", {
   expect_false("fastPLS_version" %in% names(fit))
   expect_false("timestamp" %in% names(fit))
 })
+
+test_that("the native CPU numerical backend is identifiable", {
+  backend <- fastPLS:::cpu_backend_description_cpp()
+
+  expect_type(backend, "character")
+  expect_length(backend, 1L)
+  expect_false(is.na(backend))
+  expect_gt(nchar(backend), 0L)
+})

@@ -65,6 +65,10 @@ cuda_matrix_multiply <- function(A, B) {
     .Call(`_fastPLS_cuda_matrix_multiply`, A, B)
 }
 
+cpu_backend_description_cpp <- function() {
+    .Call(`_fastPLS_cpu_backend_description`)
+}
+
 lda_train_prefix_cpp <- function(Ttrain, y, n_classes, ncomp, ridge) {
     .Call(`_fastPLS_lda_train_prefix_cpp`, Ttrain, y, n_classes, ncomp, ridge)
 }

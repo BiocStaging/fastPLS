@@ -5,6 +5,8 @@
 
 #include <fastpls/core/matrix.hpp>
 
+#include <string>
+
 namespace fastpls {
 namespace runtime {
 
@@ -19,6 +21,8 @@ void cpu_gemm_f64(core::ConstMatrixView<double> left,
                   bool transpose_left,
                   bool transpose_right,
                   core::MatrixView<double> output);
+
+std::string cpu_backend_description();
 
 }  // namespace runtime
 }  // namespace fastpls
