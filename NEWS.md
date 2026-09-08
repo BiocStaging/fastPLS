@@ -1,3 +1,8 @@
+# fastPLS 0.99.50
+
+* Revalidated the source package with BiocCheck 1.49.30 before the
+  Bioconductor staging update.
+
 # fastPLS 0.99.49
 
 * Made the CMake `fastpls::core` target independently configurable, testable
