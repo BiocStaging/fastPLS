@@ -79,34 +79,6 @@ BEGIN_RCPP
     return rcpp_result_gen;
 END_RCPP
 }
-// cuda_float32_rsvd_sample_cpp
-Rcpp::List cuda_float32_rsvd_sample_cpp(SEXP ASEXP, int l, int power_iters, int seed);
-RcppExport SEXP _fastPLS_cuda_float32_rsvd_sample_cpp(SEXP ASEXPSEXP, SEXP lSEXP, SEXP power_itersSEXP, SEXP seedSEXP) {
-BEGIN_RCPP
-    Rcpp::RObject rcpp_result_gen;
-    Rcpp::RNGScope rcpp_rngScope_gen;
-    Rcpp::traits::input_parameter< SEXP >::type ASEXP(ASEXPSEXP);
-    Rcpp::traits::input_parameter< int >::type l(lSEXP);
-    Rcpp::traits::input_parameter< int >::type power_iters(power_itersSEXP);
-    Rcpp::traits::input_parameter< int >::type seed(seedSEXP);
-    rcpp_result_gen = Rcpp::wrap(cuda_float32_rsvd_sample_cpp(ASEXP, l, power_iters, seed));
-    return rcpp_result_gen;
-END_RCPP
-}
-// metal_float32_rsvd_sample_cpp
-Rcpp::List metal_float32_rsvd_sample_cpp(SEXP ASEXP, int l, int power_iters, int seed);
-RcppExport SEXP _fastPLS_metal_float32_rsvd_sample_cpp(SEXP ASEXPSEXP, SEXP lSEXP, SEXP power_itersSEXP, SEXP seedSEXP) {
-BEGIN_RCPP
-    Rcpp::RObject rcpp_result_gen;
-    Rcpp::RNGScope rcpp_rngScope_gen;
-    Rcpp::traits::input_parameter< SEXP >::type ASEXP(ASEXPSEXP);
-    Rcpp::traits::input_parameter< int >::type l(lSEXP);
-    Rcpp::traits::input_parameter< int >::type power_iters(power_itersSEXP);
-    Rcpp::traits::input_parameter< int >::type seed(seedSEXP);
-    rcpp_result_gen = Rcpp::wrap(metal_float32_rsvd_sample_cpp(ASEXP, l, power_iters, seed));
-    return rcpp_result_gen;
-END_RCPP
-}
 // fastsvd_float32_cpp
 Rcpp::List fastsvd_float32_cpp(SEXP ASEXP, int k, int backend, int svd_method, int rsvd_oversample, int rsvd_power, int seed, bool left_only);
 RcppExport SEXP _fastPLS_fastsvd_float32_cpp(SEXP ASEXPSEXP, SEXP kSEXP, SEXP backendSEXP, SEXP svd_methodSEXP, SEXP rsvd_oversampleSEXP, SEXP rsvd_powerSEXP, SEXP seedSEXP, SEXP left_onlySEXP) {
@@ -870,10 +842,8 @@ static const R_CallMethodDef CallEntries[] = {
     {"_fastPLS_lda_predict_float32_cpp", (DL_FUNC) &_fastPLS_lda_predict_float32_cpp, 3},
     {"_fastPLS_lda_train_prefix_float32_cuda", (DL_FUNC) &_fastPLS_lda_train_prefix_float32_cuda, 4},
     {"_fastPLS_lda_predict_float32_cuda", (DL_FUNC) &_fastPLS_lda_predict_float32_cuda, 3},
-    {"_fastPLS_cuda_float32_rsvd_sample_cpp", (DL_FUNC) &_fastPLS_cuda_float32_rsvd_sample_cpp, 4},
     {"_fastPLS_cpu_float32_matrix_multiply_cpp", (DL_FUNC) &_fastPLS_cpu_float32_matrix_multiply_cpp, 4},
     {"_fastPLS_metal_float32_matrix_multiply_cpp", (DL_FUNC) &_fastPLS_metal_float32_matrix_multiply_cpp, 4},
-    {"_fastPLS_metal_float32_rsvd_sample_cpp", (DL_FUNC) &_fastPLS_metal_float32_rsvd_sample_cpp, 4},
     {"_fastPLS_fastsvd_float32_cpp", (DL_FUNC) &_fastPLS_fastsvd_float32_cpp, 8},
     {"_fastPLS_pls_float32_cpu_cpp", (DL_FUNC) &_fastPLS_pls_float32_cpu_cpp, 11},
     {"_fastPLS_pls_float32_labels_cpp", (DL_FUNC) &_fastPLS_pls_float32_labels_cpp, 12},

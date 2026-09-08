@@ -497,33 +497,6 @@ test_that("pls.single.cv preserves float32 input instead of entering the double 
   expect_true(cv$best_ncomp %in% 1:2)
 })
 
-test_that("CUDA float32 rSVD sketch matches CPU float32 arithmetic", {
-  skip_if_not_installed("float")
-  skip_native_float32_on_windows()
-  skip_if_not(has_cuda(), "CUDA backend not available")
-
-  set.seed(123)
-  A <- float::fl(matrix(rnorm(30), nrow = 6))
-  out <- fastPLS:::cuda_float32_rsvd_sample_cpp(A, l = 3L, power_iters = 1L, seed = 44L)
-  Y_cuda <- fastPLS:::.float32_from_bits(out$Y)
-  Omega <- fastPLS:::.float32_from_bits(out$Omega)
-  Y_cpu <- A %*% Omega
-  Qy <- float::qr.Q(float::qr(Y_cpu))
-  Z_cpu <- crossprod(A, Qy)
-  Qz <- float::qr.Q(float::qr(Z_cpu))
-  Y_cpu <- A %*% Qz
-
-  expect_true(inherits(Y_cuda, "float32"))
-  expect_true(all(is.finite(float::dbl(Y_cuda))))
-  Q_cuda <- qr.Q(qr(float::dbl(Y_cuda)))
-  Q_cpu <- qr.Q(qr(float::dbl(Y_cpu)))
-  expect_equal(
-    tcrossprod(Q_cuda),
-    tcrossprod(Q_cpu),
-    tolerance = 1e-4
-  )
-})
-
 test_that("public CUDA float32 PLS is resident and standalone SVD is rejected", {
   skip_if_not_installed("float")
   skip_native_float32_on_windows()
@@ -584,33 +557,6 @@ test_that("Metal float32 matrix multiply stays float32", {
   expect_true(inherits(C_t_metal, "float32"))
   expect_equal(dim(C_t_metal), dim(C_t_cpu))
   expect_equal(as.numeric(C_t_metal), as.numeric(C_t_cpu), tolerance = 1e-4)
-})
-
-test_that("Metal float32 rSVD sketch matches CPU float32 arithmetic", {
-  skip_if_not_installed("float")
-  skip_native_float32_on_windows()
-  skip_if_not(has_metal(), "Metal backend not available")
-
-  set.seed(125)
-  A <- float::fl(matrix(rnorm(30), nrow = 6))
-  out <- fastPLS:::metal_float32_rsvd_sample_cpp(A, l = 3L, power_iters = 1L, seed = 45L)
-  Y_metal <- fastPLS:::.float32_from_bits(out$Y)
-  Omega <- fastPLS:::.float32_from_bits(out$Omega)
-  Y_cpu <- A %*% Omega
-  Qy <- float::qr.Q(float::qr(Y_cpu))
-  Z_cpu <- crossprod(A, Qy)
-  Qz <- float::qr.Q(float::qr(Z_cpu))
-  Y_cpu <- A %*% Qz
-
-  expect_true(inherits(Y_metal, "float32"))
-  expect_equal(dim(Y_metal), dim(Y_cpu))
-  Q_metal <- qr.Q(qr(float::dbl(Y_metal)))
-  Q_cpu <- qr.Q(qr(float::dbl(Y_cpu)))
-  expect_equal(
-    tcrossprod(Q_metal),
-    tcrossprod(Q_cpu),
-    tolerance = 1e-4
-  )
 })
 
 test_that("fastsvd supports public float32 CPU routes", {

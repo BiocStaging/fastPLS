@@ -1849,48 +1849,6 @@ Rcpp::List lda_predict_float32_cuda(SEXP TtestSEXP,
 }
 
 // [[Rcpp::export]]
-Rcpp::List cuda_float32_rsvd_sample_cpp(SEXP ASEXP,
-                                        int l,
-                                        int power_iters,
-                                        int seed) {
-  arma::fmat A = float32_bits_to_fmat(ASEXP, "A");
-  arma::fmat Omega;
-  arma::fmat Y = rsvd_sample_float32_cuda(
-    A,
-    l,
-    power_iters,
-    static_cast<unsigned int>(seed),
-    &Omega
-  );
-  return Rcpp::List::create(
-    Rcpp::Named("Y") = fmat_to_float32_bits(Y),
-    Rcpp::Named("Omega") = fmat_to_float32_bits(Omega)
-  );
-}
-
-// [[Rcpp::export]]
-Rcpp::List metal_float32_rsvd_sample_cpp(SEXP ASEXP,
-                                         int l,
-                                         int power_iters,
-                                         int seed) {
-  arma::fmat A = float32_bits_to_fmat(ASEXP, "A");
-  arma::fmat Omega;
-  arma::fmat Y = rsvd_sample_float32_metal(
-    A,
-    l,
-    power_iters,
-    static_cast<unsigned int>(seed),
-    &Omega
-  );
-  return Rcpp::List::create(
-    Rcpp::Named("Y") = fmat_to_float32_bits(Y),
-    Rcpp::Named("Omega") = fmat_to_float32_bits(Omega)
-  );
-}
-
-
-
-// [[Rcpp::export]]
 Rcpp::List fastsvd_float32_cpp(SEXP ASEXP,
                                int k,
                                int backend,
@@ -3080,16 +3038,6 @@ Rcpp::IntegerMatrix windows_float32_bits(SEXP xSEXP, const char* name) {
   return bits;
 }
 }
-
-Rcpp::List cuda_float32_rsvd_sample_cpp(SEXP ASEXP, int l, int power_iters, int seed) {
-  return windows_float32_unavailable();
-}
-
-Rcpp::List metal_float32_rsvd_sample_cpp(SEXP ASEXP, int l, int power_iters, int seed) {
-  return windows_float32_unavailable();
-}
-
-
 
 Rcpp::List fastsvd_float32_cpp(SEXP ASEXP, int k, int backend, int svd_method, int rsvd_oversample, int rsvd_power, int seed, bool left_only) {
   return windows_float32_unavailable();
