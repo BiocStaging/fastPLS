@@ -72,6 +72,10 @@ if(BUILD_TESTING)
   target_link_libraries(test_core_linalg PRIVATE fastpls_core)
   add_test(NAME core_linalg COMMAND test_core_linalg)
 
+  add_executable(test_core_operators tests/test_core_operators.cpp)
+  target_link_libraries(test_core_operators PRIVATE fastpls_core)
+  add_test(NAME core_operators COMMAND test_core_operators)
+
   add_executable(test_core_kernels tests/test_core_kernels.cpp)
   target_link_libraries(test_core_kernels PRIVATE fastpls_core)
   add_test(NAME core_kernels COMMAND test_core_kernels)
