@@ -11,32 +11,50 @@ compact_label_fixture <- function() {
     list(X = X, Xtest = Xtest, Y = Y, labels = labels)
 }
 
+compact_fitted_slice <- function(model, index) {
+    if (is.list(model$Yfit)) {
+        return(model$Yfit[[index]])
+    }
+    model$Yfit[, , index, drop = FALSE][, , 1L]
+}
+
 test_that("compact labels preserve double PLS-SVD and SIMPLS mathematics", {
     task <- compact_label_fixture()
-    components <- 1:3
     labels <- as.integer(task$labels)
-    exact <- fastPLS:::.svd_method_id("exact")
 
     for (method in c(plssvd = 1L, simpls = 3L)) {
-        compact <- fastPLS:::pls_labels_cpp(
-            task$X, labels, nlevels(task$labels), components, 1L, TRUE,
-            unname(method), exact, 10L, 1L, 0, 41L
-        )
-        dense <- if (identical(unname(method), 1L)) {
-            fastPLS:::pls_model1(
-                task$X, task$Y, components, 1L, TRUE, exact, 10L, 1L, 0, 41L
+        components <- if (identical(unname(method), 1L)) 1:2 else 1:3
+        compact <- if (identical(unname(method), 1L)) {
+            fastPLS:::pls_labels_core_cpp(
+                task$X, labels, nlevels(task$labels), components, 1L, TRUE,
+                32L, 5L, 41L
             )
         } else {
-            fastPLS:::pls_model2_fast(
-                task$X, task$Y, components, 1L, TRUE, exact, 10L, 1L, 0, 41L
+            fastPLS:::pls_simpls_labels_core_cpp(
+                task$X, labels, nlevels(task$labels), components, 1L, TRUE,
+                32L, 5L, 41L
             )
         }
+        dense <- fastPLS:::pls_matrix_core_cpp(
+            task$X, task$Y, components, 1L, TRUE, unname(method),
+            32L, 5L, 41L
+        )
 
-        compact_prediction <- fastPLS:::pls_predict(compact, task$Xtest, FALSE)$Ypred
-        dense_prediction <- fastPLS:::pls_predict(dense, task$Xtest, FALSE)$Ypred
+        compact_prediction <- fastPLS:::pls_labels_core_predict_cpp(
+            compact, task$Xtest, FALSE
+        )$Ypred
+        dense_prediction <- fastPLS:::pls_labels_core_predict_cpp(
+            dense, task$Xtest, FALSE
+        )$Ypred
         expect_equal(compact$mY, dense$mY, tolerance = 1e-13)
         expect_equal(compact$R2Y, dense$R2Y, tolerance = 1e-11)
-        expect_equal(compact$Yfit, dense$Yfit, tolerance = 1e-10)
+        for (index in seq_along(components)) {
+            expect_equal(
+                compact_fitted_slice(compact, index),
+                compact_fitted_slice(dense, index),
+                tolerance = 1e-10
+            )
+        }
         expect_equal(compact_prediction, dense_prediction, tolerance = 1e-10)
     }
 })
@@ -82,27 +100,28 @@ test_that("dependency-free double PLS-SVD preserves compact predictions", {
         task$X, labels, nlevels(task$labels), components, 1L, TRUE,
         32L, 5L, 9501L
     )
-    legacy <- fastPLS:::pls_labels_cpp(
-        task$X, labels, nlevels(task$labels), components, 1L, TRUE,
-        1L, fastPLS:::.svd_method_id("rsvd"), 32L, 5L, 0, 9501L
+    dense <- fastPLS:::pls_matrix_core_cpp(
+        task$X, task$Y, components, 1L, TRUE, 1L, 32L, 5L, 9501L
     )
 
     core_prediction <- fastPLS:::pls_labels_core_predict_cpp(
         core, task$Xtest, FALSE
     )$Ypred
-    legacy_prediction <- fastPLS:::pls_predict(
-        legacy, task$Xtest, FALSE
+    dense_prediction <- fastPLS:::pls_labels_core_predict_cpp(
+        dense, task$Xtest, FALSE
     )$Ypred
-    expect_equal(core$mY, legacy$mY, tolerance = 1e-13)
+    expect_equal(core$mY, dense$mY, tolerance = 1e-13)
     expect_equal(
-        as.numeric(core$R2Y), as.numeric(legacy$R2Y), tolerance = 1e-10
+        as.numeric(core$R2Y), as.numeric(dense$R2Y), tolerance = 1e-10
     )
     for (index in seq_along(components)) {
         expect_equal(
-            core$Yfit[[index]], legacy$Yfit[, , index], tolerance = 1e-9
+            compact_fitted_slice(core, index),
+            compact_fitted_slice(dense, index),
+            tolerance = 1e-9
         )
     }
-    expect_equal(core_prediction, legacy_prediction, tolerance = 1e-9)
+    expect_equal(core_prediction, dense_prediction, tolerance = 1e-9)
 
     public <- pls(
         task$X, task$labels, task$Xtest,
@@ -128,27 +147,28 @@ test_that("dependency-free double SIMPLS preserves compact predictions", {
         task$X, labels, nlevels(task$labels), components, 1L, TRUE,
         32L, 5L, 9501L
     )
-    legacy <- fastPLS:::pls_labels_cpp(
-        task$X, labels, nlevels(task$labels), components, 1L, TRUE,
-        3L, fastPLS:::.svd_method_id("rsvd"), 32L, 5L, 0, 9501L
+    dense <- fastPLS:::pls_matrix_core_cpp(
+        task$X, task$Y, components, 1L, TRUE, 3L, 32L, 5L, 9501L
     )
 
     core_prediction <- fastPLS:::pls_labels_core_predict_cpp(
         core, task$Xtest, FALSE
     )$Ypred
-    legacy_prediction <- fastPLS:::pls_predict(
-        legacy, task$Xtest, FALSE
+    dense_prediction <- fastPLS:::pls_labels_core_predict_cpp(
+        dense, task$Xtest, FALSE
     )$Ypred
-    expect_equal(core$mY, legacy$mY, tolerance = 1e-13)
+    expect_equal(core$mY, dense$mY, tolerance = 1e-13)
     expect_equal(
-        as.numeric(core$R2Y), as.numeric(legacy$R2Y), tolerance = 1e-8
+        as.numeric(core$R2Y), as.numeric(dense$R2Y), tolerance = 1e-8
     )
     for (index in seq_along(components)) {
         expect_equal(
-            core$Yfit[[index]], legacy$Yfit[, , index], tolerance = 1e-8
+            compact_fitted_slice(core, index),
+            compact_fitted_slice(dense, index),
+            tolerance = 1e-8
         )
     }
-    expect_equal(core_prediction, legacy_prediction, tolerance = 1e-8)
+    expect_equal(core_prediction, dense_prediction, tolerance = 1e-8)
 
     public <- pls(
         task$X, task$labels, task$Xtest,

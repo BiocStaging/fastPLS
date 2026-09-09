@@ -53,10 +53,6 @@ pls_model2_fast <- function(XtrainSEXP, YtrainSEXP, ncomp, scaling, fit, svd_met
     .Call(`_fastPLS_pls_model2_fast`, XtrainSEXP, YtrainSEXP, ncomp, scaling, fit, svd_method, rsvd_oversample, rsvd_power, svds_tol, seed)
 }
 
-pls_labels_cpp <- function(XtrainSEXP, labels, n_classes, ncomp, scaling, fit, method, svd_method, rsvd_oversample, rsvd_power, svds_tol, seed) {
-    .Call(`_fastPLS_pls_labels_cpp`, XtrainSEXP, labels, n_classes, ncomp, scaling, fit, method, svd_method, rsvd_oversample, rsvd_power, svds_tol, seed)
-}
-
 pls_model2_fast_gpu <- function(XtrainSEXP, YtrainSEXP, ncomp, scaling, fit, svd_method, rsvd_oversample, rsvd_power, svds_tol, seed) {
     .Call(`_fastPLS_pls_model2_fast_gpu`, XtrainSEXP, YtrainSEXP, ncomp, scaling, fit, svd_method, rsvd_oversample, rsvd_power, svds_tol, seed)
 }
