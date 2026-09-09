@@ -7764,7 +7764,7 @@ if (is.null(fit_data) || is.null(fit_data$Xdata) || is.null(fit_data$Ydata)) {
     list(pred = out, metrics = metrics)
 }
 
-.compiled_cv_response <- function(Ydata, kodama_class_codes) {
+.compiled_cv_response <- function(Ydata, kodama_class_codes, float32 = FALSE) {
     classification <- is.factor(Ydata)
     if (classification) {
         Ydata <- droplevels(Ydata)
@@ -7774,8 +7774,12 @@ if (is.null(fit_data) || is.null(fit_data$Xdata) || is.null(fit_data$Ydata)) {
         responses <- length(levels)
     } else {
         levels <- NULL
-        original <- as.matrix(Ydata)
-        matrix <- as.matrix(Ydata)
+        matrix <- if (isTRUE(float32)) {
+            .as_float32_matrix(Ydata, "Ydata")
+        } else {
+            as.matrix(Ydata)
+        }
+        original <- matrix
         responses <- ncol(matrix)
     }
     codes <- matrix(numeric(0), 0L, 0L)
@@ -7843,12 +7847,17 @@ if (is.null(fit_data) || is.null(fit_data$Xdata) || is.null(fit_data$Ydata)) {
     method <- match.arg(method, c("plssvd", "simpls", "opls", "kernelpls"))
     backend <- match.arg(backend, c("cpp", "cuda", "metal"))
     classifier <- .normalize_classifier_public(classifier)
-    Xdata <- as.matrix(Xdata)
+    float32 <- .has_float32_input(Xdata, Ydata)
+    Xdata <- if (float32) {
+        .as_float32_matrix(Xdata, "Xdata")
+    } else {
+        as.matrix(Xdata)
+    }
     if (is.null(constrain)) {
         constrain <- seq_len(nrow(Xdata))
     }
     constrain <- as.integer(as.factor(constrain))
-    response <- .compiled_cv_response(Ydata, kodama_class_codes)
+    response <- .compiled_cv_response(Ydata, kodama_class_codes, float32)
     ncomp <- as.integer(ncomp)
     if (identical(method, "plssvd")) {
         ncomp <- .cap_plssvd_ncomp(ncomp, nrow(Xdata), ncol(Xdata),
@@ -7869,6 +7878,7 @@ if (is.null(fit_data) || is.null(fit_data$Xdata) || is.null(fit_data$Ydata)) {
             1L, scaling = pmatch(scaling, c("centering", "autoscaling",
             "none"))[1L],
         solver = solver, response = response, classifier = classifier,
+        float32 = float32,
         classifier_id = switch(classifier,
             argmax = 0L, lda = 1L), xprod = .compiled_cv_xprod(xprod, backend,
             solver$name, Xdata, response$backend_responses, ncomp))
@@ -7896,7 +7906,12 @@ if (is.null(fit_data) || is.null(fit_data$Xdata) || is.null(fit_data$Ydata)) {
         )
         method_id <- if (identical(context$method, "plssvd")) 1L else 3L
         if (context$response$classification) {
-            result <- pls_cv_classification_core_cpp(
+            runner <- if (context$float32) {
+                pls_cv_classification_float32_core_cpp
+            } else {
+                pls_cv_classification_core_cpp
+            }
+            result <- runner(
                 predictors = context$X,
                 labels = labels,
                 class_count = context$response$responses,
@@ -7913,7 +7928,12 @@ if (is.null(fit_data) || is.null(fit_data$Xdata) || is.null(fit_data$Ydata)) {
                     isTRUE(controls$return_scores)
             )
         } else {
-            result <- pls_cv_regression_core_cpp(
+            runner <- if (context$float32) {
+                pls_cv_regression_float32_core_cpp
+            } else {
+                pls_cv_regression_core_cpp
+            }
+            result <- runner(
                 predictors = context$X,
                 responses = context$response$matrix,
                 folds = folds,
@@ -12933,7 +12953,11 @@ keep <- c("scaling", "method", "backend", "svd.method", "classifier", "xprod")
         c("cpu_rsvd")
     )
     float32 <- .has_float32_input(Xdata, Ydata)
-    Xdata <- as.matrix(Xdata)
+    Xdata <- if (float32) {
+        .as_float32_matrix(Xdata, "Xdata")
+    } else {
+        as.matrix(Xdata)
+    }
     if (is.null(constrain)) {
         constrain <- seq_len(nrow(Xdata))
     }
@@ -12980,7 +13004,7 @@ keep <- c("scaling", "method", "backend", "svd.method", "classifier", "xprod")
 .single_cv_run_engine <- function(context, ncomp, kfold) {
     arguments <- .single_cv_engine_arguments(context, ncomp, kfold)
     if (context$backend %in% c("cuda", "metal") ||
-        context$float32 || !identical(context$config$kernel, "linear")) {
+        !identical(context$config$kernel, "linear")) {
         arguments$backend <- context$backend
         arguments$kernel <- context$config$kernel
         arguments$gamma <- context$config$gamma

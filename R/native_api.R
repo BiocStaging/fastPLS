@@ -43,6 +43,20 @@ pls_cv_classification_core_cpp <- function(
     )
 }
 
+pls_cv_classification_float32_core_cpp <- function(
+    predictors, labels, class_count, folds, components, scaling, method,
+    classifier, oversample, power, seed, store_predictions = TRUE,
+    store_scores = TRUE
+) {
+    result <- .Call(
+        "_fastPLS_pls_cv_classification_float32_core_cpp", predictors,
+        labels, class_count, folds, components, scaling, method, classifier,
+        oversample, power, seed, store_predictions, store_scores,
+        PACKAGE = "fastPLS"
+    )
+    result
+}
+
 pls_cv_regression_core_cpp <- function(
     predictors, responses, folds, components, scaling, method, metric,
     oversample, power, seed, store_predictions = TRUE
@@ -52,6 +66,18 @@ pls_cv_regression_core_cpp <- function(
         components, scaling, method, metric, oversample, power, seed,
         store_predictions, PACKAGE = "fastPLS"
     )
+}
+
+pls_cv_regression_float32_core_cpp <- function(
+    predictors, responses, folds, components, scaling, method, metric,
+    oversample, power, seed, store_predictions = TRUE
+) {
+    result <- .Call(
+        "_fastPLS_pls_cv_regression_float32_core_cpp", predictors,
+        responses, folds, components, scaling, method, metric, oversample,
+        power, seed, store_predictions, PACKAGE = "fastPLS"
+    )
+    result
 }
 
 pls_labels_core_cpp <- function(
