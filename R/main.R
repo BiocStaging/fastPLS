@@ -5048,7 +5048,14 @@ get("cuda_matrix_multiply", envir = asNamespace("fastPLS"), inherits = FALSE)(
     fit_args <- .float32_cpp_fit_args(Xtrain, response, ncomp, scaling, method,
         backend, svd.method, rsvd_oversample, rsvd_power,
         seed, fit)
-    raw_model <- if (use_label_products) {
+    raw_model <- if (use_label_products && identical(backend, "cpu") &&
+        identical(method, "simpls") && !isTRUE(fit)) {
+        pls_float32_labels_core_cpp(
+            fit_args[[1L]], fit_args[[2L]], yprep$n_classes,
+            fit_args[[3L]], fit_args[[4L]], fit_args[[9L]], fit_args[[10L]],
+            fit_args[[11L]]
+        )
+    } else if (use_label_products) {
         do.call(pls_float32_labels_cpp, append(fit_args, yprep$n_classes,
             after = 2L))
     }

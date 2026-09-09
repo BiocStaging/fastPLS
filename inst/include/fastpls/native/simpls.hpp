@@ -3,6 +3,7 @@
 #ifndef FASTPLS_NATIVE_SIMPLS_HPP
 #define FASTPLS_NATIVE_SIMPLS_HPP
 #include <fastpls/core/classification.hpp>
+#include <fastpls/core/simpls.hpp>
 #include <fastpls/native/direction.hpp>
 #include <chrono>
 #include <functional>
@@ -47,20 +48,13 @@ struct SimplsModel {
 
 inline int candidate_block_size(int remaining, int p, int q,
                                 bool classification = false, int n = 0, int maximum = 8) {
-  const double work = static_cast<double>(std::max(n, 0)) *
-    static_cast<double>(std::max(p, 0)) * static_cast<double>(std::max(q, 0));
-  if (q <= 1 || remaining < 4 || work < 5.0e8) return 1;
-  if (classification && q <= 2048) {
-    return std::max(1, std::min({maximum, remaining, p, q}));
-  }
-  const double crosscov_elements =
-    static_cast<double>(std::max(p, 0)) * static_cast<double>(std::max(q, 0));
-  if (!classification && crosscov_elements > 64.0 * 1024.0 * 1024.0) {
-    // A bounded fresh block amortizes the response-wide range calculation;
-    // components are still accepted through sequential SIMPLS updates.
-    return std::max(1, std::min({8, maximum, remaining, p, q}));
-  }
-  return 1;
+  return static_cast<int>(core::simpls_candidate_block_size(
+    static_cast<std::size_t>(std::max(remaining, 0)),
+    static_cast<std::size_t>(std::max(p, 0)),
+    static_cast<std::size_t>(std::max(q, 0)), classification,
+    static_cast<std::size_t>(std::max(n, 0)),
+    static_cast<std::size_t>(std::max(maximum, 1))
+  ));
 }
 
 template<typename Scalar>

@@ -30,10 +30,11 @@ struct LabelCrossprodResult {
 };
 
 template<class T, class Label>
-LabelCrossprodResult<T> scaled_label_crossprod(
-    ConstMatrixView<T> predictors, const Label* labels,
+LabelCrossprodResult<T> scaled_label_crossprod_impl(
+    ConstMatrixView<T> predictors, T* scaled_predictors,
+    std::size_t scaled_leading_dimension, const Label* labels,
     std::size_t label_count, std::size_t class_count,
-    PredictorScaling scaling) {
+    PredictorScaling scaling, bool form_crossprod) {
   if (predictors.data() == nullptr || labels == nullptr ||
       predictors.empty() || predictors.rows() != label_count ||
       class_count < 2) {
@@ -58,6 +59,11 @@ LabelCrossprodResult<T> scaled_label_crossprod(
     result.class_counts[label] += T(1);
   }
   for (std::size_t response = 0; response < class_count; ++response) {
+    if (result.class_counts[response] == T(0)) {
+      throw std::invalid_argument(
+        "fastPLS scaled label cross-product contains an empty class"
+      );
+    }
     result.response_mean[response] = result.class_counts[response] /
       static_cast<T>(predictors.rows());
   }
@@ -65,33 +71,36 @@ LabelCrossprodResult<T> scaled_label_crossprod(
   std::vector<T> class_sums(class_count);
   for (std::size_t predictor = 0;
        predictor < predictors.columns(); ++predictor) {
-    T sum = T(0);
-    T sum_squares = T(0);
-    for (std::size_t sample = 0; sample < predictors.rows(); ++sample) {
-      const T value = predictors(sample, predictor);
-      sum += value;
-      sum_squares += value * value;
-    }
     if (scaling != PredictorScaling::none) {
+      T sum = T(0);
+      T sum_squares = T(0);
+      for (std::size_t sample = 0; sample < predictors.rows(); ++sample) {
+        const T value = predictors(sample, predictor);
+        sum += value;
+        sum_squares += value * value;
+      }
       result.predictor_center[predictor] =
         sum / static_cast<T>(predictors.rows());
-    }
-    if (scaling == PredictorScaling::autoscaling) {
-      const T centered_sum_squares = std::max(
-        T(0), sum_squares - static_cast<T>(predictors.rows()) *
-          result.predictor_center[predictor] *
-          result.predictor_center[predictor]
-      );
-      T standard_deviation = std::sqrt(
-        centered_sum_squares /
-        static_cast<T>(std::max<std::size_t>(predictors.rows() - 1, 1))
-      );
-      if (!std::isfinite(standard_deviation) || standard_deviation <= T(0)) {
-        standard_deviation = T(1);
+      if (scaling == PredictorScaling::autoscaling) {
+        const T centered_sum_squares = std::max(
+          T(0), sum_squares - static_cast<T>(predictors.rows()) *
+            result.predictor_center[predictor] *
+            result.predictor_center[predictor]
+        );
+        T standard_deviation = std::sqrt(
+          centered_sum_squares /
+          static_cast<T>(std::max<std::size_t>(predictors.rows() - 1, 1))
+        );
+        if (!std::isfinite(standard_deviation) || standard_deviation <= T(0)) {
+          standard_deviation = T(1);
+        }
+        result.predictor_scale[predictor] = standard_deviation;
       }
-      result.predictor_scale[predictor] = standard_deviation;
     }
 
+    if (scaling == PredictorScaling::none && !form_crossprod) {
+      continue;
+    }
     std::fill(class_sums.begin(), class_sums.end(), T(0));
     T total = T(0);
     for (std::size_t sample = 0; sample < predictors.rows(); ++sample) {
@@ -100,12 +109,21 @@ LabelCrossprodResult<T> scaled_label_crossprod(
         (predictors(sample, predictor) -
          result.predictor_center[predictor]) /
         result.predictor_scale[predictor];
-      class_sums[label] += standardized;
-      total += standardized;
+      if (scaled_predictors != nullptr &&
+          scaling != PredictorScaling::none) {
+        scaled_predictors[sample + predictor * scaled_leading_dimension] =
+          standardized;
+      }
+      if (form_crossprod) {
+        class_sums[label] += standardized;
+        total += standardized;
+      }
     }
-    for (std::size_t response = 0; response < class_count; ++response) {
-      result.crossprod(predictor, response) = class_sums[response] -
-        total * result.response_mean[response];
+    if (form_crossprod) {
+      for (std::size_t response = 0; response < class_count; ++response) {
+        result.crossprod(predictor, response) = class_sums[response] -
+          total * result.response_mean[response];
+      }
     }
   }
   return result;
@@ -113,12 +131,107 @@ LabelCrossprodResult<T> scaled_label_crossprod(
 
 template<class T, class Label>
 LabelCrossprodResult<T> scaled_label_crossprod(
+    ConstMatrixView<T> predictors, const Label* labels,
+    std::size_t label_count, std::size_t class_count,
+    PredictorScaling scaling) {
+  return scaled_label_crossprod_impl(
+    predictors, static_cast<T*>(nullptr), 0, labels, label_count,
+    class_count, scaling, true
+  );
+}
+
+template<class T, class Label>
+LabelCrossprodResult<T> prepare_scaled_label_crossprod(
     MatrixView<T> predictors, const Label* labels,
     std::size_t label_count, std::size_t class_count,
     PredictorScaling scaling) {
-  return scaled_label_crossprod(
-    ConstMatrixView<T>(predictors), labels, label_count, class_count, scaling
+  return scaled_label_crossprod_impl(
+    ConstMatrixView<T>(predictors), predictors.data(),
+    predictors.leading_dimension(), labels, label_count, class_count, scaling,
+    true
   );
+}
+
+template<class T, class Label, class Backend>
+LabelCrossprodResult<T> prepare_scaled_label_crossprod(
+    MatrixView<T> predictors, const Label* labels,
+    std::size_t label_count, std::size_t class_count,
+    PredictorScaling scaling, Backend& backend) {
+  struct LabelRun {
+    std::size_t begin;
+    std::size_t length;
+    std::size_t label;
+  };
+  std::vector<LabelRun> runs;
+  if (label_count > 0) {
+    std::size_t begin = 0;
+    for (std::size_t row = 1; row <= label_count; ++row) {
+      if (row == label_count || labels[row] != labels[begin]) {
+        runs.push_back({
+          begin, row - begin, static_cast<std::size_t>(labels[begin])
+        });
+        begin = row;
+      }
+    }
+  }
+  if (runs.empty() ||
+      runs.size() > std::max<std::size_t>(1024, 4 * class_count)) {
+    return prepare_scaled_label_crossprod(
+      predictors, labels, label_count, class_count, scaling
+    );
+  }
+
+  auto result = scaled_label_crossprod_impl(
+    ConstMatrixView<T>(predictors), predictors.data(),
+    predictors.leading_dimension(), labels, label_count, class_count, scaling,
+    false
+  );
+  std::fill(
+    result.crossprod.data(), result.crossprod.data() + result.crossprod.size(),
+    T(0)
+  );
+  std::size_t maximum_run = 0;
+  for (const auto& run : runs) maximum_run = std::max(maximum_run, run.length);
+  Matrix<T> ones(maximum_run, 1);
+  std::fill(ones.data(), ones.data() + ones.size(), T(1));
+  Matrix<T> reduction(predictors.columns(), 1);
+  std::vector<unsigned char> initialized(class_count, 0);
+  for (const auto& run : runs) {
+    if (run.label >= class_count) {
+      throw std::invalid_argument(
+        "fastPLS scaled label cross-product contains an invalid class index"
+      );
+    }
+    backend.gemm(
+      ConstMatrixView<T>(
+        predictors.data() + run.begin, run.length, predictors.columns(),
+        predictors.leading_dimension()
+      ),
+      ConstMatrixView<T>(ones.data(), run.length, 1, maximum_run),
+      true, false, reduction.view()
+    );
+    for (std::size_t predictor = 0;
+         predictor < predictors.columns(); ++predictor) {
+      if (initialized[run.label]) {
+        result.crossprod(predictor, run.label) += reduction(predictor, 0);
+      } else {
+        result.crossprod(predictor, run.label) = reduction(predictor, 0);
+      }
+    }
+    initialized[run.label] = 1;
+  }
+  for (std::size_t predictor = 0;
+       predictor < predictors.columns(); ++predictor) {
+    T total = T(0);
+    for (std::size_t response = 0; response < class_count; ++response) {
+      total += result.crossprod(predictor, response);
+    }
+    for (std::size_t response = 0; response < class_count; ++response) {
+      result.crossprod(predictor, response) -=
+        total * result.response_mean[response];
+    }
+  }
+  return result;
 }
 
 template<class T, class Label>

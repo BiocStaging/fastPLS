@@ -8,11 +8,13 @@
 #include <fastpls/core/kernels.hpp>
 #include <fastpls/core/lda.hpp>
 #include <fastpls/core/matrix.hpp>
+#include <fastpls/core/simpls.hpp>
 #include <fastpls/core/statistics.hpp>
 
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
+#include <cstdlib>
 #include <cstring>
 #include <exception>
 #include <stdexcept>
@@ -28,6 +30,18 @@ fastpls::core::RSVDAuditSummary current_rsvd_audit_summary();
 }
 
 namespace {
+
+int environment_integer(const char* name, int fallback, int minimum,
+                        int maximum) {
+  const char* value = std::getenv(name);
+  if (value == nullptr || *value == '\0') return fallback;
+  char* end = nullptr;
+  const long parsed = std::strtol(value, &end, 10);
+  if (end == value || *end != '\0') return fallback;
+  return static_cast<int>(std::max<long>(
+    minimum, std::min<long>(maximum, parsed)
+  ));
+}
 
 float decode_float32(const int bits) {
   static_assert(sizeof(float) == sizeof(std::int32_t),
@@ -213,6 +227,32 @@ SEXP numeric_matrix(const fastpls::core::Matrix<double>& values) {
   );
   std::copy(values.data(), values.data() + values.size(), REAL(result));
   return result;
+}
+
+SEXP simpls_timing(const fastpls::core::SimplsTiming& timing) {
+  constexpr int count = 11;
+  SEXP output = PROTECT(Rf_allocVector(VECSXP, count));
+  const double values[count] = {
+    timing.setup, 0.0, 0.0, 0.0, timing.total, timing.direction,
+    timing.component_updates, 0.0, 0.0, timing.candidate_geometry,
+    timing.total
+  };
+  const char* labels[count] = {
+    "preprocess_crosscov_sec", "response_crosscov_sec",
+    "crossprod_cache_sec", "right_gram_sec", "estimator_sec",
+    "direction_sec", "component_update_sec", "coefficient_path_sec",
+    "fitted_values_sec", "candidate_geometry_sec", "cpp_total_sec"
+  };
+  for (int index = 0; index < count; ++index) {
+    SET_VECTOR_ELT(output, index, Rf_ScalarReal(values[index]));
+  }
+  SEXP names = PROTECT(Rf_allocVector(STRSXP, count));
+  for (int index = 0; index < count; ++index) {
+    SET_STRING_ELT(names, index, Rf_mkChar(labels[index]));
+  }
+  Rf_setAttrib(output, R_NamesSymbol, names);
+  UNPROTECT(2);
+  return output;
 }
 
 fastpls::core::Matrix<float> backend_gemm_f32(
@@ -1485,4 +1525,152 @@ extern "C" SEXP _fastPLS_label_crossprod_scaled_cpp(SEXP predictors,
     Rf_error("Unknown error in label-aware cross-product");
   }
   return R_NilValue;
+}
+
+extern "C" SEXP _fastPLS_pls_float32_labels_core_cpp(
+    SEXP predictors, SEXP labels, SEXP class_count, SEXP components,
+    SEXP scaling, SEXP oversample, SEXP power, SEXP seed) {
+  return translate_exceptions("float32 core SIMPLS fitting", [&] {
+    if (TYPEOF(labels) != INTSXP || TYPEOF(components) != INTSXP ||
+        XLENGTH(components) < 1) {
+      throw std::invalid_argument(
+        "float32 core SIMPLS requires integer labels and component counts"
+      );
+    }
+    fastpls::core::Matrix<float> x =
+      float_matrix_from_s4(predictors, "Xtrain");
+    const int classes = Rf_asInteger(class_count);
+    const int scaling_code = Rf_asInteger(scaling);
+    if (classes < 2 || scaling_code < 1 || scaling_code > 3 ||
+        XLENGTH(labels) != static_cast<R_xlen_t>(x.rows())) {
+      throw std::invalid_argument(
+        "float32 core SIMPLS training dimensions or controls are invalid"
+      );
+    }
+    std::vector<std::size_t> encoded(x.rows());
+    for (std::size_t row = 0; row < x.rows(); ++row) {
+      const int value = INTEGER(labels)[row] - 1;
+      if (value < 0 || value >= classes) {
+        throw std::invalid_argument(
+          "float32 core SIMPLS labels must be encoded as 1..n_classes"
+        );
+      }
+      encoded[row] = static_cast<std::size_t>(value);
+    }
+    fastpls::runtime::CpuLinearAlgebraF32 backend;
+    const auto prepared = fastpls::core::prepare_scaled_label_crossprod(
+      x.view(), encoded.data(), encoded.size(),
+      static_cast<std::size_t>(classes),
+      static_cast<fastpls::core::PredictorScaling>(scaling_code), backend
+    );
+
+    ProtectStack protect;
+    SEXP effective_components = protect.add(Rf_duplicate(components));
+    const int rank_cap = static_cast<int>(std::min(
+      x.columns(), std::max<std::size_t>(x.rows() - 1, 1)
+    ));
+    int maximum_components = 1;
+    for (R_xlen_t index = 0; index < XLENGTH(effective_components); ++index) {
+      const int value = INTEGER(effective_components)[index];
+      if (value == NA_INTEGER) {
+        throw std::invalid_argument("ncomp cannot contain missing values");
+      }
+      INTEGER(effective_components)[index] = std::max(
+        1, std::min(value, rank_cap)
+      );
+      maximum_components = std::max(
+        maximum_components, INTEGER(effective_components)[index]
+      );
+    }
+
+    fastpls::core::SimplsControls controls;
+    controls.components = static_cast<std::size_t>(maximum_components);
+    controls.maximum_block = fastpls::core::simpls_candidate_block_size(
+      controls.components, x.columns(), static_cast<std::size_t>(classes),
+      true, x.rows(), 64
+    );
+    const int maximum_predictors = environment_integer(
+      "FASTPLS_FAST_CROSSPROD_MAX_P",
+#ifdef FASTPLS_USE_ACCELERATE
+      2048,
+#else
+      512,
+#endif
+      16, 65536
+    );
+    const int minimum_components = environment_integer(
+      "FASTPLS_FAST_CROSSPROD_MIN_NCOMP", 20, 1, 1024
+    );
+    const int minimum_ratio = environment_integer(
+      "FASTPLS_FAST_CROSSPROD_MIN_N_TO_P_RATIO", 8, 1, 1024
+    );
+    controls.cache_predictor_crossprod =
+      maximum_components >= minimum_components && x.columns() <= x.rows() &&
+      x.rows() >= x.columns() * static_cast<std::size_t>(minimum_ratio) &&
+      x.columns() <= static_cast<std::size_t>(maximum_predictors);
+    controls.batch_candidate_geometry =
+      controls.maximum_block > 1 && !controls.cache_predictor_crossprod;
+    controls.reorthogonalize = false;
+    controls.store_scores = true;
+    controls.use_right_gram = true;
+    controls.phase_timing = environment_integer(
+      "FASTPLS_BENCH_PHASE_TIMING", 0, 0, 1
+    ) == 1;
+    controls.rsvd.oversample = Rf_asInteger(oversample);
+    controls.rsvd.power = Rf_asInteger(power);
+    controls.rsvd.seed = static_cast<unsigned int>(Rf_asInteger(seed));
+
+    fastpls::core::SimplsWorkspace<float> workspace;
+    const auto model = fastpls::core::fit_simpls_preprocessed<float>(
+      x.view(), prepared.crossprod.view(), controls, backend, workspace
+    );
+    if (model.completed_components < controls.components) {
+      throw std::runtime_error(
+        "float32 core SIMPLS returned fewer components than requested"
+      );
+    }
+
+    const int field_count = controls.phase_timing ? 15 : 14;
+    SEXP output = protect.add(Rf_allocVector(VECSXP, field_count));
+    SEXP names = protect.add(Rf_allocVector(STRSXP, field_count));
+    const char* field_names[15] = {
+      "P", "R", "Q", "Ttrain", "mX", "vX", "mY", "p", "m",
+      "ncomp", "Yfit", "R2Y", "pls_method", "xprod_mode",
+      "benchmark_phase_timing"
+    };
+    for (int index = 0; index < field_count; ++index) {
+      SET_STRING_ELT(names, index, Rf_mkChar(field_names[index]));
+    }
+    SET_VECTOR_ELT(output, 0, R_NilValue);
+    SET_VECTOR_ELT(output, 1, float_bits_matrix(model.weights));
+    SET_VECTOR_ELT(output, 2, float_bits_matrix(model.response_loadings));
+    SET_VECTOR_ELT(output, 3, float_bits_matrix(model.scores));
+    SET_VECTOR_ELT(output, 4, float_bits_matrix(row_matrix(
+      prepared.predictor_center
+    )));
+    SET_VECTOR_ELT(output, 5, float_bits_matrix(row_matrix(
+      prepared.predictor_scale
+    )));
+    SET_VECTOR_ELT(output, 6, float_bits_matrix(row_matrix(
+      prepared.response_mean
+    )));
+    SET_VECTOR_ELT(output, 7, Rf_ScalarInteger(
+      static_cast<int>(x.columns())
+    ));
+    SET_VECTOR_ELT(output, 8, Rf_ScalarInteger(classes));
+    SET_VECTOR_ELT(output, 9, effective_components);
+    SET_VECTOR_ELT(output, 10, R_NilValue);
+    SEXP r2 = protect.add(Rf_allocVector(REALSXP, XLENGTH(components)));
+    std::fill(REAL(r2), REAL(r2) + XLENGTH(r2), NA_REAL);
+    SET_VECTOR_ELT(output, 11, r2);
+    SET_VECTOR_ELT(output, 12, Rf_mkString("simpls"));
+    SET_VECTOR_ELT(
+      output, 13, Rf_mkString("float32_label_class_sums_blocked")
+    );
+    if (controls.phase_timing) {
+      SET_VECTOR_ELT(output, 14, simpls_timing(model.timing));
+    }
+    Rf_setAttrib(output, R_NamesSymbol, names);
+    return output;
+  });
 }

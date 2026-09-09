@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: MIT
 #include <fastpls/core.hpp>
 
+#include "reference_backend.hpp"
+
 #include <cassert>
 #include <cmath>
 #include <cstddef>
@@ -30,7 +32,8 @@ int main() {
   }
 
   const auto scaled = fastpls::core::scaled_label_crossprod(
-    x.view(), labels, 4, 2, fastpls::core::PredictorScaling::autoscaling
+    fastpls::core::ConstMatrixView<float>(x.view()), labels, 4, 2,
+    fastpls::core::PredictorScaling::autoscaling
   );
   assert(scaled.crossprod.rows() == 3);
   assert(scaled.crossprod.columns() == 2);
@@ -40,6 +43,31 @@ int main() {
   assert(std::abs(scaled.class_counts[1] - 2.0f) < 1e-6f);
   assert(std::abs(scaled.crossprod(0, 0) + 0.7745967f) < 1e-6f);
   assert(std::abs(scaled.crossprod(0, 1) - 0.7745967f) < 1e-6f);
+
+  fastpls::core::Matrix<double> x_double(4, 1);
+  for (std::size_t row = 0; row < x_double.rows(); ++row) {
+    x_double(row, 0) = static_cast<double>(1 + row);
+  }
+  const fastpls::core::Matrix<double>& x_double_const = x_double;
+  const auto centered_double = fastpls::core::scaled_label_crossprod(
+    x_double_const.view(), labels, 4, 2,
+    fastpls::core::PredictorScaling::centering
+  );
+  assert(std::abs(centered_double.crossprod(0, 0) + 1.0) < 1e-15);
+  assert(std::abs(centered_double.crossprod(0, 1) - 1.0) < 1e-15);
+
+  fastpls::core::Matrix<float> x_grouped(4, 1);
+  for (std::size_t row = 0; row < x_grouped.rows(); ++row) {
+    x_grouped(row, 0) = static_cast<float>(1 + row);
+  }
+  const std::size_t grouped_labels[] = {0, 0, 1, 1};
+  ReferenceBackend<float> reference_backend;
+  const auto grouped = fastpls::core::prepare_scaled_label_crossprod(
+    x_grouped.view(), grouped_labels, 4, 2,
+    fastpls::core::PredictorScaling::none, reference_backend
+  );
+  assert(std::abs(grouped.crossprod(0, 0) + 2.0f) < 1e-6f);
+  assert(std::abs(grouped.crossprod(0, 1) - 2.0f) < 1e-6f);
 
   fastpls::core::Matrix<double> scores(2, 3);
   scores(0, 0) = 0.2;

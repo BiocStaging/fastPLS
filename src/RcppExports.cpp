@@ -887,6 +887,7 @@ static const R_CallMethodDef CallEntries[] = {
     {"_fastPLS_kernel_matrix_float32_cpp",                (DL_FUNC) &_fastPLS_kernel_matrix_float32_cpp,                 7},
     {"_fastPLS_opls_apply_filter_float32_cpp",            (DL_FUNC) &_fastPLS_opls_apply_filter_float32_cpp,             6},
     {"_fastPLS_opls_apply_filter_cpp",                    (DL_FUNC) &_fastPLS_opls_apply_filter_cpp,                     5},
+    {"_fastPLS_pls_float32_labels_core_cpp",             (DL_FUNC) &_fastPLS_pls_float32_labels_core_cpp,              8},
     {NULL, NULL, 0}
 };
 

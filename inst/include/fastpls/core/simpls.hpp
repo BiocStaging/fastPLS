@@ -38,6 +38,27 @@ struct SimplsTiming {
   double total = 0;
 };
 
+inline std::size_t simpls_candidate_block_size(
+    std::size_t remaining, std::size_t predictors, std::size_t responses,
+    bool classification, std::size_t samples, std::size_t maximum = 8) {
+  const double work = static_cast<double>(samples) *
+    static_cast<double>(predictors) * static_cast<double>(responses);
+  if (responses <= 1 || remaining < 4 || work < 5.0e8) return 1;
+  if (classification && responses <= 2048) {
+    return std::max<std::size_t>(
+      1, std::min({maximum, remaining, predictors, responses})
+    );
+  }
+  const double crosscov_elements = static_cast<double>(predictors) *
+    static_cast<double>(responses);
+  if (!classification && crosscov_elements > 64.0 * 1024.0 * 1024.0) {
+    return std::max<std::size_t>(
+      1, std::min({std::size_t(8), maximum, remaining, predictors, responses})
+    );
+  }
+  return 1;
+}
+
 template<class T>
 struct SimplsModel {
   Matrix<T> weights;

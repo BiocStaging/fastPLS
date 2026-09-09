@@ -98,6 +98,10 @@ SEXP _fastPLS_center_kernel_test_cpp(SEXP kernel, SEXP training_means,
                                      SEXP training_grand_mean);
 SEXP _fastPLS_label_crossprod_scaled_cpp(SEXP predictors, SEXP labels,
                                          SEXP class_count, SEXP scaling);
+SEXP _fastPLS_pls_float32_labels_core_cpp(
+  SEXP predictors, SEXP labels, SEXP class_count, SEXP components,
+  SEXP scaling, SEXP oversample, SEXP power, SEXP seed
+);
 }
 
 #endif
