@@ -4,6 +4,7 @@ test_that("metal is the fixed operation-split float32 PLS backend", {
         "metal"
     )
     expect_identical(fastPLS:::.float32_backend_id("metal"), 3L)
+    expect_identical(fastPLS:::.float32_product_backend_id("metal"), 2L)
     expect_identical(
         fastPLS:::.resolve_classifier_for_backend("lda", "metal"),
         "lda_cpp"

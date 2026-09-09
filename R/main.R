@@ -4832,6 +4832,10 @@ get("cuda_matrix_multiply", envir = asNamespace("fastPLS"), inherits = FALSE)(
     switch(backend, cpu = 0L, cuda = 1L, metal = 3L)
 }
 
+.float32_product_backend_id <- function(backend) {
+    switch(backend, cpu = 0L, cuda = 1L, metal = 2L)
+}
+
 .float32_svd_id <- function(svd.method) {
     if (!.normalize_svd_method(svd.method) %in%
         c("cpu_rsvd", "cuda_rsvd", "metal_rsvd")) {
@@ -5211,7 +5215,7 @@ get("cuda_matrix_multiply", envir = asNamespace("fastPLS"), inherits = FALSE)(
         gamma,
         as.integer(degree),
         coef0,
-        .float32_backend_id(matrix_backend)
+        .float32_product_backend_id(matrix_backend)
     )
     centered <- center_kernel_train_float32_cpp(.float32_from_bits(raw$K))
     list(
@@ -6240,7 +6244,7 @@ predict.fastPLSKernel <- function(object, newdata, Ytest = NULL, proj = FALSE,
         Kraw <- kernel_matrix_float32_cpp(
             Xnew, object$Xref, object$kernel_id,
             object$gamma, object$degree, object$coef0,
-            .float32_backend_id(kernel_backend)
+            .float32_product_backend_id(kernel_backend)
         )
         Ktest <- .float32_from_bits(Kraw$K)
         centered_raw <- center_kernel_test_float32_cpp(Ktest,
@@ -6408,11 +6412,7 @@ predict.fastPLSOpls <- function(object, newdata, Ytest = NULL, proj = FALSE,
             "^float32_", "",
             object$opls_filter_engine %||% object$opls_engine
         )
-        filter_backend <- if (identical(engine, "metal")) {
-            2L
-        } else {
-            .float32_backend_id(engine)
-        }
+        filter_backend <- .float32_product_backend_id(engine)
         raw <- opls_apply_filter_float32_cpp(
             .as_float32_matrix(newdata, "newdata"),
             object$mX, object$vX, object$W_orth, object$P_orth,
