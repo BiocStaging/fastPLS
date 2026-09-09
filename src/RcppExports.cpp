@@ -290,21 +290,6 @@ BEGIN_RCPP
     return rcpp_result_gen;
 END_RCPP
 }
-// pls_class_predict_topk_cpp
-List pls_class_predict_topk_cpp(List& model, arma::mat Xtest, int top_k, bool proj, int block_size);
-RcppExport SEXP _fastPLS_pls_class_predict_topk_cpp(SEXP modelSEXP, SEXP XtestSEXP, SEXP top_kSEXP, SEXP projSEXP, SEXP block_sizeSEXP) {
-BEGIN_RCPP
-    Rcpp::RObject rcpp_result_gen;
-    Rcpp::RNGScope rcpp_rngScope_gen;
-    Rcpp::traits::input_parameter< List& >::type model(modelSEXP);
-    Rcpp::traits::input_parameter< arma::mat >::type Xtest(XtestSEXP);
-    Rcpp::traits::input_parameter< int >::type top_k(top_kSEXP);
-    Rcpp::traits::input_parameter< bool >::type proj(projSEXP);
-    Rcpp::traits::input_parameter< int >::type block_size(block_sizeSEXP);
-    rcpp_result_gen = Rcpp::wrap(pls_class_predict_topk_cpp(model, Xtest, top_k, proj, block_size));
-    return rcpp_result_gen;
-END_RCPP
-}
 // pls_class_predict_topk_cuda
 List pls_class_predict_topk_cuda(List& model, arma::mat Xtest, int top_k, bool proj);
 RcppExport SEXP _fastPLS_pls_class_predict_topk_cuda(SEXP modelSEXP, SEXP XtestSEXP, SEXP top_kSEXP, SEXP projSEXP) {
@@ -718,7 +703,6 @@ static const R_CallMethodDef CallEntries[] = {
     {"_fastPLS_pls_predict", (DL_FUNC) &_fastPLS_pls_predict, 3},
     {"_fastPLS_pls_predict_flash_cuda", (DL_FUNC) &_fastPLS_pls_predict_flash_cuda, 3},
     {"_fastPLS_pls_predict_flash_cpu", (DL_FUNC) &_fastPLS_pls_predict_flash_cpu, 4},
-    {"_fastPLS_pls_class_predict_topk_cpp", (DL_FUNC) &_fastPLS_pls_class_predict_topk_cpp, 5},
     {"_fastPLS_pls_class_predict_topk_cuda", (DL_FUNC) &_fastPLS_pls_class_predict_topk_cuda, 4},
     {"_fastPLS_pls_model1", (DL_FUNC) &_fastPLS_pls_model1, 10},
     {"_fastPLS_pls_model1_rsvd_xprod_precision", (DL_FUNC) &_fastPLS_pls_model1_rsvd_xprod_precision, 10},

@@ -69,10 +69,6 @@ pls_predict_flash_cpu <- function(model, XtestSEXP, proj, block_size) {
     .Call(`_fastPLS_pls_predict_flash_cpu`, model, XtestSEXP, proj, block_size)
 }
 
-pls_class_predict_topk_cpp <- function(model, Xtest, top_k, proj, block_size) {
-    .Call(`_fastPLS_pls_class_predict_topk_cpp`, model, Xtest, top_k, proj, block_size)
-}
-
 pls_class_predict_topk_cuda <- function(model, Xtest, top_k, proj) {
     .Call(`_fastPLS_pls_class_predict_topk_cuda`, model, Xtest, top_k, proj)
 }
