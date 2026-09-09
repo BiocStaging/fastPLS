@@ -26,7 +26,6 @@
 #include <fastpls/core/simpls.hpp>
 #include <fastpls/core/statistics.hpp>
 #include <fastpls/native/simpls.hpp>
-#include <fastpls/native/opls.hpp>
 #include <fastpls/native/kernels.hpp>
 #include <fastpls/native/plssvd.hpp>
 #include <fastpls/native/operator_rsvd.hpp>
@@ -1653,198 +1652,11 @@ Rcpp::List fmat_list_to_bits(const std::vector<arma::fmat>& xs, const arma::ivec
   return out;
 }
 
-arma::fmat float32_backend_matmul(const arma::fmat& A,
-                                  const arma::fmat& B,
-                                  const int backend,
-                                  const bool transpose_left = false,
-                                  const bool transpose_right = false) {
-  if (backend == 1) {
-    return fastpls_svd::cuda_matrix_multiply_float(
-      A, B, transpose_left, transpose_right
-    );
-  }
-  if (backend == 2 || backend == 3) {
-    return fastpls_svd::metal_matrix_multiply_float(
-      A, B, transpose_left, transpose_right
-    );
-  }
-  if (backend != 0) {
-    Rcpp::stop("float32 matrix multiplication requires backend 0, 1, or 2");
-  }
-  if (transpose_left && transpose_right) return A.t() * B.t();
-  if (transpose_left) return A.t() * B;
-  if (transpose_right) return A * B.t();
-  return A * B;
-}
-
 #endif
 
 } // namespace
 
 #ifndef _WIN32
-
-// [[Rcpp::export]]
-Rcpp::List opls_filter_float32_cpp(SEXP XSEXP,
-                                   SEXP YSEXP,
-                                   int north,
-                                   int scaling,
-                                   int backend,
-                                   int svd_method,
-                                   int rsvd_oversample,
-                                   int rsvd_power,
-                                   int seed) {
-  arma::fmat X = float32_bits_to_fmat(XSEXP, "X");
-  arma::fmat Y = float32_bits_to_fmat(YSEXP, "Y");
-  if (X.n_rows != Y.n_rows) {
-    Rcpp::stop("X and Y must have the same number of rows");
-  }
-  if (north < 0) {
-    Rcpp::stop("north must be >= 0");
-  }
-
-  arma::frowvec mX(X.n_cols, arma::fill::zeros);
-  if (scaling < 3) {
-    mX = arma::mean(X, 0);
-    X.each_row() -= mX;
-  }
-  arma::frowvec vX(X.n_cols, arma::fill::ones);
-  if (scaling == 2) {
-    vX = float_col_sd(X);
-    X.each_row() /= vX;
-  }
-  const arma::frowvec mY = arma::mean(Y, 0);
-  Y.each_row() -= mY;
-
-  arma::fmat W_orth(X.n_cols, static_cast<arma::uword>(north), arma::fill::zeros);
-  arma::fmat P_orth(X.n_cols, static_cast<arma::uword>(north), arma::fill::zeros);
-  int used = 0;
-  for (int component = 0; component < north; ++component) {
-    const arma::fmat S = float32_backend_matmul(X, Y, backend, true, false);
-    Rcpp::List sv = truncated_svd_float32_backend(
-      S,
-      1,
-      backend,
-      svd_method,
-      rsvd_oversample,
-      rsvd_power,
-      static_cast<unsigned int>(seed + component),
-      true
-    );
-    const arma::fmat U = Rcpp::as<arma::fmat>(sv["u"]);
-    if (U.n_cols < 1) break;
-    arma::fvec w = U.col(0);
-    const float w_norm = arma::norm(w, 2);
-    if (!std::isfinite(w_norm) || w_norm <= 0.0f) break;
-    w /= w_norm;
-
-    arma::fmat w_matrix(w.n_elem, 1);
-    w_matrix.col(0) = w;
-    const arma::fvec t = float32_backend_matmul(
-      X, w_matrix, backend, false, false
-    ).col(0);
-    const float t_ss = arma::dot(t, t);
-    if (!std::isfinite(t_ss) || t_ss <= 0.0f) break;
-    arma::fmat t_matrix(t.n_elem, 1);
-    t_matrix.col(0) = t;
-    const arma::fvec p = float32_backend_matmul(
-      X, t_matrix, backend, true, false
-    ).col(0) / t_ss;
-
-    const float ww = arma::dot(w, w);
-    arma::fvec w_orth = p - w * (arma::dot(w, p) / ww);
-    const float wo_norm = arma::norm(w_orth, 2);
-    if (!std::isfinite(wo_norm) || wo_norm <= 0.0f) break;
-    w_orth /= wo_norm;
-    arma::fmat wo_matrix(w_orth.n_elem, 1);
-    wo_matrix.col(0) = w_orth;
-    const arma::fvec t_orth = float32_backend_matmul(
-      X, wo_matrix, backend, false, false
-    ).col(0);
-    const float to_ss = arma::dot(t_orth, t_orth);
-    if (!std::isfinite(to_ss) || to_ss <= 0.0f) break;
-    arma::fmat to_matrix(t_orth.n_elem, 1);
-    to_matrix.col(0) = t_orth;
-    const arma::fvec p_orth = float32_backend_matmul(
-      X, to_matrix, backend, true, false
-    ).col(0) / to_ss;
-    arma::fmat po_matrix(p_orth.n_elem, 1);
-    po_matrix.col(0) = p_orth;
-    X -= float32_backend_matmul(to_matrix, po_matrix, backend, false, true);
-    W_orth.col(static_cast<arma::uword>(used)) = w_orth;
-    P_orth.col(static_cast<arma::uword>(used)) = p_orth;
-    ++used;
-  }
-
-  if (used == 0) {
-    W_orth.set_size(X.n_cols, 0);
-    P_orth.set_size(X.n_cols, 0);
-  } else if (used < north) {
-    W_orth = W_orth.cols(0, static_cast<arma::uword>(used - 1));
-    P_orth = P_orth.cols(0, static_cast<arma::uword>(used - 1));
-  }
-  return Rcpp::List::create(
-    Rcpp::Named("X") = fmat_to_float32_bits(X),
-    Rcpp::Named("mX") = fmat_to_float32_bits(arma::fmat(mX)),
-    Rcpp::Named("vX") = fmat_to_float32_bits(arma::fmat(vX)),
-    Rcpp::Named("W_orth") = fmat_to_float32_bits(W_orth),
-    Rcpp::Named("P_orth") = fmat_to_float32_bits(P_orth),
-    Rcpp::Named("north") = used
-  );
-}
-
-// [[Rcpp::export]]
-Rcpp::List opls_filter_float32_labels_cpp(
-    SEXP XSEXP,
-    const Rcpp::IntegerVector& labels,
-    int n_classes,
-    int north,
-    int scaling,
-    int backend,
-    int svd_method,
-    int rsvd_oversample,
-    int rsvd_power,
-    int seed) {
-  arma::fmat X = float32_bits_to_fmat(XSEXP, "X");
-  if (labels.size() != static_cast<R_xlen_t>(X.n_rows) || n_classes < 2) {
-    stop("label-aware OPLS requires one valid label per row and at least two classes");
-  }
-  arma::uvec compact_labels(X.n_rows);
-  for (arma::uword row = 0; row < X.n_rows; ++row) {
-    const int label = labels[static_cast<R_xlen_t>(row)] - 1;
-    if (label < 0 || label >= n_classes) {
-      stop("label-aware OPLS labels must be encoded as 1..n_classes");
-    }
-    compact_labels(row) = static_cast<arma::uword>(label);
-  }
-  auto solve = [&](const arma::fmat& S, int component, arma::fvec& w) {
-    if (backend == 0) {
-      return fastpls::native::leading_left_from_smaller_gram(S, w);
-    }
-    Rcpp::List decomposition = truncated_svd_float32_backend(
-      S, 1, backend, svd_method, rsvd_oversample, rsvd_power,
-      static_cast<unsigned int>(seed + component), true
-    );
-    arma::fmat directions = r_object_to_fmat(
-      decomposition["u"], "float32 OPLS candidate direction"
-    );
-    if (directions.n_cols < 1) return false;
-    w = directions.col(0);
-    return true;
-  };
-  const arma::fmat no_dense_response;
-  auto filter = fastpls::native::fit_opls_filter_with_solver(
-    std::move(X), no_dense_response, north, scaling, solve,
-    &compact_labels, n_classes
-  );
-  return Rcpp::List::create(
-    Rcpp::Named("X") = fmat_to_float32_bits(filter.X),
-    Rcpp::Named("mX") = fmat_to_float32_bits(arma::fmat(filter.x_mean)),
-    Rcpp::Named("vX") = fmat_to_float32_bits(arma::fmat(filter.x_scale)),
-    Rcpp::Named("W_orth") = fmat_to_float32_bits(filter.W),
-    Rcpp::Named("P_orth") = fmat_to_float32_bits(filter.P),
-    Rcpp::Named("north") = filter.completed
-  );
-}
 
 // [[Rcpp::export]]
 Rcpp::List lda_train_prefix_float32_cuda(SEXP TtrainSEXP,
@@ -3121,20 +2933,6 @@ Rcpp::List pls_float32_cpu_cpp(SEXP XtrainSEXP, SEXP YtrainSEXP, arma::ivec ncom
 }
 
 Rcpp::List pls_float32_labels_cpp(SEXP XtrainSEXP, const Rcpp::IntegerVector& labels, int n_classes, arma::ivec ncomp, int scaling, bool fit, int method, int backend, int svd_method, int rsvd_oversample, int rsvd_power, int seed) {
-  return windows_float32_unavailable();
-}
-
-Rcpp::List opls_filter_float32_cpp(SEXP XSEXP, SEXP YSEXP, int north, int scaling, int backend, int svd_method, int rsvd_oversample, int rsvd_power, int seed) {
-  return windows_float32_unavailable();
-}
-
-Rcpp::List opls_filter_float32_labels_cpp(SEXP XSEXP,
-                                           const Rcpp::IntegerVector& labels,
-                                           int n_classes, int north,
-                                           int scaling, int backend,
-                                           int svd_method,
-                                           int rsvd_oversample,
-                                           int rsvd_power, int seed) {
   return windows_float32_unavailable();
 }
 

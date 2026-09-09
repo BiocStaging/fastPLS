@@ -13,45 +13,6 @@ Rcpp::Rostream<true>&  Rcpp::Rcout = Rcpp::Rcpp_cout_get();
 Rcpp::Rostream<false>& Rcpp::Rcerr = Rcpp::Rcpp_cerr_get();
 #endif
 
-// opls_filter_float32_cpp
-Rcpp::List opls_filter_float32_cpp(SEXP XSEXP, SEXP YSEXP, int north, int scaling, int backend, int svd_method, int rsvd_oversample, int rsvd_power, int seed);
-RcppExport SEXP _fastPLS_opls_filter_float32_cpp(SEXP XSEXPSEXP, SEXP YSEXPSEXP, SEXP northSEXP, SEXP scalingSEXP, SEXP backendSEXP, SEXP svd_methodSEXP, SEXP rsvd_oversampleSEXP, SEXP rsvd_powerSEXP, SEXP seedSEXP) {
-BEGIN_RCPP
-    Rcpp::RObject rcpp_result_gen;
-    Rcpp::RNGScope rcpp_rngScope_gen;
-    Rcpp::traits::input_parameter< SEXP >::type XSEXP(XSEXPSEXP);
-    Rcpp::traits::input_parameter< SEXP >::type YSEXP(YSEXPSEXP);
-    Rcpp::traits::input_parameter< int >::type north(northSEXP);
-    Rcpp::traits::input_parameter< int >::type scaling(scalingSEXP);
-    Rcpp::traits::input_parameter< int >::type backend(backendSEXP);
-    Rcpp::traits::input_parameter< int >::type svd_method(svd_methodSEXP);
-    Rcpp::traits::input_parameter< int >::type rsvd_oversample(rsvd_oversampleSEXP);
-    Rcpp::traits::input_parameter< int >::type rsvd_power(rsvd_powerSEXP);
-    Rcpp::traits::input_parameter< int >::type seed(seedSEXP);
-    rcpp_result_gen = Rcpp::wrap(opls_filter_float32_cpp(XSEXP, YSEXP, north, scaling, backend, svd_method, rsvd_oversample, rsvd_power, seed));
-    return rcpp_result_gen;
-END_RCPP
-}
-// opls_filter_float32_labels_cpp
-Rcpp::List opls_filter_float32_labels_cpp(SEXP XSEXP, const Rcpp::IntegerVector& labels, int n_classes, int north, int scaling, int backend, int svd_method, int rsvd_oversample, int rsvd_power, int seed);
-RcppExport SEXP _fastPLS_opls_filter_float32_labels_cpp(SEXP XSEXPSEXP, SEXP labelsSEXP, SEXP n_classesSEXP, SEXP northSEXP, SEXP scalingSEXP, SEXP backendSEXP, SEXP svd_methodSEXP, SEXP rsvd_oversampleSEXP, SEXP rsvd_powerSEXP, SEXP seedSEXP) {
-BEGIN_RCPP
-    Rcpp::RObject rcpp_result_gen;
-    Rcpp::RNGScope rcpp_rngScope_gen;
-    Rcpp::traits::input_parameter< SEXP >::type XSEXP(XSEXPSEXP);
-    Rcpp::traits::input_parameter< const Rcpp::IntegerVector& >::type labels(labelsSEXP);
-    Rcpp::traits::input_parameter< int >::type n_classes(n_classesSEXP);
-    Rcpp::traits::input_parameter< int >::type north(northSEXP);
-    Rcpp::traits::input_parameter< int >::type scaling(scalingSEXP);
-    Rcpp::traits::input_parameter< int >::type backend(backendSEXP);
-    Rcpp::traits::input_parameter< int >::type svd_method(svd_methodSEXP);
-    Rcpp::traits::input_parameter< int >::type rsvd_oversample(rsvd_oversampleSEXP);
-    Rcpp::traits::input_parameter< int >::type rsvd_power(rsvd_powerSEXP);
-    Rcpp::traits::input_parameter< int >::type seed(seedSEXP);
-    rcpp_result_gen = Rcpp::wrap(opls_filter_float32_labels_cpp(XSEXP, labels, n_classes, north, scaling, backend, svd_method, rsvd_oversample, rsvd_power, seed));
-    return rcpp_result_gen;
-END_RCPP
-}
 // lda_train_prefix_float32_cuda
 Rcpp::List lda_train_prefix_float32_cuda(SEXP TtrainSEXP, const Rcpp::IntegerVector& y, int n_classes, const Rcpp::IntegerVector& ncomp);
 RcppExport SEXP _fastPLS_lda_train_prefix_float32_cuda(SEXP TtrainSEXPSEXP, SEXP ySEXP, SEXP n_classesSEXP, SEXP ncompSEXP) {
@@ -737,6 +698,8 @@ RcppExport SEXP _fastPLS_opls_filter_core_cpp(SEXP, SEXP, SEXP, SEXP);
 RcppExport SEXP _fastPLS_opls_filter_labels_core_cpp(SEXP, SEXP, SEXP, SEXP, SEXP);
 RcppExport SEXP _fastPLS_opls_filter_float32_core_cpp(SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP);
 RcppExport SEXP _fastPLS_opls_filter_float32_labels_core_cpp(SEXP, SEXP, SEXP, SEXP, SEXP);
+RcppExport SEXP _fastPLS_opls_filter_float32_backend_core_cpp(SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP);
+RcppExport SEXP _fastPLS_opls_filter_float32_labels_backend_core_cpp(SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP);
 RcppExport SEXP _fastPLS_label_crossprod_scaled_cpp(SEXP, SEXP, SEXP, SEXP);
 RcppExport SEXP _fastPLS_lda_cuda_native_available(void);
 RcppExport SEXP _fastPLS_rsvd_audit_reset_debug(void);
@@ -744,8 +707,6 @@ RcppExport SEXP _fastPLS_rsvd_audit_summary_debug(void);
 RcppExport SEXP _fastPLS_spearman_correlation_cpp(SEXP, SEXP);
 
 static const R_CallMethodDef CallEntries[] = {
-    {"_fastPLS_opls_filter_float32_cpp", (DL_FUNC) &_fastPLS_opls_filter_float32_cpp, 9},
-    {"_fastPLS_opls_filter_float32_labels_cpp", (DL_FUNC) &_fastPLS_opls_filter_float32_labels_cpp, 10},
     {"_fastPLS_lda_train_prefix_float32_cuda", (DL_FUNC) &_fastPLS_lda_train_prefix_float32_cuda, 4},
     {"_fastPLS_lda_predict_float32_cuda", (DL_FUNC) &_fastPLS_lda_predict_float32_cuda, 3},
     {"_fastPLS_fastsvd_float32_cpp", (DL_FUNC) &_fastPLS_fastsvd_float32_cpp, 8},
@@ -829,6 +790,8 @@ static const R_CallMethodDef CallEntries[] = {
     {"_fastPLS_opls_filter_labels_core_cpp",              (DL_FUNC) &_fastPLS_opls_filter_labels_core_cpp,               5},
     {"_fastPLS_opls_filter_float32_core_cpp",             (DL_FUNC) &_fastPLS_opls_filter_float32_core_cpp,              7},
     {"_fastPLS_opls_filter_float32_labels_core_cpp",      (DL_FUNC) &_fastPLS_opls_filter_float32_labels_core_cpp,       5},
+    {"_fastPLS_opls_filter_float32_backend_core_cpp",     (DL_FUNC) &_fastPLS_opls_filter_float32_backend_core_cpp,      8},
+    {"_fastPLS_opls_filter_float32_labels_backend_core_cpp", (DL_FUNC) &_fastPLS_opls_filter_float32_labels_backend_core_cpp, 9},
     {"_fastPLS_pls_labels_core_cpp",                     (DL_FUNC) &_fastPLS_pls_labels_core_cpp,                      9},
     {"_fastPLS_pls_simpls_labels_core_cpp",              (DL_FUNC) &_fastPLS_pls_simpls_labels_core_cpp,               9},
     {"_fastPLS_pls_matrix_core_cpp",                     (DL_FUNC) &_fastPLS_pls_matrix_core_cpp,                      9},

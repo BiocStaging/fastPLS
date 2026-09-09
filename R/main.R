@@ -5003,11 +5003,11 @@ get("cuda_matrix_multiply", envir = asNamespace("fastPLS"), inherits = FALSE)(
             as.integer(power), as.integer(seed)
         )
     } else {
-        opls_filter_float32_cpp(
+        opls_filter_float32_backend_core_cpp(
             .as_float32_matrix(Xtrain, "Xtrain"), response,
             as.integer(north), as.integer(scaling),
-            .float32_backend_id(filter_backend),
-            .float32_svd_id(svd.method), as.integer(oversample),
+            .float32_product_backend_id(filter_backend),
+            as.integer(oversample),
             as.integer(power), as.integer(seed)
         )
     }
@@ -5039,11 +5039,11 @@ get("cuda_matrix_multiply", envir = asNamespace("fastPLS"), inherits = FALSE)(
             as.integer(n_classes), as.integer(north), as.integer(scaling)
         )
     } else {
-        opls_filter_float32_labels_cpp(
+        opls_filter_float32_labels_backend_core_cpp(
             .as_float32_matrix(Xtrain, "Xtrain"), as.integer(labels),
             as.integer(n_classes), as.integer(north), as.integer(scaling),
-            .float32_backend_id(filter_backend),
-            .float32_svd_id(svd.method), as.integer(oversample),
+            .float32_product_backend_id(filter_backend),
+            as.integer(oversample),
             as.integer(power), as.integer(seed)
         )
     }

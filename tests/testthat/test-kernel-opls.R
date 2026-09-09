@@ -150,3 +150,39 @@ test_that("standalone OPLS fitting is deterministic", {
     expect_true(all(is.finite(core$X)))
   }
 })
+
+test_that("routed float32 OPLS preserves core dense and label products", {
+  set.seed(812)
+  X <- matrix(rnorm(120 * 18), 120, 18)
+  labels <- factor(rep(letters[1:3], each = 40))
+  Y <- stats::model.matrix(~ labels - 1)
+  X32 <- float::fl(X)
+  Y32 <- float::fl(Y)
+  controls <- list(north = 2L, scaling = 1L, oversample = 20L,
+                   power = 2L, seed = 71L)
+
+  direct <- fastPLS:::opls_filter_float32_core_cpp(
+    X32, Y32, controls$north, controls$scaling, controls$oversample,
+    controls$power, controls$seed
+  )
+  routed <- fastPLS:::opls_filter_float32_backend_core_cpp(
+    X32, Y32, controls$north, controls$scaling, 0L, controls$oversample,
+    controls$power, controls$seed
+  )
+  compact <- fastPLS:::opls_filter_float32_labels_backend_core_cpp(
+    X32, as.integer(labels), nlevels(labels), controls$north,
+    controls$scaling, 0L, controls$oversample, controls$power, controls$seed
+  )
+  decode <- function(value) {
+    float::dbl(fastPLS:::.float32_from_bits(value))
+  }
+
+  expect_identical(routed$north, direct$north)
+  expect_identical(compact$north, direct$north)
+  for (field in c("X", "mX", "vX", "W_orth", "P_orth")) {
+    expect_equal(decode(routed[[field]]), decode(direct[[field]]),
+                 tolerance = 0)
+    expect_equal(decode(compact[[field]]), decode(routed[[field]]),
+                 tolerance = 5e-6)
+  }
+})

@@ -410,6 +410,55 @@ OplsFilter<T> fit_opls_filter_labels(
   );
 }
 
+template<class T, class Label, class Backend>
+OplsFilter<T> fit_opls_filter_labels_rsvd(
+    Matrix<T> predictors, const Label* labels, std::size_t label_count,
+    std::size_t class_count, std::size_t components,
+    PredictorScaling scaling, RsvdControls controls, Backend& backend) {
+  if (predictors.size() == 0 || labels == nullptr ||
+      predictors.rows() != label_count || class_count < 2) {
+    throw std::invalid_argument(
+      "fastPLS label-aware OPLS dimensions are invalid"
+    );
+  }
+  auto prepared = prepare_scaled_label_crossprod(
+    predictors.view(), labels, label_count, class_count, scaling, backend
+  );
+  std::vector<T> center_offset(prepared.response_mean.size());
+  for (std::size_t index = 0; index < center_offset.size(); ++index) {
+    center_offset[index] = -prepared.response_mean[index];
+  }
+  auto refresh = [labels, label_count, class_count, &center_offset](
+      ConstMatrixView<T> current, Matrix<T>& crosscov) {
+    centered_label_crossprod(
+      current, labels, label_count, center_offset.data(), class_count,
+      crosscov.view()
+    );
+  };
+  auto solve = [controls, &backend](
+      ConstMatrixView<T> crosscov, std::size_t component,
+      Matrix<T>& direction) mutable {
+    RsvdControls component_controls = controls;
+    component_controls.seed += static_cast<unsigned int>(component);
+    component_controls.left_only = true;
+    auto decomposition = randomized_svd(
+      crosscov, 1, component_controls, backend
+    );
+    if (decomposition.U.columns() == 0) return false;
+    direction.resize(decomposition.U.rows(), 1);
+    std::copy_n(
+      decomposition.U.data(), decomposition.U.rows(), direction.data()
+    );
+    opls_detail::normalize(direction);
+    return direction.size() != 0;
+  };
+  return opls_detail::fit_preprocessed_filter<T>(
+    std::move(predictors), std::move(prepared.crossprod), components,
+    std::move(prepared.predictor_center),
+    std::move(prepared.predictor_scale), backend, refresh, solve
+  );
+}
+
 template<class T, class Backend>
 void apply_opls_filter_inplace(
     MatrixView<T> predictors, const T* center, const T* scale,
