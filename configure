@@ -13,7 +13,7 @@ pkg_cxxflags=""
 pkg_cppflags=""
 pkg_libs='$(LAPACK_LIBS) $(BLAS_LIBS)'
 cuda_objects=""
-metal_objects=" svd_metal_backend_stub.o metal_resident_backend_stub.o"
+metal_objects=""
 metal_mm_rule=""
 
 find_openblas_root() {
@@ -106,7 +106,8 @@ fi
 have_cuda=0
 
 if [ "${use_cuda}" != "0" ] && [ "${use_cuda}" != "false" ] && [ "${use_cuda}" != "FALSE" ] &&
-   [ -n "${cuda_root}" ] && [ -f "${cuda_header}" ] && [ -n "${cuda_lib_dir}" ]; then
+   [ -n "${cuda_root}" ] && [ -f "${cuda_header}" ] &&
+   [ -n "${cuda_lib_dir}" ] && [ -x "${cuda_root}/bin/nvcc" ]; then
   have_cuda=1
 fi
 
@@ -124,12 +125,9 @@ fi
 
 if [ "${have_cuda}" = "1" ]; then
   echo "fastPLS configure: CUDA Toolkit found at ${cuda_root}"
-  cuda_flags="-DFASTPLS_HAS_CUDA -I${cuda_include_dir}"
+  cuda_flags="-DFASTPLS_HAS_CUDA -DFASTPLS_HAS_CUDA_KERNELS -I${cuda_include_dir}"
   cuda_nvcc="${cuda_root}/bin/nvcc"
-  if [ -x "${cuda_nvcc}" ]; then
-    cuda_flags="${cuda_flags} -DFASTPLS_HAS_CUDA_KERNELS"
-    cuda_objects=" lda_cuda_kernels.o"
-  fi
+  cuda_objects=" core_cuda_backend.o"
   if [ -n "${pkg_cppflags}" ]; then
     pkg_cppflags="${pkg_cppflags} ${cuda_flags}"
   else
@@ -162,36 +160,8 @@ if [ "${have_metal}" = "1" ]; then
   else
     echo "fastPLS configure: Apple Metal backend enabled using system frameworks"
   fi
-  cp src/svd_metal_backend.mm.in src/svd_metal_backend.mm
-  cp src/metal_resident_backend.mm.in src/metal_resident_backend.mm
-  rm -f src/metal_resident_kernels.metal src/metal_resident_kernels.air \
-    src/metal_resident_kernels.metallib src/metal_resident_kernels_data.h
-  metal_compiler="$(xcrun -sdk macosx -f metal 2>/dev/null || true)"
-  metallib_compiler="$(xcrun -sdk macosx -f metallib 2>/dev/null || true)"
-  if [ -n "${metal_sdk}" ] && [ -n "${metal_compiler}" ] &&
-     [ -n "${metallib_compiler}" ] &&
-     [ -x /usr/bin/xxd ]; then
-    metal_cache_dir="${TMPDIR:-/tmp}/fastpls-metal-cache-$$"
-    mkdir -p "${metal_cache_dir}"
-    awk '/R"METAL\($/ {capture=1; next} /^\)METAL"\];$/ {capture=0; exit} capture {print}' \
-      src/metal_resident_backend.mm.in > src/metal_resident_kernels.metal
-    if "${metal_compiler}" -isysroot "${metal_sdk}" \
-         -fmodules-cache-path="${metal_cache_dir}" \
-         -c src/metal_resident_kernels.metal \
-         -o src/metal_resident_kernels.air >/dev/null 2>&1 &&
-       "${metallib_compiler}" src/metal_resident_kernels.air \
-         -o src/metal_resident_kernels.metallib >/dev/null 2>&1; then
-      /usr/bin/xxd -i -n fastpls_metal_library \
-        src/metal_resident_kernels.metallib > \
-        src/metal_resident_kernels_data.h
-      echo "fastPLS configure: precompiled resident Metal kernels enabled"
-    else
-      echo "fastPLS configure: Metal offline compiler unavailable; using runtime kernel compilation"
-      rm -f src/metal_resident_kernels_data.h
-    fi
-    rm -rf "${metal_cache_dir}"
-  fi
-  metal_objects=" svd_metal_backend.o metal_resident_backend.o"
+  cp src/core_metal_backend.mm.in src/core_metal_backend.mm
+  metal_objects=" core_metal_backend.o"
   metal_flags="-DFASTPLS_HAS_METAL"
   if [ -n "${pkg_cppflags}" ]; then
     pkg_cppflags="${pkg_cppflags} ${metal_flags}"
@@ -227,7 +197,7 @@ if [ -n "${cuda_objects}" ]; then
   cat >> src/Makevars <<EOF
 
 CUDA_NVCC = ${cuda_root}/bin/nvcc
-CUDA_NVCCFLAGS = -std=c++17 --extended-lambda --expt-relaxed-constexpr ${cuda_flags} -Xcompiler -fPIC
+CUDA_NVCCFLAGS = -std=c++17 --extended-lambda --expt-relaxed-constexpr -I../inst/include/ ${cuda_flags} -Xcompiler -fPIC
 
 %.o: %.cu
 	\$(CUDA_NVCC) \$(CUDA_NVCCFLAGS) -c \$< -o \$@

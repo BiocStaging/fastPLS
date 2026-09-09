@@ -11,6 +11,17 @@
   {#name, reinterpret_cast<DL_FUNC>(&name), count}
 
 static const R_CallMethodDef call_entries[] = {
+  FASTPLS_CALL(_fastPLS_cuda_matrix_multiply, 2),
+  FASTPLS_CALL(_fastPLS_cuda_resident_project_cpp, 3),
+  FASTPLS_CALL(_fastPLS_cuda_resident_response_sums_cpp, 5),
+  FASTPLS_CALL(_fastPLS_cuda_resident_simpls_fit_cpp, 17),
+  FASTPLS_CALL(_fastPLS_cuda_resident_export_cpp, 4),
+  FASTPLS_CALL(_fastPLS_cuda_resident_compact_cpp, 2),
+  FASTPLS_CALL(_fastPLS_cuda_resident_classify_cpp, 5),
+  FASTPLS_CALL(_fastPLS_cuda_resident_classify_path_cpp, 5),
+  FASTPLS_CALL(_fastPLS_cuda_resident_classify_response_path_cpp, 5),
+  FASTPLS_CALL(_fastPLS_cuda_resident_simpls_predict_cpp, 4),
+  FASTPLS_CALL(_fastPLS_cuda_resident_predict_path_cpp, 4),
   FASTPLS_CALL(_fastPLS_has_cuda, 0),
   FASTPLS_CALL(_fastPLS_has_metal, 0),
   FASTPLS_CALL(_fastPLS_lda_cuda_native_available, 0),
@@ -67,9 +78,11 @@ static const R_CallMethodDef call_entries[] = {
   FASTPLS_CALL(_fastPLS_pls_matrix_core_cpp, 10),
   FASTPLS_CALL(_fastPLS_pls_matrix_core_xprod_cpp, 10),
   FASTPLS_CALL(_fastPLS_pls_float32_matrix_core_cpp, 10),
+  FASTPLS_CALL(_fastPLS_pls_float32_matrix_backend_core_cpp, 11),
   FASTPLS_CALL(_fastPLS_pls_labels_core_predict_cpp, 3),
   FASTPLS_CALL(_fastPLS_pls_class_predict_topk_core_cpp, 5),
   FASTPLS_CALL(_fastPLS_pls_float32_labels_core_cpp, 11),
+  FASTPLS_CALL(_fastPLS_pls_float32_labels_backend_core_cpp, 12),
   {nullptr, nullptr, 0}
 };
 

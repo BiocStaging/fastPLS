@@ -1,11 +1,11 @@
 CXX_STD = CXX17
 
-PKG_CPPFLAGS = @FASTPLS_WIN_PKG_CPPFLAGS@
-PKG_CXXFLAGS = -I../inst/include/ -O3 -DWIN32 -DDLL_EXPORTS -DARMA_64BIT_WORD=1 @FASTPLS_WIN_PKG_CXXFLAGS@
+PKG_CPPFLAGS = -DFASTPLS_CORE_ONLY @FASTPLS_WIN_PKG_CPPFLAGS@
+PKG_CXXFLAGS = -I../inst/include/ -O3 -DWIN32 -DDLL_EXPORTS @FASTPLS_WIN_PKG_CXXFLAGS@
 PKG_LIBS = @FASTPLS_WIN_PKG_LIBS@ $(LAPACK_LIBS) $(BLAS_LIBS) $(FLIBS)
 
-OBJECTS = RcppExports.o core_init.o core_accelerator_stubs.o core_cpu_backend.o core_cpu_lapack.o core_cpu_lapack_f32.o r_api.o rsvd_audit.o fastPLS.o cuda_resident_r.o metal_resident_r.o \
-	 svd_iface.o svd_cpu_exact.o svd_cpu_rsvd.o svd_cuda_rsvd.o \
-	 svd_metal_api.o svd_metal_backend_stub.o@FASTPLS_WIN_CUDA_OBJECTS@
+OBJECTS = core_init.o core_accelerator_stubs.o core_cpu_backend.o \
+	core_cpu_lapack.o core_cpu_lapack_f32.o r_api.o rsvd_audit.o \
+	cuda_resident_r.o@FASTPLS_WIN_CUDA_OBJECTS@
 
 @FASTPLS_WIN_CUDA_RULE@

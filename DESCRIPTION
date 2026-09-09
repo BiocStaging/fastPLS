@@ -32,7 +32,7 @@ Description: Fast implementations of partial least squares models for
     acceleration when the required system libraries are available. Compact
     latent prediction and memory-aware numerical routes support analyses with
     large predictor or multivariate-response matrices.
-License: GPL-3
+License: MIT + file LICENSE
 URL: https://github.com/tkcaccia/fastPLS
 BugReports: https://github.com/tkcaccia/fastPLS/issues
 biocViews: Software, DimensionReduction, Classification, Regression,
@@ -41,8 +41,7 @@ SystemRequirements: Optional CUDA Toolkit and NVIDIA GPU driver for CUDA
     acceleration; optional Apple Metal framework on macOS for Metal
     acceleration. CPU-only builds do not require GPU software.
 Depends: R (>= 4.6.0), Matrix
-Imports: Biobase, Rcpp (>= 0.12.17), methods, float
-LinkingTo: Rcpp, RcppArmadillo
+Imports: Biobase, methods, float
 Suggests: BiocStyle, knitr, RhpcBLASctl, rmarkdown, testthat (>= 3.0.0)
 VignetteBuilder: knitr
 NeedsCompilation: yes

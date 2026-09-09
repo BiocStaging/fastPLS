@@ -295,6 +295,17 @@ pls_float32_matrix_core_cpp <- function(
     )
 }
 
+pls_float32_matrix_backend_core_cpp <- function(
+    predictors, responses, components, scaling, fit, method,
+    oversample, power, seed, backend, store_scores = TRUE
+) {
+    .Call(
+        "_fastPLS_pls_float32_matrix_backend_core_cpp", predictors,
+        responses, components, scaling, fit, store_scores, method,
+        oversample, power, seed, backend, PACKAGE = "fastPLS"
+    )
+}
+
 pls_float32_labels_core_cpp <- function(
     predictors, labels, class_count, components, scaling, fit, method,
     oversample, power, seed, store_scores = TRUE
@@ -304,6 +315,17 @@ pls_float32_labels_core_cpp <- function(
         class_count, components, scaling, fit, store_scores, method,
         oversample, power, seed,
         PACKAGE = "fastPLS"
+    )
+}
+
+pls_float32_labels_backend_core_cpp <- function(
+    predictors, labels, class_count, components, scaling, fit, method,
+    oversample, power, seed, backend, store_scores = TRUE
+) {
+    .Call(
+        "_fastPLS_pls_float32_labels_backend_core_cpp", predictors, labels,
+        class_count, components, scaling, fit, store_scores, method,
+        oversample, power, seed, backend, PACKAGE = "fastPLS"
     )
 }
 

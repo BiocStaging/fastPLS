@@ -1,7 +1,8 @@
 #!/usr/bin/env sh
 set -eu
 
-rm -f src/Makevars src/Makevars.win src/svd_metal_backend.mm \
+rm -f src/Makevars src/Makevars.win src/core_metal_backend.mm \
+  src/svd_metal_backend.mm \
   src/metal_resident_backend.mm src/metal_resident_kernels.metal \
   src/metal_resident_kernels.air src/metal_resident_kernels.metallib \
   src/metal_resident_kernels_data.h

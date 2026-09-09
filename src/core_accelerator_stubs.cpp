@@ -9,11 +9,8 @@
 
 namespace fastpls_svd {
 
+#ifndef FASTPLS_HAS_CUDA
 bool has_cuda_backend() {
-  return false;
-}
-
-bool has_metal_backend() {
   return false;
 }
 
@@ -28,6 +25,12 @@ fastpls::core::Matrix<float> cuda_core_gemm_f32(
     "CUDA backend requested but this fastPLS build has no CUDA support"
   );
 }
+#endif
+
+#ifndef FASTPLS_HAS_METAL
+bool has_metal_backend() {
+  return false;
+}
 
 fastpls::core::Matrix<float> metal_core_gemm_f32(
     fastpls::core::ConstMatrixView<float>,
@@ -36,6 +39,7 @@ fastpls::core::Matrix<float> metal_core_gemm_f32(
     "Metal backend requested but this fastPLS build has no Metal support"
   );
 }
+#endif
 
 }  // namespace fastpls_svd
 

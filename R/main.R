@@ -4804,25 +4804,22 @@ print.fastPLS <- function(x, ...) {
     fit_args <- .float32_cpp_fit_args(Xtrain, response, ncomp, scaling, method,
         backend, svd.method, rsvd_oversample, rsvd_power,
         seed, fit)
-    raw_model <- if (use_label_products && identical(backend, "cpu")) {
-        pls_float32_labels_core_cpp(
+    core_backend <- .float32_product_backend_id(backend)
+    raw_model <- if (use_label_products) {
+        pls_float32_labels_backend_core_cpp(
             fit_args[[1L]], fit_args[[2L]], yprep$n_classes,
             fit_args[[3L]], fit_args[[4L]], fit_args[[5L]], fit_args[[6L]],
             fit_args[[9L]], fit_args[[10L]], fit_args[[11L]],
+            backend = core_backend,
             store_scores = store_scores
         )
-    } else if (use_label_products) {
-        do.call(pls_float32_labels_cpp, append(fit_args, yprep$n_classes,
-            after = 2L))
-    }
-    else if (identical(backend, "cpu")) {
-        pls_float32_matrix_core_cpp(
+    } else {
+        pls_float32_matrix_backend_core_cpp(
             fit_args[[1L]], fit_args[[2L]], fit_args[[3L]], fit_args[[4L]],
             fit_args[[5L]], fit_args[[6L]], fit_args[[9L]], fit_args[[10L]],
-            fit_args[[11L]], store_scores = store_scores
+            fit_args[[11L]], backend = core_backend,
+            store_scores = store_scores
         )
-    } else {
-        do.call(pls_float32_cpu_cpp, fit_args)
     }
     .float32_finalize_fit(raw_model, yprep, backend)
 }

@@ -39,7 +39,8 @@ have_cuda=0
 if [ "${use_cuda}" != "0" ] && [ "${use_cuda}" != "false" ] && [ "${use_cuda}" != "FALSE" ]; then
   if [ -n "${cuda_root}" ] &&
      [ -f "${cuda_root}/include/cuda_runtime.h" ] &&
-     [ -d "${cuda_root}/lib/x64" ]; then
+     [ -d "${cuda_root}/lib/x64" ] &&
+     [ -f "${cuda_root}/bin/nvcc.exe" ]; then
     have_cuda=1
   fi
 fi
@@ -64,27 +65,21 @@ cuda_rule=""
 
 # A macOS configure run may generate the Objective-C++ Metal source.  Windows
 # builds must always use the C++ stub and must never try to compile/link Metal.
-rm -f src/svd_metal_backend.mm
+rm -f src/core_metal_backend.mm src/svd_metal_backend.mm
 
 if [ "${have_cuda}" = "1" ]; then
   echo "fastPLS configure.win: CUDA Toolkit found at ${cuda_root}"
-  pkg_cppflags="-DFASTPLS_HAS_CUDA -I\"${cuda_root}/include\""
-  pkg_cxxflags="-DFASTPLS_HAS_CUDA"
+  pkg_cppflags="-DFASTPLS_HAS_CUDA -DFASTPLS_HAS_CUDA_KERNELS -I\"${cuda_root}/include\""
+  pkg_cxxflags="-DFASTPLS_HAS_CUDA -DFASTPLS_HAS_CUDA_KERNELS"
   pkg_libs="-L\"${cuda_root}/lib/x64\" -lcudart -lcublas -lcusolver -lcurand"
 
   nvcc="${cuda_root}/bin/nvcc.exe"
-  if [ -f "${nvcc}" ]; then
-    pkg_cppflags="${pkg_cppflags} -DFASTPLS_HAS_CUDA_KERNELS"
-    pkg_cxxflags="${pkg_cxxflags} -DFASTPLS_HAS_CUDA_KERNELS"
-    cuda_objects=" lda_cuda_kernels.o"
-    cuda_rule='CUDA_NVCC = "'"${nvcc}"'"
-CUDA_NVCCFLAGS = -std=c++17 -I"'"${cuda_root}"'/include"
+  cuda_objects=" core_cuda_backend.o"
+  cuda_rule='CUDA_NVCC = "'"${nvcc}"'"
+CUDA_NVCCFLAGS = -std=c++17 -I../inst/include/ -I"'"${cuda_root}"'/include"
 
 %.o: %.cu
 	$(CUDA_NVCC) $(CUDA_NVCCFLAGS) -c $< -o $@'
-  else
-    echo "fastPLS configure.win: nvcc.exe not found; CUDA rSVD will build without native CUDA classifier kernels"
-  fi
 else
   echo "fastPLS configure.win: CUDA Toolkit not found; building CPU-only Windows package"
 fi

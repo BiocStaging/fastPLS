@@ -379,7 +379,11 @@ fastpls::core::Matrix<float> backend_gemm_f32(
 
 class RoutedLinearAlgebraF32 {
  public:
-  explicit RoutedLinearAlgebraF32(const int backend) : backend_(backend) {
+  explicit RoutedLinearAlgebraF32(
+      const int backend, const std::size_t training_rows = 0,
+      const std::size_t training_columns = 0)
+      : backend_(backend), training_rows_(training_rows),
+        training_columns_(training_columns) {
     if (backend_ < 0 || backend_ > 2) {
       throw std::invalid_argument("float32 backend must be 0, 1, or 2");
     }
@@ -389,8 +393,13 @@ class RoutedLinearAlgebraF32 {
             fastpls::core::ConstMatrixView<float> right,
             bool transpose_left, bool transpose_right,
             fastpls::core::MatrixView<float> output) const {
+    const bool training_product = training_rows_ > 0 &&
+      left.rows() == training_rows_ &&
+      left.columns() == training_columns_;
+    const int operation_backend = backend_ == 2 && !training_product ?
+      0 : backend_;
     const auto product = backend_gemm_f32(
-      left, right, transpose_left, transpose_right, backend_
+      left, right, transpose_left, transpose_right, operation_backend
     );
     if (product.rows() != output.rows() ||
         product.columns() != output.columns()) {
@@ -423,6 +432,8 @@ class RoutedLinearAlgebraF32 {
 
  private:
   int backend_;
+  std::size_t training_rows_;
+  std::size_t training_columns_;
   fastpls::runtime::CpuLinearAlgebraF32 host_;
 };
 
@@ -3068,7 +3079,9 @@ extern "C" SEXP _fastPLS_opls_filter_float32_backend_core_cpp(
     controls.power = power_count;
     controls.seed = static_cast<unsigned int>(seed_value);
     controls.left_only = true;
-    RoutedLinearAlgebraF32 routed_backend(backend_code);
+    RoutedLinearAlgebraF32 routed_backend(
+      backend_code, x.rows(), x.columns()
+    );
     const auto filter = fastpls::core::fit_opls_filter_rsvd(
       std::move(x), y.view(), static_cast<std::size_t>(component_count),
       static_cast<fastpls::core::PredictorScaling>(scaling_code), controls,
@@ -3113,7 +3126,9 @@ extern "C" SEXP _fastPLS_opls_filter_float32_labels_backend_core_cpp(
       controls.power = power_count;
       controls.seed = static_cast<unsigned int>(seed_value);
       controls.left_only = true;
-      RoutedLinearAlgebraF32 routed_backend(backend_code);
+      RoutedLinearAlgebraF32 routed_backend(
+        backend_code, x.rows(), x.columns()
+      );
       const auto filter = fastpls::core::fit_opls_filter_labels_rsvd(
         std::move(x), encoded.data(), encoded.size(),
         static_cast<std::size_t>(classes),
@@ -3360,10 +3375,12 @@ extern "C" SEXP _fastPLS_pls_matrix_core_xprod_cpp(
   });
 }
 
-extern "C" SEXP _fastPLS_pls_float32_matrix_core_cpp(
+namespace {
+
+SEXP fit_float32_matrix_core(
     SEXP predictors, SEXP responses, SEXP components, SEXP scaling,
     SEXP fit, SEXP store_scores, SEXP method, SEXP oversample, SEXP power,
-    SEXP seed) {
+    SEXP seed, int backend_code, const char* route) {
   return translate_exceptions("float32 dense core PLS fitting", [&] {
     if (TYPEOF(components) != INTSXP || XLENGTH(components) < 1) {
       throw std::invalid_argument(
@@ -3373,6 +3390,9 @@ extern "C" SEXP _fastPLS_pls_float32_matrix_core_cpp(
     fastpls::core::Matrix<float> x =
       float_matrix_from_s4(predictors, "Xtrain");
     const auto y = float_matrix_from_s4(responses, "Ytrain");
+    RoutedLinearAlgebraF32 backend(
+      backend_code, x.rows(), x.columns()
+    );
     const int scaling_code = Rf_asInteger(scaling);
     const int fit_code = Rf_asLogical(fit);
     const int store_scores_code = Rf_asLogical(store_scores);
@@ -3384,7 +3404,6 @@ extern "C" SEXP _fastPLS_pls_float32_matrix_core_cpp(
         "float32 dense core PLS dimensions or controls are invalid"
       );
     }
-    fastpls::runtime::CpuLinearAlgebraF32 backend;
     const auto prepared = fastpls::core::prepare_scaled_dense_crossprod(
       x.view(), y.view(),
       static_cast<fastpls::core::PredictorScaling>(scaling_code), backend
@@ -3395,9 +3414,38 @@ extern "C" SEXP _fastPLS_pls_float32_matrix_core_cpp(
       components, fit_code, store_scores_code, method_code,
       Rf_asInteger(oversample),
       Rf_asInteger(power), static_cast<unsigned int>(Rf_asInteger(seed)),
-      "float32_dense_crosscov", backend, false
+      route, backend, false
     );
   });
+}
+
+}  // namespace
+
+extern "C" SEXP _fastPLS_pls_float32_matrix_core_cpp(
+    SEXP predictors, SEXP responses, SEXP components, SEXP scaling,
+    SEXP fit, SEXP store_scores, SEXP method, SEXP oversample, SEXP power,
+    SEXP seed) {
+  return fit_float32_matrix_core(
+    predictors, responses, components, scaling, fit, store_scores, method,
+    oversample, power, seed, 0, "float32_dense_crosscov"
+  );
+}
+
+extern "C" SEXP _fastPLS_pls_float32_matrix_backend_core_cpp(
+    SEXP predictors, SEXP responses, SEXP components, SEXP scaling,
+    SEXP fit, SEXP store_scores, SEXP method, SEXP oversample, SEXP power,
+    SEXP seed, SEXP backend) {
+  const int backend_code = Rf_asInteger(backend);
+  if (backend_code < 0 || backend_code > 2 || backend_code == NA_INTEGER) {
+    Rf_error("float32 PLS backend must be CPU, CUDA, or Metal");
+  }
+  const char* route = backend_code == 0 ? "float32_dense_crosscov" :
+    backend_code == 1 ? "float32_cuda_hybrid_dense_crosscov" :
+    "float32_metal_hybrid_dense_crosscov";
+  return fit_float32_matrix_core(
+    predictors, responses, components, scaling, fit, store_scores, method,
+    oversample, power, seed, backend_code, route
+  );
 }
 
 extern "C" SEXP _fastPLS_pls_labels_core_predict_cpp(
@@ -3737,10 +3785,13 @@ extern "C" SEXP _fastPLS_pls_class_predict_topk_core_cpp(
   });
 }
 
-extern "C" SEXP _fastPLS_pls_float32_labels_core_cpp(
+namespace {
+
+SEXP fit_float32_labels_core(
     SEXP predictors, SEXP labels, SEXP class_count, SEXP components,
     SEXP scaling, SEXP fit, SEXP store_scores, SEXP method, SEXP oversample,
-    SEXP power, SEXP seed) {
+    SEXP power, SEXP seed, int backend_code, const char* plssvd_route,
+    const char* simpls_route) {
   return translate_exceptions("float32 core PLS fitting", [&] {
     if (TYPEOF(labels) != INTSXP || TYPEOF(components) != INTSXP ||
         XLENGTH(components) < 1) {
@@ -3750,6 +3801,9 @@ extern "C" SEXP _fastPLS_pls_float32_labels_core_cpp(
     }
     fastpls::core::Matrix<float> x =
       float_matrix_from_s4(predictors, "Xtrain");
+    RoutedLinearAlgebraF32 backend(
+      backend_code, x.rows(), x.columns()
+    );
     const int classes = Rf_asInteger(class_count);
     const int scaling_code = Rf_asInteger(scaling);
     const int fit_code = Rf_asLogical(fit);
@@ -3766,14 +3820,13 @@ extern "C" SEXP _fastPLS_pls_float32_labels_core_cpp(
     const auto encoded = encoded_class_labels(
       labels, x.rows(), classes, "float32 core PLS"
     );
-    fastpls::runtime::CpuLinearAlgebraF32 backend;
     if (method_code == 1) {
       return fit_plssvd_label_core(
         x, encoded, classes, components, scaling_code, fit_code,
         store_scores_code,
         Rf_asInteger(oversample), Rf_asInteger(power),
         static_cast<unsigned int>(Rf_asInteger(seed)),
-        "float32_label_class_sums", backend
+        plssvd_route, backend
       );
     }
     const auto prepared = fastpls::core::prepare_scaled_label_crossprod(
@@ -3786,7 +3839,43 @@ extern "C" SEXP _fastPLS_pls_float32_labels_core_cpp(
       classes, components, fit_code, store_scores_code,
       Rf_asInteger(oversample),
       Rf_asInteger(power), static_cast<unsigned int>(Rf_asInteger(seed)),
-      "float32_label_class_sums_blocked", backend
+      simpls_route, backend
     );
   });
+}
+
+}  // namespace
+
+extern "C" SEXP _fastPLS_pls_float32_labels_core_cpp(
+    SEXP predictors, SEXP labels, SEXP class_count, SEXP components,
+    SEXP scaling, SEXP fit, SEXP store_scores, SEXP method, SEXP oversample,
+    SEXP power, SEXP seed) {
+  return fit_float32_labels_core(
+    predictors, labels, class_count, components, scaling, fit, store_scores,
+    method, oversample, power, seed, 0, "float32_label_class_sums",
+    "float32_label_class_sums_blocked"
+  );
+}
+
+extern "C" SEXP _fastPLS_pls_float32_labels_backend_core_cpp(
+    SEXP predictors, SEXP labels, SEXP class_count, SEXP components,
+    SEXP scaling, SEXP fit, SEXP store_scores, SEXP method, SEXP oversample,
+    SEXP power, SEXP seed, SEXP backend) {
+  const int backend_code = Rf_asInteger(backend);
+  if (backend_code < 0 || backend_code > 2 || backend_code == NA_INTEGER) {
+    Rf_error("float32 PLS backend must be CPU, CUDA, or Metal");
+  }
+  const char* plssvd_route = backend_code == 0 ?
+    "float32_label_class_sums" : backend_code == 1 ?
+    "float32_cuda_hybrid_label_class_sums" :
+    "float32_metal_hybrid_label_class_sums";
+  const char* simpls_route = backend_code == 0 ?
+    "float32_label_class_sums_blocked" : backend_code == 1 ?
+    "float32_cuda_hybrid_label_class_sums_blocked" :
+    "float32_metal_hybrid_label_class_sums_blocked";
+  return fit_float32_labels_core(
+    predictors, labels, class_count, components, scaling, fit, store_scores,
+    method, oversample, power, seed, backend_code, plssvd_route,
+    simpls_route
+  );
 }
