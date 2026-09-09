@@ -121,30 +121,36 @@ SEXP _fastPLS_label_crossprod_scaled_cpp(SEXP predictors, SEXP labels,
                                          SEXP class_count, SEXP scaling);
 SEXP _fastPLS_pls_labels_core_cpp(
   SEXP predictors, SEXP labels, SEXP class_count, SEXP components,
-  SEXP scaling, SEXP fit, SEXP oversample, SEXP power, SEXP seed
+  SEXP scaling, SEXP fit, SEXP store_scores, SEXP oversample, SEXP power,
+  SEXP seed
 );
 SEXP _fastPLS_pls_simpls_labels_core_cpp(
   SEXP predictors, SEXP labels, SEXP class_count, SEXP components,
-  SEXP scaling, SEXP fit, SEXP oversample, SEXP power, SEXP seed
+  SEXP scaling, SEXP fit, SEXP store_scores, SEXP oversample, SEXP power,
+  SEXP seed
 );
 SEXP _fastPLS_pls_matrix_core_cpp(
   SEXP predictors, SEXP responses, SEXP components, SEXP scaling,
-  SEXP fit, SEXP method, SEXP oversample, SEXP power, SEXP seed
+  SEXP fit, SEXP store_scores, SEXP method, SEXP oversample, SEXP power,
+  SEXP seed
 );
 SEXP _fastPLS_pls_matrix_core_xprod_cpp(
   SEXP predictors, SEXP responses, SEXP components, SEXP scaling,
-  SEXP fit, SEXP method, SEXP oversample, SEXP power, SEXP seed
+  SEXP fit, SEXP store_scores, SEXP method, SEXP oversample, SEXP power,
+  SEXP seed
 );
 SEXP _fastPLS_pls_float32_matrix_core_cpp(
   SEXP predictors, SEXP responses, SEXP components, SEXP scaling,
-  SEXP fit, SEXP method, SEXP oversample, SEXP power, SEXP seed
+  SEXP fit, SEXP store_scores, SEXP method, SEXP oversample, SEXP power,
+  SEXP seed
 );
 SEXP _fastPLS_pls_labels_core_predict_cpp(
   SEXP model, SEXP predictors, SEXP project
 );
 SEXP _fastPLS_pls_float32_labels_core_cpp(
   SEXP predictors, SEXP labels, SEXP class_count, SEXP components,
-  SEXP scaling, SEXP fit, SEXP method, SEXP oversample, SEXP power, SEXP seed
+  SEXP scaling, SEXP fit, SEXP store_scores, SEXP method, SEXP oversample,
+  SEXP power, SEXP seed
 );
 }
 

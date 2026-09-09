@@ -638,6 +638,7 @@ SEXP serialize_plssvd_core_model(
     const fastpls::core::PlssvdModel<T>& model,
     fastpls::core::ConstMatrixView<T> predictors,
     const Prepared& prepared, SEXP effective_components, bool fitted,
+    bool store_scores,
     const char* xprod_mode, Backend& backend,
     Metric metric, bool array_paths = false) {
   ProtectStack protect;
@@ -688,7 +689,9 @@ SEXP serialize_plssvd_core_model(
   SET_VECTOR_ELT(output, 0, R_NilValue);
   SET_VECTOR_ELT(output, 1, core_matrix(model.weights));
   SET_VECTOR_ELT(output, 2, core_matrix(model.response_loadings));
-  SET_VECTOR_ELT(output, 3, core_matrix(model.scores));
+  SET_VECTOR_ELT(
+    output, 3, store_scores ? core_matrix(model.scores) : R_NilValue
+  );
   SET_VECTOR_ELT(
     output, 4, array_paths ? core_matrix_cube(
       model.prediction_weights, model.weights.columns(),
@@ -761,7 +764,7 @@ template<class T, class Prepared, class Backend, class Metric>
 SEXP fit_plssvd_core_prepared(
     fastpls::core::ConstMatrixView<T> predictors,
     const Prepared& prepared, std::size_t response_rank_cap,
-    SEXP components, bool fitted, int oversample, int power,
+    SEXP components, bool fitted, bool store_scores, int oversample, int power,
     unsigned int seed, const char* xprod_mode, Backend& backend,
     Metric metric, bool array_paths = false) {
   ProtectStack protect;
@@ -778,7 +781,8 @@ SEXP fit_plssvd_core_prepared(
     static_cast<std::size_t>(XLENGTH(effective)), controls, backend
   );
   return serialize_plssvd_core_model(
-    model, predictors, prepared, effective, fitted, xprod_mode, backend,
+    model, predictors, prepared, effective, fitted, store_scores, xprod_mode,
+    backend,
     metric, array_paths
   );
 }
@@ -788,11 +792,12 @@ SEXP fit_plssvd_label_core_prepared(
     fastpls::core::ConstMatrixView<T> predictors,
     const fastpls::core::LabelCrossprodResult<T>& prepared,
     const std::vector<std::size_t>& labels, int class_count,
-    SEXP components, bool fitted, int oversample, int power,
+    SEXP components, bool fitted, bool store_scores, int oversample, int power,
     unsigned int seed, const char* xprod_mode, Backend& backend) {
   return fit_plssvd_core_prepared(
     predictors, prepared, static_cast<std::size_t>(class_count - 1),
-    components, fitted, oversample, power, seed, xprod_mode, backend,
+    components, fitted, store_scores, oversample, power, seed, xprod_mode,
+    backend,
     [&](fastpls::core::ConstMatrixView<T> values) {
       return fastpls::core::dummy_response_r2(
         labels.data(), labels.size(), prepared.response_mean.data(),
@@ -806,7 +811,8 @@ template<class T, class Backend>
 SEXP fit_plssvd_label_core(
     fastpls::core::Matrix<T>& predictors,
     const std::vector<std::size_t>& labels, int class_count,
-    SEXP components, int scaling, bool fitted, int oversample, int power,
+    SEXP components, int scaling, bool fitted, bool store_scores,
+    int oversample, int power,
     unsigned int seed, const char* xprod_mode, Backend& backend) {
   const auto prepared = fastpls::core::prepare_scaled_label_crossprod(
     predictors.view(), labels.data(), labels.size(),
@@ -815,8 +821,8 @@ SEXP fit_plssvd_label_core(
   );
   return fit_plssvd_label_core_prepared(
     fastpls::core::ConstMatrixView<T>(predictors.view()), prepared, labels,
-    class_count, components, fitted, oversample, power, seed, xprod_mode,
-    backend
+    class_count, components, fitted, store_scores, oversample, power, seed,
+    xprod_mode, backend
   );
 }
 
@@ -888,6 +894,7 @@ SEXP serialize_simpls_core_model(
     const fastpls::core::SimplsModel<T>& model,
     fastpls::core::ConstMatrixView<T> predictors,
     const Prepared& prepared, SEXP effective_components, bool fitted,
+    bool store_scores,
     const char* xprod_mode, Backend& backend, Metric metric,
     const fastpls::core::SimplsControls& controls,
     bool array_paths = false) {
@@ -940,7 +947,9 @@ SEXP serialize_simpls_core_model(
   SET_VECTOR_ELT(output, 0, R_NilValue);
   SET_VECTOR_ELT(output, 1, core_matrix(model.weights));
   SET_VECTOR_ELT(output, 2, core_matrix(model.response_loadings));
-  SET_VECTOR_ELT(output, 3, core_matrix(model.scores));
+  SET_VECTOR_ELT(
+    output, 3, store_scores ? core_matrix(model.scores) : R_NilValue
+  );
   SET_VECTOR_ELT(output, 4, core_matrix(row_matrix(
     prepared.predictor_center
   )));
@@ -982,7 +991,8 @@ template<class T, class Prepared, class Backend, class Metric>
 SEXP fit_simpls_core_prepared(
     fastpls::core::ConstMatrixView<T> predictors,
     const Prepared& prepared,
-    SEXP components, bool fitted, int oversample, int power,
+    SEXP components, bool fitted, bool store_scores,
+    int oversample, int power,
     unsigned int seed, const char* xprod_mode, Backend& backend,
     Metric metric, bool array_paths = false,
     bool reorthogonalize_scores = false,
@@ -1001,6 +1011,7 @@ SEXP fit_simpls_core_prepared(
     oversample, power, seed
   );
   controls.reorthogonalize = reorthogonalize_scores;
+  controls.store_scores = fitted || store_scores;
   fastpls::core::SimplsWorkspace<T> workspace;
   const auto model = fastpls::core::fit_simpls_preprocessed<T>(
     predictors, prepared.crossprod.view(), controls, backend, workspace
@@ -1011,8 +1022,8 @@ SEXP fit_simpls_core_prepared(
     );
   }
   return serialize_simpls_core_model(
-    model, predictors, prepared, effective_components, fitted, xprod_mode,
-    backend, metric, controls, array_paths
+    model, predictors, prepared, effective_components, fitted,
+    controls.store_scores, xprod_mode, backend, metric, controls, array_paths
   );
 }
 
@@ -1021,10 +1032,12 @@ SEXP fit_simpls_label_core_prepared(
     fastpls::core::ConstMatrixView<T> predictors,
     const fastpls::core::LabelCrossprodResult<T>& prepared,
     const std::vector<std::size_t>& labels, int class_count,
-    SEXP components, bool fitted, int oversample, int power,
+    SEXP components, bool fitted, bool store_scores,
+    int oversample, int power,
     unsigned int seed, const char* xprod_mode, Backend& backend) {
   return fit_simpls_core_prepared(
-    predictors, prepared, components, fitted, oversample, power, seed,
+    predictors, prepared, components, fitted, store_scores,
+    oversample, power, seed,
     xprod_mode, backend,
     [&](fastpls::core::ConstMatrixView<T> values) {
       return fastpls::core::dummy_response_r2(
@@ -1039,7 +1052,8 @@ template<class T, class Backend>
 SEXP fit_simpls_label_core(
     fastpls::core::Matrix<T>& predictors,
     const std::vector<std::size_t>& labels, int class_count,
-    SEXP components, int scaling, bool fitted, int oversample, int power,
+    SEXP components, int scaling, bool fitted, bool store_scores,
+    int oversample, int power,
     unsigned int seed, const char* xprod_mode, Backend& backend) {
   const auto prepared = fastpls::core::prepare_scaled_label_crossprod(
     predictors.view(), labels.data(), labels.size(),
@@ -1048,8 +1062,8 @@ SEXP fit_simpls_label_core(
   );
   return fit_simpls_label_core_prepared(
     fastpls::core::ConstMatrixView<T>(predictors.view()), prepared, labels,
-    class_count, components, fitted, oversample, power, seed, xprod_mode,
-    backend
+    class_count, components, fitted, store_scores, oversample, power, seed,
+    xprod_mode, backend
   );
 }
 
@@ -1058,7 +1072,8 @@ SEXP fit_dense_core_prepared(
     fastpls::core::ConstMatrixView<T> predictors,
     fastpls::core::ConstMatrixView<T> responses,
     const fastpls::core::DensePreprocessingResult<T>& prepared,
-    SEXP components, bool fitted, int method, int oversample, int power,
+    SEXP components, bool fitted, bool store_scores,
+    int method, int oversample, int power,
     unsigned int seed, const char* xprod_mode, Backend& backend,
     bool array_paths) {
   const auto metric = [&](fastpls::core::ConstMatrixView<T> values) {
@@ -1070,13 +1085,14 @@ SEXP fit_dense_core_prepared(
   if (method == 1) {
     return fit_plssvd_core_prepared(
       predictors, prepared, prepared.response_mean.size(), components,
-      fitted, oversample, power, seed, xprod_mode, backend, metric, array_paths
+      fitted, store_scores, oversample, power, seed, xprod_mode, backend,
+      metric, array_paths
     );
   }
   if (method == 3) {
     return fit_simpls_core_prepared(
-      predictors, prepared, components, fitted, oversample, power, seed,
-      xprod_mode, backend, metric, array_paths,
+      predictors, prepared, components, fitted, store_scores,
+      oversample, power, seed, xprod_mode, backend, metric, array_paths,
       std::is_same<T, float>::value
     );
   }
@@ -1090,7 +1106,7 @@ SEXP fit_dense_plssvd_operator(
     fastpls::core::ConstMatrixView<T> predictors,
     fastpls::core::ConstMatrixView<T> responses,
     const fastpls::core::DensePreprocessingResult<T>& prepared,
-    SEXP components, bool fitted, int oversample, int power,
+    SEXP components, bool fitted, bool store_scores, int oversample, int power,
     unsigned int seed, const char* xprod_mode, Backend& backend,
     bool array_paths) {
   ProtectStack protect;
@@ -1118,8 +1134,8 @@ SEXP fit_dense_plssvd_operator(
     );
   };
   return serialize_plssvd_core_model(
-    model, predictors, prepared, effective, fitted, xprod_mode, backend,
-    metric, array_paths
+    model, predictors, prepared, effective, fitted, store_scores, xprod_mode,
+    backend, metric, array_paths
   );
 }
 
@@ -1128,7 +1144,8 @@ SEXP fit_dense_simpls_operator(
     fastpls::core::ConstMatrixView<T> predictors,
     fastpls::core::ConstMatrixView<T> responses,
     const fastpls::core::DensePreprocessingResult<T>& prepared,
-    SEXP components, bool fitted, int oversample, int power,
+    SEXP components, bool fitted, bool store_scores,
+    int oversample, int power,
     unsigned int seed, const char* xprod_mode, Backend& backend,
     bool array_paths) {
   ProtectStack protect;
@@ -1142,6 +1159,7 @@ SEXP fit_dense_simpls_operator(
     static_cast<std::size_t>(maximum_components), false,
     oversample, power, seed
   );
+  controls.store_scores = fitted || store_scores;
   const long double crosscov_bytes =
     static_cast<long double>(predictors.columns()) *
     static_cast<long double>(responses.columns()) * sizeof(T);
@@ -1175,8 +1193,8 @@ SEXP fit_dense_simpls_operator(
     );
   };
   return serialize_simpls_core_model(
-    model, predictors, prepared, effective, fitted, xprod_mode, backend,
-    metric, controls, array_paths
+    model, predictors, prepared, effective, fitted, controls.store_scores,
+    xprod_mode, backend, metric, controls, array_paths
   );
 }
 
@@ -2483,7 +2501,8 @@ extern "C" SEXP _fastPLS_opls_filter_float32_labels_backend_core_cpp(
 
 extern "C" SEXP _fastPLS_pls_labels_core_cpp(
     SEXP predictors, SEXP labels, SEXP class_count, SEXP components,
-    SEXP scaling, SEXP fit, SEXP oversample, SEXP power, SEXP seed) {
+    SEXP scaling, SEXP fit, SEXP store_scores, SEXP oversample, SEXP power,
+    SEXP seed) {
   return translate_exceptions("double core PLS-SVD fitting", [&] {
     if (TYPEOF(components) != INTSXP || XLENGTH(components) < 1) {
       throw std::invalid_argument(
@@ -2493,7 +2512,9 @@ extern "C" SEXP _fastPLS_pls_labels_core_cpp(
     const int classes = Rf_asInteger(class_count);
     const int scaling_code = Rf_asInteger(scaling);
     const int fit_code = Rf_asLogical(fit);
-    if (scaling_code < 1 || scaling_code > 3 || fit_code == NA_LOGICAL) {
+    const int store_scores_code = Rf_asLogical(store_scores);
+    if (scaling_code < 1 || scaling_code > 3 || fit_code == NA_LOGICAL ||
+        store_scores_code == NA_LOGICAL) {
       throw std::invalid_argument(
         "double core PLS-SVD training controls are invalid"
       );
@@ -2513,6 +2534,7 @@ extern "C" SEXP _fastPLS_pls_labels_core_cpp(
       );
       return fit_plssvd_label_core_prepared(
         x, prepared, encoded, classes, components, fit_code,
+        store_scores_code,
         Rf_asInteger(oversample), Rf_asInteger(power),
         static_cast<unsigned int>(Rf_asInteger(seed)),
         "float64_label_class_sums", backend
@@ -2526,6 +2548,7 @@ extern "C" SEXP _fastPLS_pls_labels_core_cpp(
     );
     return fit_plssvd_label_core(
       x, encoded, classes, components, scaling_code, fit_code,
+      store_scores_code,
       Rf_asInteger(oversample), Rf_asInteger(power),
       static_cast<unsigned int>(Rf_asInteger(seed)),
       "float64_label_class_sums", backend
@@ -2535,7 +2558,8 @@ extern "C" SEXP _fastPLS_pls_labels_core_cpp(
 
 extern "C" SEXP _fastPLS_pls_simpls_labels_core_cpp(
     SEXP predictors, SEXP labels, SEXP class_count, SEXP components,
-    SEXP scaling, SEXP fit, SEXP oversample, SEXP power, SEXP seed) {
+    SEXP scaling, SEXP fit, SEXP store_scores, SEXP oversample, SEXP power,
+    SEXP seed) {
   return translate_exceptions("double core SIMPLS fitting", [&] {
     if (TYPEOF(components) != INTSXP || XLENGTH(components) < 1) {
       throw std::invalid_argument(
@@ -2545,7 +2569,9 @@ extern "C" SEXP _fastPLS_pls_simpls_labels_core_cpp(
     const int classes = Rf_asInteger(class_count);
     const int scaling_code = Rf_asInteger(scaling);
     const int fit_code = Rf_asLogical(fit);
-    if (scaling_code < 1 || scaling_code > 3 || fit_code == NA_LOGICAL) {
+    const int store_scores_code = Rf_asLogical(store_scores);
+    if (scaling_code < 1 || scaling_code > 3 || fit_code == NA_LOGICAL ||
+        store_scores_code == NA_LOGICAL) {
       throw std::invalid_argument(
         "double core SIMPLS training controls are invalid"
       );
@@ -2565,6 +2591,7 @@ extern "C" SEXP _fastPLS_pls_simpls_labels_core_cpp(
       );
       return fit_simpls_label_core_prepared(
         x, prepared, encoded, classes, components, fit_code,
+        store_scores_code,
         Rf_asInteger(oversample), Rf_asInteger(power),
         static_cast<unsigned int>(Rf_asInteger(seed)),
         "float64_label_class_sums_blocked", backend
@@ -2578,6 +2605,7 @@ extern "C" SEXP _fastPLS_pls_simpls_labels_core_cpp(
     );
     return fit_simpls_label_core(
       x, encoded, classes, components, scaling_code, fit_code,
+      store_scores_code,
       Rf_asInteger(oversample), Rf_asInteger(power),
       static_cast<unsigned int>(Rf_asInteger(seed)),
       "float64_label_class_sums_blocked", backend
@@ -2587,7 +2615,8 @@ extern "C" SEXP _fastPLS_pls_simpls_labels_core_cpp(
 
 extern "C" SEXP _fastPLS_pls_matrix_core_cpp(
     SEXP predictors, SEXP responses, SEXP components, SEXP scaling,
-    SEXP fit, SEXP method, SEXP oversample, SEXP power, SEXP seed) {
+    SEXP fit, SEXP store_scores, SEXP method, SEXP oversample, SEXP power,
+    SEXP seed) {
   return translate_exceptions("double dense core PLS fitting", [&] {
     if (TYPEOF(components) != INTSXP || XLENGTH(components) < 1) {
       throw std::invalid_argument(
@@ -2604,8 +2633,10 @@ extern "C" SEXP _fastPLS_pls_matrix_core_cpp(
     }
     const int scaling_code = Rf_asInteger(scaling);
     const int fit_code = Rf_asLogical(fit);
+    const int store_scores_code = Rf_asLogical(store_scores);
     const int method_code = Rf_asInteger(method);
     if (scaling_code < 1 || scaling_code > 3 || fit_code == NA_LOGICAL ||
+        store_scores_code == NA_LOGICAL ||
         (method_code != 1 && method_code != 3)) {
       throw std::invalid_argument(
         "double dense core PLS controls are invalid"
@@ -2620,7 +2651,7 @@ extern "C" SEXP _fastPLS_pls_matrix_core_cpp(
         x, y, backend
       );
       return fit_dense_core_prepared(
-        x, y, prepared, components, fit_code, method_code,
+        x, y, prepared, components, fit_code, store_scores_code, method_code,
         Rf_asInteger(oversample), Rf_asInteger(power),
         static_cast<unsigned int>(Rf_asInteger(seed)),
         "float64_dense_crosscov", backend, true
@@ -2635,7 +2666,8 @@ extern "C" SEXP _fastPLS_pls_matrix_core_cpp(
     );
     return fit_dense_core_prepared(
       fastpls::core::ConstMatrixView<double>(x.view()), y, prepared,
-      components, fit_code, method_code, Rf_asInteger(oversample),
+      components, fit_code, store_scores_code, method_code,
+      Rf_asInteger(oversample),
       Rf_asInteger(power), static_cast<unsigned int>(Rf_asInteger(seed)),
       "float64_dense_crosscov", backend, true
     );
@@ -2644,7 +2676,8 @@ extern "C" SEXP _fastPLS_pls_matrix_core_cpp(
 
 extern "C" SEXP _fastPLS_pls_matrix_core_xprod_cpp(
     SEXP predictors, SEXP responses, SEXP components, SEXP scaling,
-    SEXP fit, SEXP method, SEXP oversample, SEXP power, SEXP seed) {
+    SEXP fit, SEXP store_scores, SEXP method, SEXP oversample, SEXP power,
+    SEXP seed) {
   return translate_exceptions("double implicit core PLS fitting", [&] {
     const int method_code = Rf_asInteger(method);
     if (TYPEOF(components) != INTSXP || XLENGTH(components) < 1 ||
@@ -2666,8 +2699,9 @@ extern "C" SEXP _fastPLS_pls_matrix_core_xprod_cpp(
     }
     const int scaling_code = Rf_asInteger(scaling);
     const int fit_code = Rf_asLogical(fit);
+    const int store_scores_code = Rf_asLogical(store_scores);
     if (x.rows() != y.rows() || scaling_code < 1 || scaling_code > 3 ||
-        fit_code == NA_LOGICAL) {
+        fit_code == NA_LOGICAL || store_scores_code == NA_LOGICAL) {
       throw std::invalid_argument(
         "double implicit core PLS dimensions or controls are invalid"
       );
@@ -2680,15 +2714,16 @@ extern "C" SEXP _fastPLS_pls_matrix_core_xprod_cpp(
     const auto x_view = fastpls::core::ConstMatrixView<double>(x.view());
     if (method_code == 1) {
       return fit_dense_plssvd_operator(
-        x_view, y, prepared, components, fit_code, Rf_asInteger(oversample),
-        Rf_asInteger(power),
+        x_view, y, prepared, components, fit_code, store_scores_code,
+        Rf_asInteger(oversample), Rf_asInteger(power),
         static_cast<unsigned int>(Rf_asInteger(seed)),
         "float64_implicit_crosscov", backend, true
       );
     }
     return fit_dense_simpls_operator(
-      x_view, y, prepared, components, fit_code, Rf_asInteger(oversample),
-      Rf_asInteger(power), static_cast<unsigned int>(Rf_asInteger(seed)),
+      x_view, y, prepared, components, fit_code, store_scores_code,
+      Rf_asInteger(oversample), Rf_asInteger(power),
+      static_cast<unsigned int>(Rf_asInteger(seed)),
       "float64_implicit_crosscov", backend, true
     );
   });
@@ -2696,7 +2731,8 @@ extern "C" SEXP _fastPLS_pls_matrix_core_xprod_cpp(
 
 extern "C" SEXP _fastPLS_pls_float32_matrix_core_cpp(
     SEXP predictors, SEXP responses, SEXP components, SEXP scaling,
-    SEXP fit, SEXP method, SEXP oversample, SEXP power, SEXP seed) {
+    SEXP fit, SEXP store_scores, SEXP method, SEXP oversample, SEXP power,
+    SEXP seed) {
   return translate_exceptions("float32 dense core PLS fitting", [&] {
     if (TYPEOF(components) != INTSXP || XLENGTH(components) < 1) {
       throw std::invalid_argument(
@@ -2708,9 +2744,10 @@ extern "C" SEXP _fastPLS_pls_float32_matrix_core_cpp(
     const auto y = float_matrix_from_s4(responses, "Ytrain");
     const int scaling_code = Rf_asInteger(scaling);
     const int fit_code = Rf_asLogical(fit);
+    const int store_scores_code = Rf_asLogical(store_scores);
     const int method_code = Rf_asInteger(method);
     if (x.rows() != y.rows() || scaling_code < 1 || scaling_code > 3 ||
-        fit_code == NA_LOGICAL ||
+        fit_code == NA_LOGICAL || store_scores_code == NA_LOGICAL ||
         (method_code != 1 && method_code != 3)) {
       throw std::invalid_argument(
         "float32 dense core PLS dimensions or controls are invalid"
@@ -2724,7 +2761,8 @@ extern "C" SEXP _fastPLS_pls_float32_matrix_core_cpp(
     return fit_dense_core_prepared(
       fastpls::core::ConstMatrixView<float>(x.view()),
       fastpls::core::ConstMatrixView<float>(y.view()), prepared,
-      components, fit_code, method_code, Rf_asInteger(oversample),
+      components, fit_code, store_scores_code, method_code,
+      Rf_asInteger(oversample),
       Rf_asInteger(power), static_cast<unsigned int>(Rf_asInteger(seed)),
       "float32_dense_crosscov", backend, false
     );
@@ -2906,8 +2944,8 @@ extern "C" SEXP _fastPLS_pls_labels_core_predict_cpp(
 
 extern "C" SEXP _fastPLS_pls_float32_labels_core_cpp(
     SEXP predictors, SEXP labels, SEXP class_count, SEXP components,
-    SEXP scaling, SEXP fit, SEXP method, SEXP oversample, SEXP power,
-    SEXP seed) {
+    SEXP scaling, SEXP fit, SEXP store_scores, SEXP method, SEXP oversample,
+    SEXP power, SEXP seed) {
   return translate_exceptions("float32 core PLS fitting", [&] {
     if (TYPEOF(labels) != INTSXP || TYPEOF(components) != INTSXP ||
         XLENGTH(components) < 1) {
@@ -2920,9 +2958,10 @@ extern "C" SEXP _fastPLS_pls_float32_labels_core_cpp(
     const int classes = Rf_asInteger(class_count);
     const int scaling_code = Rf_asInteger(scaling);
     const int fit_code = Rf_asLogical(fit);
+    const int store_scores_code = Rf_asLogical(store_scores);
     const int method_code = Rf_asInteger(method);
     if (classes < 2 || scaling_code < 1 || scaling_code > 3 ||
-        fit_code == NA_LOGICAL ||
+        fit_code == NA_LOGICAL || store_scores_code == NA_LOGICAL ||
         (method_code != 1 && method_code != 3) ||
         XLENGTH(labels) != static_cast<R_xlen_t>(x.rows())) {
       throw std::invalid_argument(
@@ -2936,6 +2975,7 @@ extern "C" SEXP _fastPLS_pls_float32_labels_core_cpp(
     if (method_code == 1) {
       return fit_plssvd_label_core(
         x, encoded, classes, components, scaling_code, fit_code,
+        store_scores_code,
         Rf_asInteger(oversample), Rf_asInteger(power),
         static_cast<unsigned int>(Rf_asInteger(seed)),
         "float32_label_class_sums", backend
@@ -2948,7 +2988,8 @@ extern "C" SEXP _fastPLS_pls_float32_labels_core_cpp(
     );
     return fit_simpls_label_core_prepared(
       fastpls::core::ConstMatrixView<float>(x.view()), prepared, encoded,
-      classes, components, fit_code, Rf_asInteger(oversample),
+      classes, components, fit_code, store_scores_code,
+      Rf_asInteger(oversample),
       Rf_asInteger(power), static_cast<unsigned int>(Rf_asInteger(seed)),
       "float32_label_class_sums_blocked", backend
     );

@@ -68,3 +68,34 @@ test_that("invalid latent counts do not bypass the existing coefficient fallback
     expect_error(fastPLS:::pls_predict(model, X, TRUE),
         "compact latent prediction was not available")
 })
+
+test_that("compact CPU SIMPLS omits unused training scores", {
+    set.seed(921)
+    predictors <- matrix(rnorm(360 * 48), 360, 48)
+    labels <- factor(sample(letters[1:6], 360, replace = TRUE))
+
+    for (precision in c("float64", "float32")) {
+        input <- if (precision == "float32") {
+            float::fl(predictors)
+        } else {
+            predictors
+        }
+        compact <- pls(
+            input, labels, ncomp = 8L, method = "simpls", backend = "cpu",
+            fit = FALSE, return_variance = FALSE, seed = 37L
+        )
+        fitted <- pls(
+            input, labels, ncomp = 8L, method = "simpls", backend = "cpu",
+            fit = TRUE, return_variance = FALSE, seed = 37L
+        )
+
+        expect_null(compact$Ttrain, info = precision)
+        expect_equal(dim(fitted$Ttrain), c(nrow(predictors), 8L),
+            info = precision)
+        expect_identical(
+            predict(compact, input)$Ypred,
+            predict(fitted, input)$Ypred,
+            info = precision
+        )
+    }
+})

@@ -794,13 +794,13 @@ static const R_CallMethodDef CallEntries[] = {
     {"_fastPLS_opls_filter_float32_labels_core_cpp",      (DL_FUNC) &_fastPLS_opls_filter_float32_labels_core_cpp,       5},
     {"_fastPLS_opls_filter_float32_backend_core_cpp",     (DL_FUNC) &_fastPLS_opls_filter_float32_backend_core_cpp,      8},
     {"_fastPLS_opls_filter_float32_labels_backend_core_cpp", (DL_FUNC) &_fastPLS_opls_filter_float32_labels_backend_core_cpp, 9},
-    {"_fastPLS_pls_labels_core_cpp",                     (DL_FUNC) &_fastPLS_pls_labels_core_cpp,                      9},
-    {"_fastPLS_pls_simpls_labels_core_cpp",              (DL_FUNC) &_fastPLS_pls_simpls_labels_core_cpp,               9},
-    {"_fastPLS_pls_matrix_core_cpp",                     (DL_FUNC) &_fastPLS_pls_matrix_core_cpp,                      9},
-    {"_fastPLS_pls_matrix_core_xprod_cpp",               (DL_FUNC) &_fastPLS_pls_matrix_core_xprod_cpp,                9},
-    {"_fastPLS_pls_float32_matrix_core_cpp",             (DL_FUNC) &_fastPLS_pls_float32_matrix_core_cpp,              9},
+    {"_fastPLS_pls_labels_core_cpp",                     (DL_FUNC) &_fastPLS_pls_labels_core_cpp,                     10},
+    {"_fastPLS_pls_simpls_labels_core_cpp",              (DL_FUNC) &_fastPLS_pls_simpls_labels_core_cpp,              10},
+    {"_fastPLS_pls_matrix_core_cpp",                     (DL_FUNC) &_fastPLS_pls_matrix_core_cpp,                     10},
+    {"_fastPLS_pls_matrix_core_xprod_cpp",               (DL_FUNC) &_fastPLS_pls_matrix_core_xprod_cpp,               10},
+    {"_fastPLS_pls_float32_matrix_core_cpp",             (DL_FUNC) &_fastPLS_pls_float32_matrix_core_cpp,             10},
     {"_fastPLS_pls_labels_core_predict_cpp",             (DL_FUNC) &_fastPLS_pls_labels_core_predict_cpp,              3},
-    {"_fastPLS_pls_float32_labels_core_cpp",             (DL_FUNC) &_fastPLS_pls_float32_labels_core_cpp,             10},
+    {"_fastPLS_pls_float32_labels_core_cpp",             (DL_FUNC) &_fastPLS_pls_float32_labels_core_cpp,             11},
     {NULL, NULL, 0}
 };
 

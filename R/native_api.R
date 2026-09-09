@@ -6,11 +6,11 @@ cpu_backend_description_cpp <- function() {
 
 pls_labels_core_cpp <- function(
     predictors, labels, class_count, components, scaling, fit,
-    oversample, power, seed
+    oversample, power, seed, store_scores = TRUE
 ) {
     .Call(
         "_fastPLS_pls_labels_core_cpp", predictors, labels, class_count,
-        components, scaling, fit, oversample, power, seed,
+        components, scaling, fit, store_scores, oversample, power, seed,
         PACKAGE = "fastPLS"
     )
 }
@@ -24,55 +24,59 @@ pls_labels_core_predict_cpp <- function(model, predictors, project = FALSE) {
 
 pls_simpls_labels_core_cpp <- function(
     predictors, labels, class_count, components, scaling, fit,
-    oversample, power, seed
+    oversample, power, seed, store_scores = TRUE
 ) {
     .Call(
         "_fastPLS_pls_simpls_labels_core_cpp", predictors, labels,
-        class_count, components, scaling, fit, oversample, power, seed,
+        class_count, components, scaling, fit, store_scores,
+        oversample, power, seed,
         PACKAGE = "fastPLS"
     )
 }
 
 pls_matrix_core_cpp <- function(
     predictors, responses, components, scaling, fit, method,
-    oversample, power, seed
+    oversample, power, seed, store_scores = TRUE
 ) {
     .Call(
         "_fastPLS_pls_matrix_core_cpp", predictors, responses, components,
-        scaling, fit, method, oversample, power, seed,
+        scaling, fit, store_scores, method, oversample, power, seed,
         PACKAGE = "fastPLS"
     )
 }
 
 pls_matrix_core_xprod_cpp <- function(
     predictors, responses, components, scaling, fit, method,
-    oversample, power, seed
+    oversample, power, seed, store_scores = TRUE
 ) {
     .Call(
         "_fastPLS_pls_matrix_core_xprod_cpp", predictors, responses,
-        components, scaling, fit, method, oversample, power, seed,
+        components, scaling, fit, store_scores, method, oversample, power,
+        seed,
         PACKAGE = "fastPLS"
     )
 }
 
 pls_float32_matrix_core_cpp <- function(
     predictors, responses, components, scaling, fit, method,
-    oversample, power, seed
+    oversample, power, seed, store_scores = TRUE
 ) {
     .Call(
         "_fastPLS_pls_float32_matrix_core_cpp", predictors, responses,
-        components, scaling, fit, method, oversample, power, seed,
+        components, scaling, fit, store_scores, method, oversample, power,
+        seed,
         PACKAGE = "fastPLS"
     )
 }
 
 pls_float32_labels_core_cpp <- function(
     predictors, labels, class_count, components, scaling, fit, method,
-    oversample, power, seed
+    oversample, power, seed, store_scores = TRUE
 ) {
     .Call(
         "_fastPLS_pls_float32_labels_core_cpp", predictors, labels,
-        class_count, components, scaling, fit, method, oversample, power, seed,
+        class_count, components, scaling, fit, store_scores, method,
+        oversample, power, seed,
         PACKAGE = "fastPLS"
     )
 }

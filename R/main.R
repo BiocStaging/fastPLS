@@ -4788,7 +4788,7 @@ print.fastPLS <- function(x, ...) {
 
 .fit_float32_pls <- function(Xtrain, Ytrain, ncomp, scaling, method, backend,
     svd.method,
-    rsvd_oversample, rsvd_power, seed, fit) {
+    rsvd_oversample, rsvd_power, seed, fit, store_scores = fit) {
     use_label_products <- is.factor(Ytrain) || is.character(Ytrain)
     yprep <- .float32_prepare_response(Ytrain,
         materialize_labels = !use_label_products)
@@ -4808,7 +4808,8 @@ print.fastPLS <- function(x, ...) {
         pls_float32_labels_core_cpp(
             fit_args[[1L]], fit_args[[2L]], yprep$n_classes,
             fit_args[[3L]], fit_args[[4L]], fit_args[[5L]], fit_args[[6L]],
-            fit_args[[9L]], fit_args[[10L]], fit_args[[11L]]
+            fit_args[[9L]], fit_args[[10L]], fit_args[[11L]],
+            store_scores = store_scores
         )
     } else if (use_label_products) {
         do.call(pls_float32_labels_cpp, append(fit_args, yprep$n_classes,
@@ -4818,7 +4819,7 @@ print.fastPLS <- function(x, ...) {
         pls_float32_matrix_core_cpp(
             fit_args[[1L]], fit_args[[2L]], fit_args[[3L]], fit_args[[4L]],
             fit_args[[5L]], fit_args[[6L]], fit_args[[9L]], fit_args[[10L]],
-            fit_args[[11L]]
+            fit_args[[11L]], store_scores = store_scores
         )
     } else {
         do.call(pls_float32_cpu_cpp, fit_args)
@@ -5173,7 +5174,8 @@ print.fastPLS <- function(x, ...) {
             rsvd_oversample = rsvd_oversample,
             rsvd_power = rsvd_power,
             seed = seed,
-            fit = fit
+            fit = fit,
+            store_scores = fit || .is_lda_classifier(classifier)
         )
         inner <- .attach_float32_classifier(
             inner,
@@ -5278,7 +5280,8 @@ print.fastPLS <- function(x, ...) {
     } else {
         value <- .fit_float32_pls(
             Xtrain, Ytrain, ncomp, scaling, "simpls", backend,
-            svd.method, oversample, power, seed, fit
+            svd.method, oversample, power, seed, fit,
+            store_scores = fit || .is_lda_classifier(classifier)
         )
         .attach_float32_classifier(
             value, Xtrain, Ytrain, classifier, lda_ridge
@@ -5316,7 +5319,8 @@ print.fastPLS <- function(x, ...) {
             Xtrain = kernel_data$K, Ytrain = Ytrain, ncomp = ncomp,
             scaling = 3L, method = "simpls", backend = backend,
             svd.method = svd.method, rsvd_oversample = rsvd_oversample,
-            rsvd_power = rsvd_power, seed = seed, fit = fit
+            rsvd_power = rsvd_power, seed = seed, fit = fit,
+            store_scores = fit || .is_lda_classifier(classifier)
         )
         .attach_float32_classifier(
             value, Xtrain = kernel_data$K, Ytrain_original = Ytrain,
@@ -11430,7 +11434,9 @@ model <- .maybe_attach_pls_variance_explained(model, Xtrain, return_variance)
             config$ncomp,
             context$scal, context$method, context$backend, ctl$svd.method,
             ctl$rsvd_oversample,
-            ctl$rsvd_power, ctl$seed, config$fit)
+            ctl$rsvd_power, ctl$seed, config$fit,
+            store_scores = config$fit ||
+                .is_lda_classifier(context$classifier))
         .attach_float32_classifier(fitted, context$Xtrain, context$Ytrain,
             context$classifier,
             config$lda_ridge)
@@ -11620,6 +11626,8 @@ model <- .maybe_attach_pls_variance_explained(model, Xtrain, return_variance)
             components = as.integer(config$ncomp),
             scaling = context$scal,
             fit = config$fit,
+            store_scores = config$fit ||
+                .is_lda_classifier(context$classifier),
             method = 3L,
             oversample = ctl$rsvd_oversample,
             power = ctl$rsvd_power,
@@ -11697,6 +11705,8 @@ model <- .maybe_attach_pls_variance_explained(model, Xtrain, return_variance)
                 components = as.integer(ncomp),
                 scaling = context$scal,
                 fit = config$fit,
+                store_scores = config$fit ||
+                    .is_lda_classifier(context$classifier),
                 oversample = ctl$rsvd_oversample,
                 power = ctl$rsvd_power,
                 seed = ctl$seed
@@ -11740,6 +11750,8 @@ model <- .maybe_attach_pls_variance_explained(model, Xtrain, return_variance)
             components = as.integer(ncomp),
             scaling = context$scal,
             fit = config$fit,
+            store_scores = config$fit ||
+                .is_lda_classifier(context$classifier),
             method = cpu$method_id,
             oversample = context$control$rsvd_oversample,
             power = context$control$rsvd_power,
