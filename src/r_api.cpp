@@ -7,6 +7,7 @@
 #include <R_ext/Random.h>
 #include <fastpls/core/audited_rsvd.hpp>
 #include <fastpls/core/classification.hpp>
+#include <fastpls/core/cross_validation.hpp>
 #include <fastpls/core/diagnostics.hpp>
 #include <fastpls/core/folds.hpp>
 #include <fastpls/core/kernels.hpp>
@@ -1517,6 +1518,160 @@ extern "C" SEXP _fastPLS_cv_folds_core_cpp(
     }
     PutRNGstate();
     return integer_predictions(result);
+  });
+}
+
+extern "C" SEXP _fastPLS_pls_cv_classification_core_cpp(
+    SEXP predictors, SEXP labels, SEXP class_count, SEXP folds,
+    SEXP components, SEXP scaling, SEXP method, SEXP classifier,
+    SEXP oversample, SEXP power, SEXP seed, SEXP store_predictions) {
+  return translate_exceptions("core classification cross-validation", [&] {
+    ProtectStack protect;
+    const auto x = numeric_matrix_view(predictors, "Xdata");
+    SEXP label_values = protect.add(Rf_coerceVector(labels, INTSXP));
+    SEXP fold_values = protect.add(Rf_coerceVector(folds, INTSXP));
+    SEXP component_values = protect.add(Rf_coerceVector(components, INTSXP));
+    if (XLENGTH(label_values) != static_cast<R_xlen_t>(x.rows()) ||
+        XLENGTH(fold_values) != static_cast<R_xlen_t>(x.rows()) ||
+        XLENGTH(component_values) < 1) {
+      throw std::invalid_argument(
+        "core classification CV dimensions are invalid"
+      );
+    }
+    const int classes = Rf_asInteger(class_count);
+    const int scaling_code = Rf_asInteger(scaling);
+    const int method_code = Rf_asInteger(method);
+    const int classifier_code = Rf_asInteger(classifier);
+    const int retain = Rf_asLogical(store_predictions);
+    if (classes < 2 || scaling_code < 1 || scaling_code > 3 ||
+        (method_code != 1 && method_code != 3) ||
+        (classifier_code != 0 && classifier_code != 1) ||
+        retain == NA_LOGICAL) {
+      throw std::invalid_argument(
+        "core classification CV controls are invalid"
+      );
+    }
+    const int maximum = *std::max_element(
+      INTEGER(component_values),
+      INTEGER(component_values) + XLENGTH(component_values)
+    );
+    fastpls::core::PlssvdControls plssvd;
+    plssvd.rsvd.oversample = Rf_asInteger(oversample);
+    plssvd.rsvd.power = Rf_asInteger(power);
+    plssvd.rsvd.seed = static_cast<unsigned int>(Rf_asInteger(seed));
+    const auto simpls = simpls_controls(
+      x.rows(), x.columns(), static_cast<std::size_t>(classes),
+      static_cast<std::size_t>(maximum), true,
+      plssvd.rsvd.oversample, plssvd.rsvd.power, plssvd.rsvd.seed
+    );
+    fastpls::runtime::CpuLinearAlgebraF64 backend;
+    const auto result = fastpls::core::cross_validate_classification<double>(
+      x, INTEGER(label_values), static_cast<std::size_t>(classes),
+      INTEGER(fold_values),
+      INTEGER(component_values),
+      static_cast<std::size_t>(XLENGTH(component_values)),
+      static_cast<fastpls::core::PredictorScaling>(scaling_code),
+      static_cast<fastpls::core::LinearPlsFamily>(method_code),
+      static_cast<fastpls::core::ClassificationHead>(classifier_code),
+      plssvd, simpls, backend, retain == TRUE
+    );
+
+    SEXP output = protect.add(Rf_allocVector(VECSXP, 5));
+    SEXP names = protect.add(Rf_allocVector(STRSXP, 5));
+    const char* field_names[5] = {
+      "fold", "status", "ncomp", "metric_value", "class_pred"
+    };
+    for (int index = 0; index < 5; ++index) {
+      SET_STRING_ELT(names, index, Rf_mkChar(field_names[index]));
+    }
+    SET_VECTOR_ELT(output, 0, integer_predictions(result.folds));
+    SET_VECTOR_ELT(output, 1, integer_predictions(result.status));
+    SET_VECTOR_ELT(output, 2, component_values);
+    SET_VECTOR_ELT(output, 3, numeric_vector(result.metrics));
+    SET_VECTOR_ELT(output, 4, R_NilValue);
+    if (retain == TRUE) {
+      SEXP predictions = protect.add(Rf_allocMatrix(
+        INTSXP, static_cast<int>(result.predictions.rows()),
+        static_cast<int>(result.predictions.columns())
+      ));
+      std::copy(
+        result.predictions.data(),
+        result.predictions.data() + result.predictions.size(),
+        INTEGER(predictions)
+      );
+      SET_VECTOR_ELT(output, 4, predictions);
+    }
+    Rf_setAttrib(output, R_NamesSymbol, names);
+    return output;
+  });
+}
+
+extern "C" SEXP _fastPLS_pls_cv_regression_core_cpp(
+    SEXP predictors, SEXP responses, SEXP folds, SEXP components,
+    SEXP scaling, SEXP method, SEXP metric, SEXP oversample, SEXP power,
+    SEXP seed, SEXP store_predictions) {
+  return translate_exceptions("core regression cross-validation", [&] {
+    ProtectStack protect;
+    const auto x = numeric_matrix_view(predictors, "Xdata");
+    const auto y = numeric_matrix_view(responses, "Ydata");
+    SEXP fold_values = protect.add(Rf_coerceVector(folds, INTSXP));
+    SEXP component_values = protect.add(Rf_coerceVector(components, INTSXP));
+    if (x.rows() != y.rows() ||
+        XLENGTH(fold_values) != static_cast<R_xlen_t>(x.rows()) ||
+        XLENGTH(component_values) < 1) {
+      throw std::invalid_argument("core regression CV dimensions are invalid");
+    }
+    const int scaling_code = Rf_asInteger(scaling);
+    const int method_code = Rf_asInteger(method);
+    const int metric_code = Rf_asInteger(metric);
+    const int retain = Rf_asLogical(store_predictions);
+    if (scaling_code < 1 || scaling_code > 3 ||
+        (method_code != 1 && method_code != 3) ||
+        metric_code < 2 || metric_code > 4 || retain == NA_LOGICAL) {
+      throw std::invalid_argument("core regression CV controls are invalid");
+    }
+    const int maximum = *std::max_element(
+      INTEGER(component_values),
+      INTEGER(component_values) + XLENGTH(component_values)
+    );
+    fastpls::core::PlssvdControls plssvd;
+    plssvd.rsvd.oversample = Rf_asInteger(oversample);
+    plssvd.rsvd.power = Rf_asInteger(power);
+    plssvd.rsvd.seed = static_cast<unsigned int>(Rf_asInteger(seed));
+    const auto simpls = simpls_controls(
+      x.rows(), x.columns(), y.columns(), static_cast<std::size_t>(maximum),
+      false, plssvd.rsvd.oversample, plssvd.rsvd.power,
+      plssvd.rsvd.seed
+    );
+    fastpls::runtime::CpuLinearAlgebraF64 backend;
+    const auto result = fastpls::core::cross_validate_regression<double>(
+      x, y, INTEGER(fold_values), INTEGER(component_values),
+      static_cast<std::size_t>(XLENGTH(component_values)),
+      static_cast<fastpls::core::PredictorScaling>(scaling_code),
+      static_cast<fastpls::core::LinearPlsFamily>(method_code),
+      static_cast<fastpls::core::RegressionMetric>(metric_code),
+      plssvd, simpls, backend, retain == TRUE
+    );
+
+    SEXP output = protect.add(Rf_allocVector(VECSXP, 5));
+    SEXP names = protect.add(Rf_allocVector(STRSXP, 5));
+    const char* field_names[5] = {
+      "fold", "status", "ncomp", "metric_value", "Ypred"
+    };
+    for (int index = 0; index < 5; ++index) {
+      SET_STRING_ELT(names, index, Rf_mkChar(field_names[index]));
+    }
+    SET_VECTOR_ELT(output, 0, integer_predictions(result.folds));
+    SET_VECTOR_ELT(output, 1, integer_predictions(result.status));
+    SET_VECTOR_ELT(output, 2, component_values);
+    SET_VECTOR_ELT(output, 3, numeric_vector(result.metrics));
+    SET_VECTOR_ELT(
+      output, 4, retain == TRUE ? core_matrix_list(
+        result.predictions, INTEGER(component_values)
+      ) : R_NilValue
+    );
+    Rf_setAttrib(output, R_NamesSymbol, names);
+    return output;
   });
 }
 

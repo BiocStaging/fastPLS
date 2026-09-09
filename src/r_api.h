@@ -51,6 +51,16 @@ SEXP _fastPLS_fastsvd_float32_core_cpp(SEXP matrix, SEXP components,
                                        SEXP seed, SEXP left_only);
 SEXP _fastPLS_cv_folds_core_cpp(SEXP groups, SEXP labels,
                                 SEXP class_count, SEXP folds);
+SEXP _fastPLS_pls_cv_classification_core_cpp(
+  SEXP predictors, SEXP labels, SEXP class_count, SEXP folds,
+  SEXP components, SEXP scaling, SEXP method, SEXP classifier,
+  SEXP oversample, SEXP power, SEXP seed, SEXP store_predictions
+);
+SEXP _fastPLS_pls_cv_regression_core_cpp(
+  SEXP predictors, SEXP responses, SEXP folds, SEXP components,
+  SEXP scaling, SEXP method, SEXP metric, SEXP oversample, SEXP power,
+  SEXP seed, SEXP store_predictions
+);
 SEXP _fastPLS_lda_train_prefix_cpp(SEXP scores, SEXP labels,
                                     SEXP class_count, SEXP components,
                                     SEXP ridge);
