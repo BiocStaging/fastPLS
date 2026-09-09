@@ -773,7 +773,8 @@ SEXP fit_simpls_core_prepared(
     const Prepared& prepared,
     SEXP components, bool fitted, int oversample, int power,
     unsigned int seed, const char* xprod_mode, Backend& backend,
-    Metric metric, bool array_paths = false) {
+    Metric metric, bool array_paths = false,
+    bool reorthogonalize_scores = false) {
   ProtectStack protect;
   SEXP effective_components = protect.add(Rf_duplicate(components));
   const std::size_t sample_rank = std::max<std::size_t>(
@@ -796,11 +797,12 @@ SEXP fit_simpls_core_prepared(
     );
   }
 
-  const auto controls = simpls_controls(
+  auto controls = simpls_controls(
     predictors.rows(), predictors.columns(),
     prepared.response_mean.size(),
     static_cast<std::size_t>(maximum_components), oversample, power, seed
   );
+  controls.reorthogonalize = reorthogonalize_scores;
   fastpls::core::SimplsWorkspace<T> workspace;
   const auto model = fastpls::core::fit_simpls_preprocessed<T>(
     predictors, prepared.crossprod.view(), controls, backend, workspace
@@ -938,7 +940,8 @@ SEXP fit_dense_core_prepared(
     fastpls::core::ConstMatrixView<T> responses,
     const fastpls::core::DenseCrossprodResult<T>& prepared,
     SEXP components, bool fitted, int method, int oversample, int power,
-    unsigned int seed, const char* xprod_mode, Backend& backend) {
+    unsigned int seed, const char* xprod_mode, Backend& backend,
+    bool array_paths) {
   const auto metric = [&](fastpls::core::ConstMatrixView<T> values) {
     return fastpls::core::dense_response_r2(
       responses, prepared.response_mean.data(),
@@ -948,13 +951,14 @@ SEXP fit_dense_core_prepared(
   if (method == 1) {
     return fit_plssvd_core_prepared(
       predictors, prepared, prepared.response_mean.size(), components,
-      fitted, oversample, power, seed, xprod_mode, backend, metric, true
+      fitted, oversample, power, seed, xprod_mode, backend, metric, array_paths
     );
   }
   if (method == 3) {
     return fit_simpls_core_prepared(
       predictors, prepared, components, fitted, oversample, power, seed,
-      xprod_mode, backend, metric, true
+      xprod_mode, backend, metric, array_paths,
+      std::is_same<T, float>::value
     );
   }
   throw std::invalid_argument(
@@ -2176,7 +2180,7 @@ extern "C" SEXP _fastPLS_pls_matrix_core_cpp(
         x, y, prepared, components, fit_code, method_code,
         Rf_asInteger(oversample), Rf_asInteger(power),
         static_cast<unsigned int>(Rf_asInteger(seed)),
-        "float64_dense_crosscov", backend
+        "float64_dense_crosscov", backend, true
       );
     }
     fastpls::core::Matrix<double> x = numeric_matrix_from_sexp(
@@ -2190,7 +2194,44 @@ extern "C" SEXP _fastPLS_pls_matrix_core_cpp(
       fastpls::core::ConstMatrixView<double>(x.view()), y, prepared,
       components, fit_code, method_code, Rf_asInteger(oversample),
       Rf_asInteger(power), static_cast<unsigned int>(Rf_asInteger(seed)),
-      "float64_dense_crosscov", backend
+      "float64_dense_crosscov", backend, true
+    );
+  });
+}
+
+extern "C" SEXP _fastPLS_pls_float32_matrix_core_cpp(
+    SEXP predictors, SEXP responses, SEXP components, SEXP scaling,
+    SEXP fit, SEXP method, SEXP oversample, SEXP power, SEXP seed) {
+  return translate_exceptions("float32 dense core PLS fitting", [&] {
+    if (TYPEOF(components) != INTSXP || XLENGTH(components) < 1) {
+      throw std::invalid_argument(
+        "float32 dense core PLS requires integer component counts"
+      );
+    }
+    fastpls::core::Matrix<float> x =
+      float_matrix_from_s4(predictors, "Xtrain");
+    const auto y = float_matrix_from_s4(responses, "Ytrain");
+    const int scaling_code = Rf_asInteger(scaling);
+    const int fit_code = Rf_asLogical(fit);
+    const int method_code = Rf_asInteger(method);
+    if (x.rows() != y.rows() || scaling_code < 1 || scaling_code > 3 ||
+        fit_code == NA_LOGICAL ||
+        (method_code != 1 && method_code != 3)) {
+      throw std::invalid_argument(
+        "float32 dense core PLS dimensions or controls are invalid"
+      );
+    }
+    fastpls::runtime::CpuLinearAlgebraF32 backend;
+    const auto prepared = fastpls::core::prepare_scaled_dense_crossprod(
+      x.view(), y.view(),
+      static_cast<fastpls::core::PredictorScaling>(scaling_code), backend
+    );
+    return fit_dense_core_prepared(
+      fastpls::core::ConstMatrixView<float>(x.view()),
+      fastpls::core::ConstMatrixView<float>(y.view()), prepared,
+      components, fit_code, method_code, Rf_asInteger(oversample),
+      Rf_asInteger(power), static_cast<unsigned int>(Rf_asInteger(seed)),
+      "float32_dense_crosscov", backend, false
     );
   });
 }

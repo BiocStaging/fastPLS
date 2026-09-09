@@ -65,3 +65,41 @@ test_that("public dense CPU rSVD uses the standalone core", {
         expect_equal(dim(fit$Ypred), c(nrow(task$Xtest), ncol(task$Y), 3L))
     }
 })
+
+test_that("float32 dense CPU rSVD uses the same standalone core", {
+    skip_if_not_installed("float")
+    skip_on_os("windows")
+    task <- dense_regression_fixture()
+    X <- float::fl(task$X)
+    Y <- float::fl(task$Y)
+    components <- 1:3
+    for (method in c(plssvd = 1L, simpls = 3L)) {
+        core <- fastPLS:::pls_float32_matrix_core_cpp(
+            X, Y, components, 1L, TRUE, unname(method), 32L, 5L, 9551L
+        )
+        legacy <- fastPLS:::pls_float32_cpu_cpp(
+            X, Y, components, 1L, TRUE, unname(method), 0L, 3L,
+            32L, 5L, 9551L
+        )
+        core_values <- fastPLS:::.float32_bits_list_to_float(core$Yfit)
+        legacy_values <- fastPLS:::.float32_bits_list_to_float(legacy$Yfit)
+        expect_equal(
+            as.numeric(core$R2Y), as.numeric(legacy$R2Y), tolerance = 2e-5
+        )
+        for (name in names(core_values)) {
+            expect_equal(
+                float::dbl(core_values[[name]]),
+                float::dbl(legacy_values[[name]]),
+                tolerance = 2e-5
+            )
+        }
+
+        fit <- pls(
+            X, Y, ncomp = components, method = names(method),
+            backend = "cpu", svd.method = "rsvd", fit = FALSE,
+            return_variance = FALSE, oversample = 32L, power = 5L,
+            seed = 9551L
+        )
+        expect_identical(fit$xprod_mode, "float32_dense_crosscov")
+    }
+})

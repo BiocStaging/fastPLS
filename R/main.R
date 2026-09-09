@@ -5058,7 +5058,13 @@ get("cuda_matrix_multiply", envir = asNamespace("fastPLS"), inherits = FALSE)(
         do.call(pls_float32_labels_cpp, append(fit_args, yprep$n_classes,
             after = 2L))
     }
-    else {
+    else if (identical(backend, "cpu")) {
+        pls_float32_matrix_core_cpp(
+            fit_args[[1L]], fit_args[[2L]], fit_args[[3L]], fit_args[[4L]],
+            fit_args[[5L]], fit_args[[6L]], fit_args[[9L]], fit_args[[10L]],
+            fit_args[[11L]]
+        )
+    } else {
         do.call(pls_float32_cpu_cpp, fit_args)
     }
     .float32_finalize_fit(raw_model, yprep, backend)
