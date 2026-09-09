@@ -52,6 +52,7 @@ void check() {
   using fastpls::core::CenteredCrosscovOperator;
   using fastpls::core::ExplicitOperator;
   using fastpls::core::Matrix;
+  using fastpls::core::ProjectedOperator;
   ReferenceBackend<T> backend;
   Matrix<T> x(17, 9);
   Matrix<T> y(17, 7);
@@ -122,6 +123,43 @@ void check() {
   assert(relative_error(
     actual_centered.view(), centered_crosscov.view()) < tolerance
   );
+
+  ProjectedOperator<
+    T, CenteredCrosscovOperator<T, ReferenceBackend<T>>, ReferenceBackend<T>
+  > projected(centered_operator, 3, backend);
+  Matrix<T> projected_crosscov = centered_crosscov;
+  for (std::size_t step = 0; step <= 3; ++step) {
+    Matrix<T> actual;
+    Matrix<T> expected(projected_crosscov.rows(), right.columns());
+    projected.multiply(right.view(), false, actual);
+    backend.gemm(
+      projected_crosscov.view(), right.view(), false, false, expected.view()
+    );
+    assert(relative_error(actual.view(), expected.view()) < tolerance);
+    expected.resize(projected_crosscov.columns(), left.columns());
+    projected.multiply(left.view(), true, actual);
+    backend.gemm(
+      projected_crosscov.view(), left.view(), true, false, expected.view()
+    );
+    assert(relative_error(actual.view(), expected.view()) < tolerance);
+    projected.materialize(actual);
+    assert(relative_error(
+      actual.view(), projected_crosscov.view()) < tolerance
+    );
+    if (step == 3) break;
+
+    Matrix<T> direction(9, 1);
+    for (std::size_t row = 0; row < direction.rows(); ++row) {
+      direction(row, 0) = static_cast<T>(row == step ? 1 : 0);
+    }
+    projected.deflate(direction.view());
+    for (std::size_t column = 0;
+         column < projected_crosscov.columns(); ++column) {
+      projected_crosscov(step, column) = T(0);
+    }
+  }
+  assert(projected.deflations() == 3);
+  assert(projected.basis().columns() == 3);
 
   for (std::size_t step = 0; step <= 3; ++step) {
     ExplicitOperator<T, ReferenceBackend<T>> explicit_operator(

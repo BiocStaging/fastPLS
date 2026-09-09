@@ -150,6 +150,131 @@ class CenteredCrosscovOperator {
   Matrix<T> intermediate_;
 };
 
+// Applies an orthogonal predictor-side projection to another matrix operator.
+// SIMPLS appends one orthonormal deflation direction at a time, so the current
+// cross-covariance is represented as (I - V V') S without storing S.
+template<class T, class Operator, class Backend>
+class ProjectedOperator {
+ public:
+  ProjectedOperator(Operator& input, std::size_t component_capacity,
+                    Backend& backend)
+      : input_(input), basis_(input.rows(), component_capacity),
+        backend_(backend) {
+    if (input.rows() == 0 || input.columns() == 0 ||
+        component_capacity == 0) {
+      throw std::invalid_argument(
+        "fastPLS projected operator dimensions are invalid"
+      );
+    }
+  }
+
+  std::size_t rows() const noexcept { return input_.rows(); }
+  std::size_t columns() const noexcept { return input_.columns(); }
+  std::size_t workspace_rows() const noexcept {
+    return input_.workspace_rows();
+  }
+  std::size_t deflations() const noexcept { return active_; }
+
+  void multiply(ConstMatrixView<T> right, bool transpose,
+                Matrix<T>& output) {
+    output.resize(transpose ? columns() : rows(), right.columns());
+    multiply(right, transpose, output.view());
+  }
+
+  void multiply(ConstMatrixView<T> right, bool transpose,
+                MatrixView<T> output) {
+    const std::size_t expected_rows = transpose ? rows() : columns();
+    const std::size_t output_rows = transpose ? columns() : rows();
+    if (right.rows() != expected_rows || output.rows() != output_rows ||
+        output.columns() != right.columns()) {
+      throw std::invalid_argument(
+        "fastPLS projected operator product dimensions are inconsistent"
+      );
+    }
+    if (active_ == 0) {
+      input_.multiply(right, transpose, output);
+      return;
+    }
+
+    const ConstMatrixView<T> active_basis(
+      basis_.data(), basis_.rows(), active_, basis_.rows()
+    );
+    if (transpose) {
+      projected_.resize(right.rows(), right.columns());
+      for (std::size_t column = 0; column < right.columns(); ++column) {
+        std::copy_n(
+          right.data() + column * right.leading_dimension(), right.rows(),
+          projected_.data() + column * projected_.rows()
+        );
+      }
+      coefficients_.resize(active_, right.columns());
+      backend_.gemm(
+        active_basis, right, true, false, coefficients_.view()
+      );
+      correction_.resize(rows(), right.columns());
+      backend_.gemm(
+        active_basis, coefficients_.view(), false, false, correction_.view()
+      );
+      for (std::size_t index = 0; index < projected_.size(); ++index) {
+        projected_.data()[index] -= correction_.data()[index];
+      }
+      input_.multiply(projected_.view(), true, output);
+      return;
+    }
+
+    input_.multiply(right, false, output);
+    coefficients_.resize(active_, output.columns());
+    backend_.gemm(
+      active_basis, output, true, false, coefficients_.view()
+    );
+    correction_.resize(rows(), output.columns());
+    backend_.gemm(
+      active_basis, coefficients_.view(), false, false, correction_.view()
+    );
+    for (std::size_t column = 0; column < output.columns(); ++column) {
+      for (std::size_t row = 0; row < output.rows(); ++row) {
+        output(row, column) -= correction_(row, column);
+      }
+    }
+  }
+
+  void deflate(ConstMatrixView<T> direction) {
+    if (direction.rows() != rows() || direction.columns() != 1 ||
+        active_ >= basis_.columns()) {
+      throw std::invalid_argument(
+        "fastPLS projected operator deflation dimensions are inconsistent"
+      );
+    }
+    for (std::size_t row = 0; row < rows(); ++row) {
+      basis_(row, active_) = direction(row, 0);
+    }
+    ++active_;
+  }
+
+  void materialize(Matrix<T>& output) {
+    Matrix<T> identity(columns(), columns());
+    for (std::size_t index = 0; index < columns(); ++index) {
+      identity(index, index) = T(1);
+    }
+    multiply(identity.view(), false, output);
+  }
+
+  ConstMatrixView<T> basis() const noexcept {
+    return ConstMatrixView<T>(
+      basis_.data(), basis_.rows(), active_, basis_.rows()
+    );
+  }
+
+ private:
+  Operator& input_;
+  Matrix<T> basis_;
+  Backend& backend_;
+  Matrix<T> projected_;
+  Matrix<T> coefficients_;
+  Matrix<T> correction_;
+  std::size_t active_ = 0;
+};
+
 // Represents S_a = F_a'Y with F_a = F_{a-1}(I-v_a v_a'). Deflation
 // updates the smaller predictor-side factor instead of materializing S_a.
 template<class T, class Backend>

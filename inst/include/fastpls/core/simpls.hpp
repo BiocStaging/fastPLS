@@ -4,6 +4,7 @@
 #define FASTPLS_CORE_SIMPLS_HPP
 
 #include <fastpls/core/matrix.hpp>
+#include <fastpls/core/operator_rsvd.hpp>
 #include <fastpls/core/rsvd.hpp>
 
 #include <algorithm>
@@ -589,6 +590,236 @@ SimplsModel<T> fit_simpls_preprocessed(
           }
         }
       }
+
+      simpls_detail::copy_column(
+        ConstMatrixView<T>(direction.view()), 0,
+        model.weights.view(), component
+      );
+      simpls_detail::copy_column(
+        ConstMatrixView<T>(workspace.response_loading.view()), 0,
+        model.response_loadings.view(), component
+      );
+      simpls_detail::copy_column(
+        ConstMatrixView<T>(workspace.deflation_direction.view()), 0,
+        model.deflation_basis.view(), component
+      );
+      if (retain_scores) {
+        simpls_detail::copy_column(
+          ConstMatrixView<T>(workspace.score.view()), 0,
+          model.scores.view(), component
+        );
+      }
+      model.completed_components = component + 1;
+      model.timing.component_updates += std::chrono::duration<double>(
+        Clock::now() - component_started
+      ).count();
+    }
+    if (stopped) break;
+  }
+  model.timing.total = std::chrono::duration<double>(
+    Clock::now() - started
+  ).count();
+  return model;
+}
+
+// Fits SIMPLS through a predictor-response operator. The initial operator is
+// retained for response loadings, while the projected operator accumulates the
+// orthogonal SIMPLS deflations without materializing the cross-covariance.
+template<class T, class InitialOperator, class ProjectedOperator,
+         class Backend>
+SimplsModel<T> fit_simpls_operator(
+    ConstMatrixView<T> predictors,
+    InitialOperator& initial_crosscov,
+    ProjectedOperator& projected_crosscov,
+    const SimplsControls& controls,
+    Backend& backend,
+    SimplsWorkspace<T>& workspace,
+    OperatorRsvdWorkspace<T>& rsvd_workspace) {
+  using Clock = std::chrono::steady_clock;
+  const auto started = Clock::now();
+  if (predictors.empty() || initial_crosscov.rows() != predictors.columns() ||
+      projected_crosscov.rows() != predictors.columns() ||
+      initial_crosscov.columns() == 0 ||
+      projected_crosscov.columns() != initial_crosscov.columns() ||
+      controls.components == 0) {
+    throw std::invalid_argument(
+      "fastPLS implicit SIMPLS dimensions or controls are invalid"
+    );
+  }
+  const std::size_t n = predictors.rows();
+  const std::size_t p = predictors.columns();
+  const std::size_t q = initial_crosscov.columns();
+  const std::size_t maximum = std::min({
+    controls.components, p, std::max<std::size_t>(n - 1, 1)
+  });
+
+  SimplsModel<T> model;
+  model.weights.resize(p, maximum);
+  model.response_loadings.resize(q, maximum);
+  model.deflation_basis.resize(p, maximum);
+  const bool retain_scores = controls.store_scores ||
+    controls.reorthogonalize;
+  if (retain_scores) model.scores.resize(n, maximum);
+  if (controls.cache_predictor_crossprod) {
+    workspace.predictor_crossprod.resize(p, p);
+    backend.gemm(
+      predictors, predictors, true, false,
+      workspace.predictor_crossprod.view()
+    );
+  }
+  model.timing.setup = std::chrono::duration<double>(
+    Clock::now() - started
+  ).count();
+
+  std::size_t component = 0;
+  while (component < maximum) {
+    const auto direction_started = Clock::now();
+    const std::size_t block = std::min({
+      std::max<std::size_t>(controls.maximum_block, 1),
+      maximum - component,
+      std::min(p, q)
+    });
+    RsvdControls rsvd = controls.rsvd;
+    rsvd.seed += static_cast<unsigned int>(component);
+    rsvd.left_only = true;
+    auto decomposition = randomized_operator_svd<T>(
+      projected_crosscov, static_cast<int>(block), rsvd, backend,
+      rsvd_workspace
+    );
+    model.timing.direction += std::chrono::duration<double>(
+      Clock::now() - direction_started
+    ).count();
+    const std::size_t available = std::min(
+      block, decomposition.U.columns()
+    );
+    if (available == 0) break;
+
+    if (controls.batch_candidate_geometry &&
+        !controls.cache_predictor_crossprod) {
+      const auto geometry_started = Clock::now();
+      workspace.candidate_scores.resize(n, available);
+      backend.gemm(
+        predictors, decomposition.U.view(), false, false,
+        workspace.candidate_scores.view()
+      );
+      workspace.candidate_loadings.resize(p, available);
+      backend.gemm(
+        predictors, workspace.candidate_scores.view(), true, false,
+        workspace.candidate_loadings.view()
+      );
+      model.timing.candidate_geometry += std::chrono::duration<double>(
+        Clock::now() - geometry_started
+      ).count();
+    }
+
+    bool stopped = false;
+    for (std::size_t candidate = 0;
+         candidate < available && component < maximum;
+         ++candidate, ++component) {
+      const auto component_started = Clock::now();
+      Matrix<T> direction(p, 1);
+      simpls_detail::copy_column(
+        ConstMatrixView<T>(decomposition.U.view()), candidate,
+        direction.view(), 0
+      );
+
+      workspace.score.resize(n, 1);
+      workspace.predictor_loading.resize(p, 1);
+      if (controls.cache_predictor_crossprod) {
+        backend.gemm(
+          workspace.predictor_crossprod.view(), direction.view(),
+          false, false, workspace.predictor_loading.view()
+        );
+        const T norm_squared = simpls_detail::dot(
+          ConstMatrixView<T>(direction.view()),
+          ConstMatrixView<T>(workspace.predictor_loading.view())
+        );
+        if (!std::isfinite(norm_squared) || norm_squared <= T(0)) {
+          stopped = true;
+          break;
+        }
+        const T score_norm = std::sqrt(norm_squared);
+        simpls_detail::scale(direction.view(), score_norm);
+        simpls_detail::scale(
+          workspace.predictor_loading.view(), score_norm
+        );
+        if (retain_scores) {
+          backend.gemm(
+            predictors, direction.view(), false, false,
+            workspace.score.view()
+          );
+        }
+      } else {
+        if (controls.batch_candidate_geometry) {
+          simpls_detail::copy_column(
+            ConstMatrixView<T>(workspace.candidate_scores.view()),
+            candidate, workspace.score.view(), 0
+          );
+        } else {
+          backend.gemm(
+            predictors, direction.view(), false, false,
+            workspace.score.view()
+          );
+        }
+        const bool score_reorthogonalized =
+          controls.reorthogonalize && component > 0;
+        if (score_reorthogonalized) {
+          simpls_detail::remove_score_basis(
+            ConstMatrixView<T>(model.scores.view()),
+            ConstMatrixView<T>(model.weights.view()), component,
+            workspace.score, direction, backend, workspace.projection,
+            workspace.correction
+          );
+        }
+        const T score_norm = simpls_detail::norm(
+          ConstMatrixView<T>(workspace.score.view())
+        );
+        if (!std::isfinite(score_norm) || score_norm <= T(0)) {
+          stopped = true;
+          break;
+        }
+        simpls_detail::scale(workspace.score.view(), score_norm);
+        simpls_detail::scale(direction.view(), score_norm);
+        if (controls.batch_candidate_geometry &&
+            !score_reorthogonalized) {
+          simpls_detail::copy_column(
+            ConstMatrixView<T>(workspace.candidate_loadings.view()),
+            candidate, workspace.predictor_loading.view(), 0
+          );
+          simpls_detail::scale(
+            workspace.predictor_loading.view(), score_norm
+          );
+        } else {
+          backend.gemm(
+            predictors, workspace.score.view(), true, false,
+            workspace.predictor_loading.view()
+          );
+        }
+      }
+
+      initial_crosscov.multiply(
+        direction.view(), true, workspace.response_loading
+      );
+      simpls_detail::copy_matrix(
+        ConstMatrixView<T>(workspace.predictor_loading.view()),
+        workspace.deflation_direction
+      );
+      simpls_detail::remove_basis(
+        ConstMatrixView<T>(model.deflation_basis.view()), component,
+        workspace.deflation_direction, controls.reorthogonalize,
+        backend, workspace.projection, workspace.correction
+      );
+      const T deflation_norm = simpls_detail::norm(
+        ConstMatrixView<T>(workspace.deflation_direction.view())
+      );
+      if (!std::isfinite(deflation_norm) || deflation_norm <= T(0)) {
+        stopped = true;
+        break;
+      }
+      simpls_detail::scale(
+        workspace.deflation_direction.view(), deflation_norm
+      );
+      projected_crosscov.deflate(workspace.deflation_direction.view());
 
       simpls_detail::copy_column(
         ConstMatrixView<T>(direction.view()), 0,

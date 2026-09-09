@@ -746,11 +746,12 @@ SEXP fit_plssvd_label_core(
 
 fastpls::core::SimplsControls simpls_controls(
     std::size_t samples, std::size_t predictors, std::size_t responses,
-    std::size_t components, int oversample, int power, unsigned int seed) {
+    std::size_t components, bool classification,
+    int oversample, int power, unsigned int seed) {
   fastpls::core::SimplsControls controls;
   controls.components = components;
   controls.maximum_block = fastpls::core::simpls_candidate_block_size(
-    components, predictors, responses, true, samples, 64
+    components, predictors, responses, classification, samples, 64
   );
   const int maximum_predictors = environment_integer(
     "FASTPLS_FAST_CROSSPROD_MAX_P",
@@ -786,52 +787,35 @@ fastpls::core::SimplsControls simpls_controls(
   return controls;
 }
 
-template<class T, class Prepared, class Backend, class Metric>
-SEXP fit_simpls_core_prepared(
-    fastpls::core::ConstMatrixView<T> predictors,
-    const Prepared& prepared,
-    SEXP components, bool fitted, int oversample, int power,
-    unsigned int seed, const char* xprod_mode, Backend& backend,
-    Metric metric, bool array_paths = false,
-    bool reorthogonalize_scores = false) {
-  ProtectStack protect;
-  SEXP effective_components = protect.add(Rf_duplicate(components));
-  const std::size_t sample_rank = std::max<std::size_t>(
-    predictors.rows() - 1, 1
-  );
-  const int rank_cap = static_cast<int>(std::min(
-    predictors.columns(), sample_rank
-  ));
-  int maximum_components = 1;
-  for (R_xlen_t index = 0; index < XLENGTH(effective_components); ++index) {
-    const int value = INTEGER(effective_components)[index];
+SEXP capped_simpls_components(
+    SEXP components, std::size_t samples, std::size_t predictors,
+    int& maximum_components, ProtectStack& protect) {
+  SEXP effective = protect.add(Rf_duplicate(components));
+  const std::size_t sample_rank = std::max<std::size_t>(samples - 1, 1);
+  const int rank_cap = static_cast<int>(std::min(predictors, sample_rank));
+  maximum_components = 1;
+  for (R_xlen_t index = 0; index < XLENGTH(effective); ++index) {
+    const int value = INTEGER(effective)[index];
     if (value == NA_INTEGER) {
       throw std::invalid_argument("ncomp cannot contain missing values");
     }
-    INTEGER(effective_components)[index] = std::max(
-      1, std::min(value, rank_cap)
-    );
+    INTEGER(effective)[index] = std::max(1, std::min(value, rank_cap));
     maximum_components = std::max(
-      maximum_components, INTEGER(effective_components)[index]
+      maximum_components, INTEGER(effective)[index]
     );
   }
+  return effective;
+}
 
-  auto controls = simpls_controls(
-    predictors.rows(), predictors.columns(),
-    prepared.response_mean.size(),
-    static_cast<std::size_t>(maximum_components), oversample, power, seed
-  );
-  controls.reorthogonalize = reorthogonalize_scores;
-  fastpls::core::SimplsWorkspace<T> workspace;
-  const auto model = fastpls::core::fit_simpls_preprocessed<T>(
-    predictors, prepared.crossprod.view(), controls, backend, workspace
-  );
-  if (model.completed_components < controls.components) {
-    throw std::runtime_error(
-      "fastPLS core SIMPLS returned fewer components than requested"
-    );
-  }
-
+template<class T, class Prepared, class Backend, class Metric>
+SEXP serialize_simpls_core_model(
+    const fastpls::core::SimplsModel<T>& model,
+    fastpls::core::ConstMatrixView<T> predictors,
+    const Prepared& prepared, SEXP effective_components, bool fitted,
+    const char* xprod_mode, Backend& backend, Metric metric,
+    const fastpls::core::SimplsControls& controls,
+    bool array_paths = false) {
+  ProtectStack protect;
   std::vector<fastpls::core::Matrix<T>> fitted_values;
   std::vector<double> r2_values(
     static_cast<std::size_t>(XLENGTH(effective_components)), NA_REAL
@@ -904,7 +888,9 @@ SEXP fit_simpls_core_prepared(
       fitted_values, INTEGER(effective_components)
     )) : R_NilValue
   );
-  SEXP r2 = protect.add(Rf_allocVector(REALSXP, XLENGTH(components)));
+  SEXP r2 = protect.add(Rf_allocVector(
+    REALSXP, XLENGTH(effective_components)
+  ));
   std::copy(r2_values.begin(), r2_values.end(), REAL(r2));
   SET_VECTOR_ELT(output, 11, r2);
   SET_VECTOR_ELT(output, 12, Rf_mkString("simpls"));
@@ -914,6 +900,44 @@ SEXP fit_simpls_core_prepared(
   }
   Rf_setAttrib(output, R_NamesSymbol, names);
   return output;
+}
+
+template<class T, class Prepared, class Backend, class Metric>
+SEXP fit_simpls_core_prepared(
+    fastpls::core::ConstMatrixView<T> predictors,
+    const Prepared& prepared,
+    SEXP components, bool fitted, int oversample, int power,
+    unsigned int seed, const char* xprod_mode, Backend& backend,
+    Metric metric, bool array_paths = false,
+    bool reorthogonalize_scores = false,
+    bool classification = false) {
+  ProtectStack protect;
+  int maximum_components = 1;
+  SEXP effective_components = capped_simpls_components(
+    components, predictors.rows(), predictors.columns(), maximum_components,
+    protect
+  );
+
+  auto controls = simpls_controls(
+    predictors.rows(), predictors.columns(),
+    prepared.response_mean.size(),
+    static_cast<std::size_t>(maximum_components), classification,
+    oversample, power, seed
+  );
+  controls.reorthogonalize = reorthogonalize_scores;
+  fastpls::core::SimplsWorkspace<T> workspace;
+  const auto model = fastpls::core::fit_simpls_preprocessed<T>(
+    predictors, prepared.crossprod.view(), controls, backend, workspace
+  );
+  if (model.completed_components < controls.components) {
+    throw std::runtime_error(
+      "fastPLS core SIMPLS returned fewer components than requested"
+    );
+  }
+  return serialize_simpls_core_model(
+    model, predictors, prepared, effective_components, fitted, xprod_mode,
+    backend, metric, controls, array_paths
+  );
 }
 
 template<class T, class Backend>
@@ -931,7 +955,7 @@ SEXP fit_simpls_label_core_prepared(
         labels.data(), labels.size(), prepared.response_mean.data(),
         static_cast<std::size_t>(class_count), values
       );
-    }
+    }, false, false, true
   );
 }
 
@@ -1020,6 +1044,55 @@ SEXP fit_dense_plssvd_operator(
   return serialize_plssvd_core_model(
     model, predictors, prepared, effective, fitted, xprod_mode, backend,
     metric, array_paths
+  );
+}
+
+template<class T, class Backend>
+SEXP fit_dense_simpls_operator(
+    fastpls::core::ConstMatrixView<T> predictors,
+    fastpls::core::ConstMatrixView<T> responses,
+    const fastpls::core::DensePreprocessingResult<T>& prepared,
+    SEXP components, bool fitted, int oversample, int power,
+    unsigned int seed, const char* xprod_mode, Backend& backend,
+    bool array_paths) {
+  ProtectStack protect;
+  int maximum_components = 1;
+  SEXP effective = capped_simpls_components(
+    components, predictors.rows(), predictors.columns(), maximum_components,
+    protect
+  );
+  auto controls = simpls_controls(
+    predictors.rows(), predictors.columns(), responses.columns(),
+    static_cast<std::size_t>(maximum_components), false,
+    oversample, power, seed
+  );
+  fastpls::core::CenteredCrosscovOperator<T, Backend> initial(
+    predictors, responses, prepared.response_mean.data(),
+    prepared.response_mean.size(), backend
+  );
+  fastpls::core::ProjectedOperator<
+    T, fastpls::core::CenteredCrosscovOperator<T, Backend>, Backend
+  > projected(initial, controls.components, backend);
+  fastpls::core::SimplsWorkspace<T> workspace;
+  fastpls::core::OperatorRsvdWorkspace<T> rsvd_workspace;
+  const auto model = fastpls::core::fit_simpls_operator<T>(
+    predictors, initial, projected, controls, backend, workspace,
+    rsvd_workspace
+  );
+  if (model.completed_components < controls.components) {
+    throw std::runtime_error(
+      "fastPLS implicit core SIMPLS returned fewer components than requested"
+    );
+  }
+  const auto metric = [&](fastpls::core::ConstMatrixView<T> values) {
+    return fastpls::core::dense_response_r2(
+      responses, prepared.response_mean.data(),
+      prepared.response_mean.size(), values
+    );
+  };
+  return serialize_simpls_core_model(
+    model, predictors, prepared, effective, fitted, xprod_mode, backend,
+    metric, controls, array_paths
   );
 }
 
@@ -2260,10 +2333,11 @@ extern "C" SEXP _fastPLS_pls_matrix_core_xprod_cpp(
     SEXP predictors, SEXP responses, SEXP components, SEXP scaling,
     SEXP fit, SEXP method, SEXP oversample, SEXP power, SEXP seed) {
   return translate_exceptions("double implicit core PLS fitting", [&] {
+    const int method_code = Rf_asInteger(method);
     if (TYPEOF(components) != INTSXP || XLENGTH(components) < 1 ||
-        Rf_asInteger(method) != 1) {
+        (method_code != 1 && method_code != 3)) {
       throw std::invalid_argument(
-        "double implicit core PLS currently requires PLS-SVD"
+        "double implicit core PLS requires PLS-SVD or SIMPLS"
       );
     }
     fastpls::core::Matrix<double> x = numeric_matrix_from_sexp(
@@ -2290,10 +2364,18 @@ extern "C" SEXP _fastPLS_pls_matrix_core_xprod_cpp(
       x.view(), y,
       static_cast<fastpls::core::PredictorScaling>(scaling_code), backend
     );
-    return fit_dense_plssvd_operator(
-      fastpls::core::ConstMatrixView<double>(x.view()), y, prepared,
-      components, fit_code, Rf_asInteger(oversample), Rf_asInteger(power),
-      static_cast<unsigned int>(Rf_asInteger(seed)),
+    const auto x_view = fastpls::core::ConstMatrixView<double>(x.view());
+    if (method_code == 1) {
+      return fit_dense_plssvd_operator(
+        x_view, y, prepared, components, fit_code, Rf_asInteger(oversample),
+        Rf_asInteger(power),
+        static_cast<unsigned int>(Rf_asInteger(seed)),
+        "float64_implicit_crosscov", backend, true
+      );
+    }
+    return fit_dense_simpls_operator(
+      x_view, y, prepared, components, fit_code, Rf_asInteger(oversample),
+      Rf_asInteger(power), static_cast<unsigned int>(Rf_asInteger(seed)),
       "float64_implicit_crosscov", backend, true
     );
   });

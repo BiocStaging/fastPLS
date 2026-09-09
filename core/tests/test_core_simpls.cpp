@@ -55,6 +55,24 @@ void check() {
   );
   assert(model.completed_components == 2);
 
+  std::vector<T> response_mean(response.columns(), T(0));
+  fastpls::core::CenteredCrosscovOperator<T, ReferenceBackend<T>> initial(
+    predictors.view(), response.view(), response_mean.data(),
+    response_mean.size(), backend
+  );
+  fastpls::core::ProjectedOperator<
+    T,
+    fastpls::core::CenteredCrosscovOperator<T, ReferenceBackend<T>>,
+    ReferenceBackend<T>
+  > projected(initial, controls.components, backend);
+  SimplsWorkspace<T> operator_workspace;
+  fastpls::core::OperatorRsvdWorkspace<T> rsvd_workspace;
+  auto operator_model = fastpls::core::fit_simpls_operator<T>(
+    predictors.view(), initial, projected, controls, backend,
+    operator_workspace, rsvd_workspace
+  );
+  assert(operator_model.completed_components == 2);
+
   Matrix<T> prediction = fastpls::core::predict_simpls_preprocessed<T>(
     predictors.view(), model, 2, backend
   );
@@ -68,6 +86,18 @@ void check() {
   const T relative_error = std::sqrt(squared_error / response_sum_squares);
   const T tolerance = sizeof(T) == sizeof(float) ? T(2e-4) : T(1e-8);
   assert(relative_error < tolerance);
+
+  Matrix<T> operator_prediction =
+    fastpls::core::predict_simpls_preprocessed<T>(
+      predictors.view(), operator_model, 2, backend
+    );
+  T operator_difference = T(0);
+  for (std::size_t index = 0; index < prediction.size(); ++index) {
+    const T difference =
+      prediction.data()[index] - operator_prediction.data()[index];
+    operator_difference += difference * difference;
+  }
+  assert(std::sqrt(operator_difference / response_sum_squares) < tolerance);
 
   for (std::size_t left = 0; left < 2; ++left) {
     for (std::size_t right = 0; right < 2; ++right) {
