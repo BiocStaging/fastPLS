@@ -5,6 +5,7 @@
 
 #include <fastpls/core/classification.hpp>
 #include <fastpls/core/lda.hpp>
+#include <fastpls/core/opls.hpp>
 #include <fastpls/core/plssvd.hpp>
 #include <fastpls/core/simpls.hpp>
 #include <fastpls/core/supervised.hpp>
@@ -21,7 +22,8 @@ namespace core {
 
 enum class LinearPlsFamily {
   plssvd = 1,
-  simpls = 3
+  simpls = 3,
+  opls = 4
 };
 
 enum class ClassificationHead {
@@ -317,7 +319,8 @@ ClassificationCvResult<T> cross_validate_classification(
     PredictorScaling scaling, LinearPlsFamily family,
     ClassificationHead head, const PlssvdControls& plssvd_controls,
     const SimplsControls& simpls_controls, Backend& backend,
-    bool store_predictions, bool store_scores) {
+    bool store_predictions, bool store_scores,
+    std::size_t orthogonal_components = 0) {
   if (predictors.empty() || labels == nullptr || class_count < 2 ||
       components == nullptr || prefix_count < 1) {
     throw std::invalid_argument(
@@ -381,13 +384,36 @@ ClassificationCvResult<T> cross_validate_classification(
     const auto compact = cv_detail::compact_labels(
       labels, partition.train, active
     );
-    const auto prepared = prepare_scaled_label_crossprod(
-      train.view(), compact.data(), compact.size(), active.size(),
-      scaling, backend
-    );
-    cv_detail::standardize(
-      test.view(), prepared.predictor_center, prepared.predictor_scale
-    );
+    LabelCrossprodResult<T> prepared;
+    if (family == LinearPlsFamily::opls) {
+      if (orthogonal_components < 1) {
+        throw std::invalid_argument(
+          "OPLS cross-validation requires an orthogonal component"
+        );
+      }
+      auto filter = fit_opls_filter_labels<T>(
+        std::move(train), compact.data(), compact.size(), active.size(),
+        orthogonal_components, scaling, backend
+      );
+      test = apply_opls_filter<T>(
+        std::move(test), filter.predictor_center.data(),
+        filter.predictor_scale.data(), filter.predictor_center.size(),
+        filter.weights.view(), filter.loadings.view(), backend
+      );
+      train = std::move(filter.predictors);
+      prepared = prepare_scaled_label_crossprod(
+        train.view(), compact.data(), compact.size(), active.size(),
+        PredictorScaling::none, backend
+      );
+    } else {
+      prepared = prepare_scaled_label_crossprod(
+        train.view(), compact.data(), compact.size(), active.size(),
+        scaling, backend
+      );
+      cv_detail::standardize(
+        test.view(), prepared.predictor_center, prepared.predictor_scale
+      );
+    }
 
     if (family == LinearPlsFamily::plssvd) {
       PlssvdControls controls = plssvd_controls;
@@ -459,7 +485,8 @@ ClassificationCvResult<T> cross_validate_classification(
           totals[prefix] += 1.0;
         }
       }
-    } else if (family == LinearPlsFamily::simpls) {
+    } else if (family == LinearPlsFamily::simpls ||
+               family == LinearPlsFamily::opls) {
       SimplsControls controls = simpls_controls;
       controls.rsvd.seed += static_cast<unsigned int>(fold);
       controls.store_scores = head == ClassificationHead::lda;
@@ -534,7 +561,7 @@ ClassificationCvResult<T> cross_validate_classification(
       }
     } else {
       throw std::invalid_argument(
-        "classification CV supports PLS-SVD and SIMPLS"
+        "classification CV supports PLS-SVD, SIMPLS, and OPLS"
       );
     }
     result.status[fold] = 1;
@@ -554,7 +581,7 @@ RegressionCvResult<T> cross_validate_regression(
     PredictorScaling scaling, LinearPlsFamily family,
     RegressionMetric metric, const PlssvdControls& plssvd_controls,
     const SimplsControls& simpls_controls, Backend& backend,
-    bool store_predictions) {
+    bool store_predictions, std::size_t orthogonal_components = 0) {
   if (predictors.empty() || responses.empty() ||
       predictors.rows() != responses.rows() || components == nullptr ||
       prefix_count < 1) {
@@ -600,12 +627,34 @@ RegressionCvResult<T> cross_validate_regression(
     Matrix<T> train_response = cv_detail::gather_rows(
       responses, partition.train
     );
-    const auto prepared = prepare_scaled_dense_crossprod(
-      train.view(), train_response.view(), scaling, backend
-    );
-    cv_detail::standardize(
-      test.view(), prepared.predictor_center, prepared.predictor_scale
-    );
+    DensePreprocessingResult<T> prepared;
+    if (family == LinearPlsFamily::opls) {
+      if (orthogonal_components < 1) {
+        throw std::invalid_argument(
+          "OPLS cross-validation requires an orthogonal component"
+        );
+      }
+      auto filter = fit_opls_filter<T>(
+        std::move(train), train_response.view(), orthogonal_components,
+        scaling, backend
+      );
+      test = apply_opls_filter<T>(
+        std::move(test), filter.predictor_center.data(),
+        filter.predictor_scale.data(), filter.predictor_center.size(),
+        filter.weights.view(), filter.loadings.view(), backend
+      );
+      train = std::move(filter.predictors);
+      prepared = prepare_scaled_dense_crossprod(
+        train.view(), train_response.view(), PredictorScaling::none, backend
+      );
+    } else {
+      prepared = prepare_scaled_dense_crossprod(
+        train.view(), train_response.view(), scaling, backend
+      );
+      cv_detail::standardize(
+        test.view(), prepared.predictor_center, prepared.predictor_scale
+      );
+    }
 
     if (family == LinearPlsFamily::plssvd) {
       PlssvdControls controls = plssvd_controls;
@@ -633,7 +682,8 @@ RegressionCvResult<T> cross_validate_regression(
           );
         }
       }
-    } else if (family == LinearPlsFamily::simpls) {
+    } else if (family == LinearPlsFamily::simpls ||
+               family == LinearPlsFamily::opls) {
       SimplsControls controls = simpls_controls;
       controls.rsvd.seed += static_cast<unsigned int>(fold);
       controls.store_scores = false;
@@ -662,7 +712,9 @@ RegressionCvResult<T> cross_validate_regression(
         }
       }
     } else {
-      throw std::invalid_argument("regression CV supports PLS-SVD and SIMPLS");
+      throw std::invalid_argument(
+        "regression CV supports PLS-SVD, SIMPLS, and OPLS"
+      );
     }
     result.status[fold] = 1;
   }

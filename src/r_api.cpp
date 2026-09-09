@@ -1332,7 +1332,8 @@ SEXP classification_cv_result(
     fastpls::core::ConstMatrixView<T> predictors, SEXP labels,
     SEXP class_count, SEXP folds, SEXP components, SEXP scaling,
     SEXP method, SEXP classifier, SEXP oversample, SEXP power, SEXP seed,
-    SEXP store_predictions, SEXP store_scores, Backend& backend) {
+    SEXP store_predictions, SEXP store_scores, Backend& backend,
+    std::size_t orthogonal_components = 0) {
   ProtectStack protect;
   SEXP label_values = protect.add(Rf_coerceVector(labels, INTSXP));
   SEXP fold_values = protect.add(Rf_coerceVector(folds, INTSXP));
@@ -1351,7 +1352,7 @@ SEXP classification_cv_result(
   const int retain = Rf_asLogical(store_predictions);
   const int retain_scores = Rf_asLogical(store_scores);
   if (classes < 2 || scaling_code < 1 || scaling_code > 3 ||
-      (method_code != 1 && method_code != 3) ||
+      (method_code != 1 && method_code != 3 && method_code != 4) ||
       (classifier_code != 0 && classifier_code != 1) ||
       retain == NA_LOGICAL || retain_scores == NA_LOGICAL) {
     throw std::invalid_argument(
@@ -1378,7 +1379,8 @@ SEXP classification_cv_result(
     static_cast<fastpls::core::PredictorScaling>(scaling_code),
     static_cast<fastpls::core::LinearPlsFamily>(method_code),
     static_cast<fastpls::core::ClassificationHead>(classifier_code),
-    plssvd, simpls, backend, retain == TRUE, retain_scores == TRUE
+    plssvd, simpls, backend, retain == TRUE, retain_scores == TRUE,
+    orthogonal_components
   );
 
   SEXP output = protect.add(Rf_allocVector(VECSXP, 6));
@@ -1422,7 +1424,7 @@ SEXP regression_cv_result(
     fastpls::core::ConstMatrixView<T> responses, SEXP folds,
     SEXP components, SEXP scaling, SEXP method, SEXP metric,
     SEXP oversample, SEXP power, SEXP seed, SEXP store_predictions,
-    Backend& backend) {
+    Backend& backend, std::size_t orthogonal_components = 0) {
   ProtectStack protect;
   SEXP fold_values = protect.add(Rf_coerceVector(folds, INTSXP));
   SEXP component_values = protect.add(Rf_coerceVector(components, INTSXP));
@@ -1436,7 +1438,7 @@ SEXP regression_cv_result(
   const int metric_code = Rf_asInteger(metric);
   const int retain = Rf_asLogical(store_predictions);
   if (scaling_code < 1 || scaling_code > 3 ||
-      (method_code != 1 && method_code != 3) ||
+      (method_code != 1 && method_code != 3 && method_code != 4) ||
       metric_code < 2 || metric_code > 4 || retain == NA_LOGICAL) {
     throw std::invalid_argument("core regression CV controls are invalid");
   }
@@ -1459,7 +1461,7 @@ SEXP regression_cv_result(
     static_cast<fastpls::core::PredictorScaling>(scaling_code),
     static_cast<fastpls::core::LinearPlsFamily>(method_code),
     static_cast<fastpls::core::RegressionMetric>(metric_code),
-    plssvd, simpls, backend, retain == TRUE
+    plssvd, simpls, backend, retain == TRUE, orthogonal_components
   );
 
   SEXP output = protect.add(Rf_allocVector(VECSXP, 5));
@@ -1712,6 +1714,50 @@ extern "C" SEXP _fastPLS_pls_cv_classification_float32_core_cpp(
   );
 }
 
+extern "C" SEXP _fastPLS_pls_cv_opls_classification_core_cpp(
+    SEXP predictors, SEXP labels, SEXP class_count, SEXP folds,
+    SEXP components, SEXP scaling, SEXP classifier, SEXP north,
+    SEXP oversample, SEXP power, SEXP seed, SEXP store_predictions,
+    SEXP store_scores) {
+  return translate_exceptions("core OPLS classification CV", [&] {
+    ProtectStack protect;
+    SEXP method = protect.add(Rf_ScalarInteger(4));
+    const int orthogonal = Rf_asInteger(north);
+    if (orthogonal < 1) {
+      throw std::invalid_argument("OPLS north must be positive");
+    }
+    const auto x = numeric_matrix_view(predictors, "Xdata");
+    fastpls::runtime::CpuLinearAlgebraF64 backend;
+    return classification_cv_result<double>(
+      x, labels, class_count, folds, components, scaling, method, classifier,
+      oversample, power, seed, store_predictions, store_scores, backend,
+      static_cast<std::size_t>(orthogonal)
+    );
+  });
+}
+
+extern "C" SEXP _fastPLS_pls_cv_opls_classification_float32_core_cpp(
+    SEXP predictors, SEXP labels, SEXP class_count, SEXP folds,
+    SEXP components, SEXP scaling, SEXP classifier, SEXP north,
+    SEXP oversample, SEXP power, SEXP seed, SEXP store_predictions,
+    SEXP store_scores) {
+  return translate_exceptions("float32 core OPLS classification CV", [&] {
+    ProtectStack protect;
+    SEXP method = protect.add(Rf_ScalarInteger(4));
+    const int orthogonal = Rf_asInteger(north);
+    if (orthogonal < 1) {
+      throw std::invalid_argument("OPLS north must be positive");
+    }
+    const auto x = float_matrix_from_s4(predictors, "Xdata");
+    fastpls::runtime::CpuLinearAlgebraF32 backend;
+    return classification_cv_result<float>(
+      x.view(), labels, class_count, folds, components, scaling, method,
+      classifier, oversample, power, seed, store_predictions, store_scores,
+      backend, static_cast<std::size_t>(orthogonal)
+    );
+  });
+}
+
 extern "C" SEXP _fastPLS_pls_cv_regression_core_cpp(
     SEXP predictors, SEXP responses, SEXP folds, SEXP components,
     SEXP scaling, SEXP method, SEXP metric, SEXP oversample, SEXP power,
@@ -1738,6 +1784,50 @@ extern "C" SEXP _fastPLS_pls_cv_regression_float32_core_cpp(
     return regression_cv_result<float>(
       x.view(), y.view(), folds, components, scaling, method, metric,
       oversample, power, seed, store_predictions, backend
+    );
+  });
+}
+
+extern "C" SEXP _fastPLS_pls_cv_opls_regression_core_cpp(
+    SEXP predictors, SEXP responses, SEXP folds, SEXP components,
+    SEXP scaling, SEXP metric, SEXP north, SEXP oversample, SEXP power,
+    SEXP seed, SEXP store_predictions) {
+  return translate_exceptions("core OPLS regression CV", [&] {
+    ProtectStack protect;
+    SEXP method = protect.add(Rf_ScalarInteger(4));
+    const int orthogonal = Rf_asInteger(north);
+    if (orthogonal < 1) {
+      throw std::invalid_argument("OPLS north must be positive");
+    }
+    const auto x = numeric_matrix_view(predictors, "Xdata");
+    const auto y = numeric_matrix_view(responses, "Ydata");
+    fastpls::runtime::CpuLinearAlgebraF64 backend;
+    return regression_cv_result<double>(
+      x, y, folds, components, scaling, method, metric, oversample, power,
+      seed, store_predictions, backend,
+      static_cast<std::size_t>(orthogonal)
+    );
+  });
+}
+
+extern "C" SEXP _fastPLS_pls_cv_opls_regression_float32_core_cpp(
+    SEXP predictors, SEXP responses, SEXP folds, SEXP components,
+    SEXP scaling, SEXP metric, SEXP north, SEXP oversample, SEXP power,
+    SEXP seed, SEXP store_predictions) {
+  return translate_exceptions("float32 core OPLS regression CV", [&] {
+    ProtectStack protect;
+    SEXP method = protect.add(Rf_ScalarInteger(4));
+    const int orthogonal = Rf_asInteger(north);
+    if (orthogonal < 1) {
+      throw std::invalid_argument("OPLS north must be positive");
+    }
+    const auto x = float_matrix_from_s4(predictors, "Xdata");
+    const auto y = float_matrix_from_s4(responses, "Ydata");
+    fastpls::runtime::CpuLinearAlgebraF32 backend;
+    return regression_cv_result<float>(
+      x.view(), y.view(), folds, components, scaling, method, metric,
+      oversample, power, seed, store_predictions, backend,
+      static_cast<std::size_t>(orthogonal)
     );
   });
 }

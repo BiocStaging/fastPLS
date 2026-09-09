@@ -1,6 +1,6 @@
 legacy_cv_call <- function(X, Y, groups, components, method,
                            classification, classes, classifier, seed,
-                           return_scores = FALSE) {
+                           return_scores = FALSE, north = 0L) {
     set.seed(seed)
     fastPLS:::pls_cv_predict_compiled(
         Xdata = X,
@@ -19,7 +19,7 @@ legacy_cv_call <- function(X, Y, groups, components, method,
         classification = classification,
         n_response = classes,
         xprod = FALSE,
-        opls_north = 0L,
+        opls_north = north,
         return_scores = return_scores,
         class_codes = matrix(numeric(), 0, 0),
         classifier = classifier,
@@ -172,4 +172,69 @@ test_that("public CPU CV dispatches float32 linear inputs through the core", {
         ),
         logical(1)
     )))
+})
+
+test_that("standalone OPLS CV preserves legacy and float32 workflows", {
+    set.seed(88)
+    labels <- rep(1:3, each = 30)
+    X <- matrix(rnorm(90 * 12), 90, 12)
+    X[, 1:3] <- X[, 1:3] + 3 * model.matrix(~ factor(labels) - 1)
+    Y <- cbind(
+        X[, 1] - 0.5 * X[, 2] + rnorm(90, sd = 0.2),
+        X[, 3] + 0.3 * X[, 4] + rnorm(90, sd = 0.2)
+    )
+    groups <- rep(seq_len(45), each = 2)
+    components <- 1:2
+
+    legacy <- legacy_cv_call(
+        X, matrix(as.double(labels), ncol = 1), groups, components,
+        4L, TRUE, 3L, 0L, 41L, return_scores = TRUE, north = 1L
+    )
+    core <- fastPLS:::pls_cv_opls_classification_core_cpp(
+        X, labels, 3L, legacy$fold, components, 1L, 0L, 1L,
+        16L, 3L, 41L, TRUE, TRUE
+    )
+    core32 <- fastPLS:::pls_cv_opls_classification_float32_core_cpp(
+        float::fl(X), labels, 3L, legacy$fold, components, 1L, 0L, 1L,
+        16L, 3L, 41L, TRUE, TRUE
+    )
+    expect_equal(core$metric_value, legacy$metrics$metric_value)
+    expect_identical(
+        as.integer(core$class_pred), as.integer(legacy$class_pred)
+    )
+    expect_equal(core$Ypred, legacy$Ypred, tolerance = 1e-10)
+    expect_identical(core32$class_pred, core$class_pred)
+    expect_equal(core32$Ypred, core$Ypred, tolerance = 1e-4)
+
+    legacy_regression <- legacy_cv_call(
+        X, Y, groups, components, 4L, FALSE, ncol(Y), 0L, 19L,
+        north = 1L
+    )
+    core_regression <- fastPLS:::pls_cv_opls_regression_core_cpp(
+        X, Y, legacy_regression$fold, components, 1L, 4L, 1L,
+        16L, 3L, 19L, TRUE
+    )
+    core_regression32 <-
+        fastPLS:::pls_cv_opls_regression_float32_core_cpp(
+            float::fl(X), float::fl(Y), legacy_regression$fold, components,
+            1L, 4L, 1L, 16L, 3L, 19L, TRUE
+        )
+    expect_equal(
+        core_regression$metric_value,
+        legacy_regression$metrics$metric_value,
+        tolerance = 1e-10
+    )
+    expect_equal(
+        core_regression$Ypred, legacy_regression$Ypred,
+        tolerance = 1e-9
+    )
+    expect_equal(
+        core_regression32$metric_value,
+        core_regression$metric_value,
+        tolerance = 1e-4
+    )
+    expect_equal(
+        core_regression32$Ypred, core_regression$Ypred,
+        tolerance = 1e-4
+    )
 })

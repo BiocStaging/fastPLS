@@ -7889,7 +7889,7 @@ if (is.null(fit_data) || is.null(fit_data$Xdata) || is.null(fit_data$Ydata)) {
         .fastpls_set_seed(controls$seed)
     }
     core_route <- identical(context$backend, "cpp") &&
-        context$method %in% c("plssvd", "simpls") &&
+        context$method %in% c("plssvd", "simpls", "opls") &&
         !isTRUE(context$xprod) &&
         length(context$response$codes) == 0L
     if (core_route) {
@@ -7906,49 +7906,97 @@ if (is.null(fit_data) || is.null(fit_data$Xdata) || is.null(fit_data$Ydata)) {
         )
         method_id <- if (identical(context$method, "plssvd")) 1L else 3L
         if (context$response$classification) {
-            runner <- if (context$float32) {
-                pls_cv_classification_float32_core_cpp
+            if (identical(context$method, "opls")) {
+                runner <- if (context$float32) {
+                    pls_cv_opls_classification_float32_core_cpp
+                } else {
+                    pls_cv_opls_classification_core_cpp
+                }
+                result <- runner(
+                    predictors = context$X,
+                    labels = labels,
+                    class_count = context$response$responses,
+                    folds = folds,
+                    components = context$ncomp,
+                    scaling = context$scaling,
+                    classifier = context$classifier_id,
+                    north = as.integer(controls$north),
+                    oversample = as.integer(controls$oversample),
+                    power = as.integer(controls$power),
+                    seed = as.integer(controls$seed),
+                    store_predictions = isTRUE(controls$store_predictions),
+                    store_scores = isTRUE(controls$store_predictions) &&
+                        isTRUE(controls$return_scores)
+                )
             } else {
-                pls_cv_classification_core_cpp
+                runner <- if (context$float32) {
+                    pls_cv_classification_float32_core_cpp
+                } else {
+                    pls_cv_classification_core_cpp
+                }
+                result <- runner(
+                    predictors = context$X,
+                    labels = labels,
+                    class_count = context$response$responses,
+                    folds = folds,
+                    components = context$ncomp,
+                    scaling = context$scaling,
+                    method = method_id,
+                    classifier = context$classifier_id,
+                    oversample = as.integer(controls$oversample),
+                    power = as.integer(controls$power),
+                    seed = as.integer(controls$seed),
+                    store_predictions = isTRUE(controls$store_predictions),
+                    store_scores = isTRUE(controls$store_predictions) &&
+                        isTRUE(controls$return_scores)
+                )
             }
-            result <- runner(
-                predictors = context$X,
-                labels = labels,
-                class_count = context$response$responses,
-                folds = folds,
-                components = context$ncomp,
-                scaling = context$scaling,
-                method = method_id,
-                classifier = context$classifier_id,
-                oversample = as.integer(controls$oversample),
-                power = as.integer(controls$power),
-                seed = as.integer(controls$seed),
-                store_predictions = isTRUE(controls$store_predictions),
-                store_scores = isTRUE(controls$store_predictions) &&
-                    isTRUE(controls$return_scores)
-            )
         } else {
-            runner <- if (context$float32) {
-                pls_cv_regression_float32_core_cpp
+            if (identical(context$method, "opls")) {
+                runner <- if (context$float32) {
+                    pls_cv_opls_regression_float32_core_cpp
+                } else {
+                    pls_cv_opls_regression_core_cpp
+                }
+                result <- runner(
+                    predictors = context$X,
+                    responses = context$response$matrix,
+                    folds = folds,
+                    components = context$ncomp,
+                    scaling = context$scaling,
+                    metric = .cv_metric_id(
+                        controls$selection_metric,
+                        context$response$classification
+                    ),
+                    north = as.integer(controls$north),
+                    oversample = as.integer(controls$oversample),
+                    power = as.integer(controls$power),
+                    seed = as.integer(controls$seed),
+                    store_predictions = isTRUE(controls$store_predictions)
+                )
             } else {
-                pls_cv_regression_core_cpp
+                runner <- if (context$float32) {
+                    pls_cv_regression_float32_core_cpp
+                } else {
+                    pls_cv_regression_core_cpp
+                }
+                result <- runner(
+                    predictors = context$X,
+                    responses = context$response$matrix,
+                    folds = folds,
+                    components = context$ncomp,
+                    scaling = context$scaling,
+                    method = method_id,
+                    metric = .cv_metric_id(
+                        controls$selection_metric,
+                        context$response$classification
+                    ),
+                    oversample = as.integer(controls$oversample),
+                    power = as.integer(controls$power),
+                    seed = as.integer(controls$seed),
+                    store_predictions = isTRUE(controls$store_predictions)
+                )
             }
-            result <- runner(
-                predictors = context$X,
-                responses = context$response$matrix,
-                folds = folds,
-                components = context$ncomp,
-                scaling = context$scaling,
-                method = method_id,
-                metric = .cv_metric_id(
-                    controls$selection_metric,
-                    context$response$classification
-                ),
-                oversample = as.integer(controls$oversample),
-                power = as.integer(controls$power),
-                seed = as.integer(controls$seed),
-                store_predictions = isTRUE(controls$store_predictions)
-            )
         }
         metric_name <- if (context$response$classification) {
             "accuracy"
