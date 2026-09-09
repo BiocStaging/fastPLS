@@ -106,6 +106,10 @@ SEXP _fastPLS_pls_simpls_labels_core_cpp(
   SEXP predictors, SEXP labels, SEXP class_count, SEXP components,
   SEXP scaling, SEXP fit, SEXP oversample, SEXP power, SEXP seed
 );
+SEXP _fastPLS_pls_matrix_core_cpp(
+  SEXP predictors, SEXP responses, SEXP components, SEXP scaling,
+  SEXP fit, SEXP method, SEXP oversample, SEXP power, SEXP seed
+);
 SEXP _fastPLS_pls_labels_core_predict_cpp(
   SEXP model, SEXP predictors, SEXP project
 );

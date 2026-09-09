@@ -11,6 +11,7 @@
 #include <fastpls/core/plssvd.hpp>
 #include <fastpls/core/simpls.hpp>
 #include <fastpls/core/statistics.hpp>
+#include <fastpls/core/supervised.hpp>
 
 #include <algorithm>
 #include <cmath>
@@ -20,6 +21,7 @@
 #include <exception>
 #include <stdexcept>
 #include <string>
+#include <type_traits>
 #include <vector>
 
 namespace fastpls_svd {
@@ -251,6 +253,54 @@ SEXP core_matrix_list(
     SET_STRING_ELT(names, index, Rf_mkChar(name.c_str()));
   }
   Rf_setAttrib(output, R_NamesSymbol, names);
+  UNPROTECT(2);
+  return output;
+}
+
+template<class T>
+SEXP core_matrix_cube(
+    const std::vector<fastpls::core::Matrix<T>>& values,
+    std::size_t rows, std::size_t columns, bool variable_columns = false) {
+  const SEXPTYPE type = std::is_same<T, float>::value ? INTSXP : REALSXP;
+  SEXP output = PROTECT(Rf_allocVector(
+    type, static_cast<R_xlen_t>(rows * columns * values.size())
+  ));
+  SEXP dimensions = PROTECT(Rf_allocVector(INTSXP, 3));
+  INTEGER(dimensions)[0] = static_cast<int>(rows);
+  INTEGER(dimensions)[1] = static_cast<int>(columns);
+  INTEGER(dimensions)[2] = static_cast<int>(values.size());
+  Rf_setAttrib(output, R_DimSymbol, dimensions);
+  if (type == INTSXP) {
+    std::fill(INTEGER(output), INTEGER(output) + XLENGTH(output), 0);
+  } else {
+    std::fill(REAL(output), REAL(output) + XLENGTH(output), 0.0);
+  }
+  const std::size_t slice_size = rows * columns;
+  for (std::size_t slice = 0; slice < values.size(); ++slice) {
+    if (values[slice].rows() > rows ||
+        (variable_columns ? values[slice].columns() > columns :
+                            values[slice].columns() != columns)) {
+      UNPROTECT(2);
+      throw std::invalid_argument(
+        "fastPLS core matrix path has inconsistent dimensions"
+      );
+    }
+    for (std::size_t column = 0;
+         column < values[slice].columns(); ++column) {
+      for (std::size_t row = 0; row < values[slice].rows(); ++row) {
+        const std::size_t destination = slice * slice_size +
+          column * rows + row;
+        if (type == INTSXP) {
+          INTEGER(output)[destination] = encode_float32(
+            static_cast<float>(values[slice](row, column))
+          );
+        } else {
+          REAL(output)[destination] =
+            static_cast<double>(values[slice](row, column));
+        }
+      }
+    }
+  }
   UNPROTECT(2);
   return output;
 }
@@ -506,21 +556,20 @@ std::vector<std::size_t> encoded_class_labels(
   return encoded;
 }
 
-template<class T, class Backend>
-SEXP fit_plssvd_label_core_prepared(
+template<class T, class Prepared, class Backend, class Metric>
+SEXP fit_plssvd_core_prepared(
     fastpls::core::ConstMatrixView<T> predictors,
-    const fastpls::core::LabelCrossprodResult<T>& prepared,
-    const std::vector<std::size_t>& labels, int class_count,
+    const Prepared& prepared, std::size_t response_rank_cap,
     SEXP components, bool fitted, int oversample, int power,
-    unsigned int seed, const char* xprod_mode, Backend& backend) {
+    unsigned int seed, const char* xprod_mode, Backend& backend,
+    Metric metric, bool array_paths = false) {
   ProtectStack protect;
   SEXP effective_components = protect.add(Rf_duplicate(components));
   const std::size_t sample_rank = std::max<std::size_t>(
     predictors.rows() - 1, 1
   );
   const int rank_cap = static_cast<int>(std::min({
-    predictors.columns(), sample_rank,
-    static_cast<std::size_t>(class_count - 1)
+    predictors.columns(), sample_rank, response_rank_cap
   }));
   for (R_xlen_t index = 0; index < XLENGTH(effective_components); ++index) {
     const int value = INTEGER(effective_components)[index];
@@ -556,17 +605,18 @@ SEXP fit_plssvd_label_core_prepared(
       const auto scores = fastpls::core::make_const_view(
         model.scores.data(), model.scores.rows(), count, model.scores.rows()
       );
-      fastpls::core::Matrix<T> values(predictors.rows(), class_count);
+      fastpls::core::Matrix<T> values(
+        predictors.rows(), prepared.response_mean.size()
+      );
       backend.gemm(
         scores, model.prediction_weights[index].view(), false, false,
         values.view()
       );
-      r2_values[index] = fastpls::core::dummy_response_r2(
-        labels.data(), labels.size(), prepared.response_mean.data(),
-        static_cast<std::size_t>(class_count), values.view()
+      r2_values[index] = metric(
+        fastpls::core::ConstMatrixView<T>(values.view())
       );
       for (std::size_t response = 0;
-           response < static_cast<std::size_t>(class_count); ++response) {
+           response < prepared.response_mean.size(); ++response) {
         for (std::size_t row = 0; row < values.rows(); ++row) {
           values(row, response) += prepared.response_mean[response];
         }
@@ -575,12 +625,13 @@ SEXP fit_plssvd_label_core_prepared(
     }
   }
 
-  constexpr int field_count = 15;
+  constexpr int field_count = 16;
   SEXP output = protect.add(Rf_allocVector(VECSXP, field_count));
   SEXP names = protect.add(Rf_allocVector(STRSXP, field_count));
   const char* field_names[field_count] = {
     "P", "R", "Q", "Ttrain", "W_latent", "mX", "vX", "mY",
-    "p", "m", "ncomp", "Yfit", "R2Y", "pls_method", "xprod_mode"
+    "p", "m", "ncomp", "Yfit", "R2Y", "pls_method", "xprod_mode",
+    "C_latent"
   };
   for (int index = 0; index < field_count; ++index) {
     SET_STRING_ELT(names, index, Rf_mkChar(field_names[index]));
@@ -590,7 +641,10 @@ SEXP fit_plssvd_label_core_prepared(
   SET_VECTOR_ELT(output, 2, core_matrix(model.response_loadings));
   SET_VECTOR_ELT(output, 3, core_matrix(model.scores));
   SET_VECTOR_ELT(
-    output, 4, core_matrix_list(
+    output, 4, array_paths ? core_matrix_cube(
+      model.prediction_weights, model.weights.columns(),
+      prepared.response_mean.size()
+    ) : core_matrix_list(
       model.prediction_weights, INTEGER(effective_components)
     )
   );
@@ -606,20 +660,51 @@ SEXP fit_plssvd_label_core_prepared(
   SET_VECTOR_ELT(output, 8, Rf_ScalarInteger(
     static_cast<int>(predictors.columns())
   ));
-  SET_VECTOR_ELT(output, 9, Rf_ScalarInteger(class_count));
+  SET_VECTOR_ELT(output, 9, Rf_ScalarInteger(
+    static_cast<int>(prepared.response_mean.size())
+  ));
   SET_VECTOR_ELT(output, 10, effective_components);
   SET_VECTOR_ELT(
-    output, 11, fitted ? core_matrix_list(
+    output, 11, fitted ? (array_paths ? core_matrix_cube(
+      fitted_values, predictors.rows(), prepared.response_mean.size()
+    ) : core_matrix_list(
       fitted_values, INTEGER(effective_components)
-    ) : R_NilValue
+    )) : R_NilValue
   );
   SEXP r2 = protect.add(Rf_allocVector(REALSXP, XLENGTH(components)));
   std::copy(r2_values.begin(), r2_values.end(), REAL(r2));
   SET_VECTOR_ELT(output, 12, r2);
   SET_VECTOR_ELT(output, 13, Rf_mkString("plssvd"));
   SET_VECTOR_ELT(output, 14, Rf_mkString(xprod_mode));
+  SET_VECTOR_ELT(
+    output, 15, array_paths ? core_matrix_cube(
+      model.latent_coefficients, model.weights.columns(),
+      model.weights.columns(), true
+    ) : core_matrix_list(
+      model.latent_coefficients, INTEGER(effective_components)
+    )
+  );
   Rf_setAttrib(output, R_NamesSymbol, names);
   return output;
+}
+
+template<class T, class Backend>
+SEXP fit_plssvd_label_core_prepared(
+    fastpls::core::ConstMatrixView<T> predictors,
+    const fastpls::core::LabelCrossprodResult<T>& prepared,
+    const std::vector<std::size_t>& labels, int class_count,
+    SEXP components, bool fitted, int oversample, int power,
+    unsigned int seed, const char* xprod_mode, Backend& backend) {
+  return fit_plssvd_core_prepared(
+    predictors, prepared, static_cast<std::size_t>(class_count - 1),
+    components, fitted, oversample, power, seed, xprod_mode, backend,
+    [&](fastpls::core::ConstMatrixView<T> values) {
+      return fastpls::core::dummy_response_r2(
+        labels.data(), labels.size(), prepared.response_mean.data(),
+        static_cast<std::size_t>(class_count), values
+      );
+    }
+  );
 }
 
 template<class T, class Backend>
@@ -682,13 +767,13 @@ fastpls::core::SimplsControls simpls_controls(
   return controls;
 }
 
-template<class T, class Backend>
-SEXP fit_simpls_label_core_prepared(
+template<class T, class Prepared, class Backend, class Metric>
+SEXP fit_simpls_core_prepared(
     fastpls::core::ConstMatrixView<T> predictors,
-    const fastpls::core::LabelCrossprodResult<T>& prepared,
-    const std::vector<std::size_t>& labels, int class_count,
+    const Prepared& prepared,
     SEXP components, bool fitted, int oversample, int power,
-    unsigned int seed, const char* xprod_mode, Backend& backend) {
+    unsigned int seed, const char* xprod_mode, Backend& backend,
+    Metric metric, bool array_paths = false) {
   ProtectStack protect;
   SEXP effective_components = protect.add(Rf_duplicate(components));
   const std::size_t sample_rank = std::max<std::size_t>(
@@ -713,7 +798,7 @@ SEXP fit_simpls_label_core_prepared(
 
   const auto controls = simpls_controls(
     predictors.rows(), predictors.columns(),
-    static_cast<std::size_t>(class_count),
+    prepared.response_mean.size(),
     static_cast<std::size_t>(maximum_components), oversample, power, seed
   );
   fastpls::core::SimplsWorkspace<T> workspace;
@@ -743,14 +828,15 @@ SEXP fit_simpls_label_core_prepared(
         model.response_loadings.data(), model.response_loadings.rows(), count,
         model.response_loadings.rows()
       );
-      fastpls::core::Matrix<T> values(predictors.rows(), class_count);
+      fastpls::core::Matrix<T> values(
+        predictors.rows(), prepared.response_mean.size()
+      );
       backend.gemm(scores, loadings, false, true, values.view());
-      r2_values[index] = fastpls::core::dummy_response_r2(
-        labels.data(), labels.size(), prepared.response_mean.data(),
-        static_cast<std::size_t>(class_count), values.view()
+      r2_values[index] = metric(
+        fastpls::core::ConstMatrixView<T>(values.view())
       );
       for (std::size_t response = 0;
-           response < static_cast<std::size_t>(class_count); ++response) {
+           response < prepared.response_mean.size(); ++response) {
         for (std::size_t row = 0; row < values.rows(); ++row) {
           values(row, response) += prepared.response_mean[response];
         }
@@ -786,12 +872,16 @@ SEXP fit_simpls_label_core_prepared(
   SET_VECTOR_ELT(output, 7, Rf_ScalarInteger(
     static_cast<int>(predictors.columns())
   ));
-  SET_VECTOR_ELT(output, 8, Rf_ScalarInteger(class_count));
+  SET_VECTOR_ELT(output, 8, Rf_ScalarInteger(
+    static_cast<int>(prepared.response_mean.size())
+  ));
   SET_VECTOR_ELT(output, 9, effective_components);
   SET_VECTOR_ELT(
-    output, 10, fitted ? core_matrix_list(
+    output, 10, fitted ? (array_paths ? core_matrix_cube(
+      fitted_values, predictors.rows(), prepared.response_mean.size()
+    ) : core_matrix_list(
       fitted_values, INTEGER(effective_components)
-    ) : R_NilValue
+    )) : R_NilValue
   );
   SEXP r2 = protect.add(Rf_allocVector(REALSXP, XLENGTH(components)));
   std::copy(r2_values.begin(), r2_values.end(), REAL(r2));
@@ -803,6 +893,25 @@ SEXP fit_simpls_label_core_prepared(
   }
   Rf_setAttrib(output, R_NamesSymbol, names);
   return output;
+}
+
+template<class T, class Backend>
+SEXP fit_simpls_label_core_prepared(
+    fastpls::core::ConstMatrixView<T> predictors,
+    const fastpls::core::LabelCrossprodResult<T>& prepared,
+    const std::vector<std::size_t>& labels, int class_count,
+    SEXP components, bool fitted, int oversample, int power,
+    unsigned int seed, const char* xprod_mode, Backend& backend) {
+  return fit_simpls_core_prepared(
+    predictors, prepared, components, fitted, oversample, power, seed,
+    xprod_mode, backend,
+    [&](fastpls::core::ConstMatrixView<T> values) {
+      return fastpls::core::dummy_response_r2(
+        labels.data(), labels.size(), prepared.response_mean.data(),
+        static_cast<std::size_t>(class_count), values
+      );
+    }
+  );
 }
 
 template<class T, class Backend>
@@ -820,6 +929,36 @@ SEXP fit_simpls_label_core(
     fastpls::core::ConstMatrixView<T>(predictors.view()), prepared, labels,
     class_count, components, fitted, oversample, power, seed, xprod_mode,
     backend
+  );
+}
+
+template<class T, class Backend>
+SEXP fit_dense_core_prepared(
+    fastpls::core::ConstMatrixView<T> predictors,
+    fastpls::core::ConstMatrixView<T> responses,
+    const fastpls::core::DenseCrossprodResult<T>& prepared,
+    SEXP components, bool fitted, int method, int oversample, int power,
+    unsigned int seed, const char* xprod_mode, Backend& backend) {
+  const auto metric = [&](fastpls::core::ConstMatrixView<T> values) {
+    return fastpls::core::dense_response_r2(
+      responses, prepared.response_mean.data(),
+      prepared.response_mean.size(), values
+    );
+  };
+  if (method == 1) {
+    return fit_plssvd_core_prepared(
+      predictors, prepared, prepared.response_mean.size(), components,
+      fitted, oversample, power, seed, xprod_mode, backend, metric, true
+    );
+  }
+  if (method == 3) {
+    return fit_simpls_core_prepared(
+      predictors, prepared, components, fitted, oversample, power, seed,
+      xprod_mode, backend, metric, true
+    );
+  }
+  throw std::invalid_argument(
+    "fastPLS dense core method must be PLS-SVD or SIMPLS"
   );
 }
 
@@ -1999,6 +2138,63 @@ extern "C" SEXP _fastPLS_pls_simpls_labels_core_cpp(
   });
 }
 
+extern "C" SEXP _fastPLS_pls_matrix_core_cpp(
+    SEXP predictors, SEXP responses, SEXP components, SEXP scaling,
+    SEXP fit, SEXP method, SEXP oversample, SEXP power, SEXP seed) {
+  return translate_exceptions("double dense core PLS fitting", [&] {
+    if (TYPEOF(components) != INTSXP || XLENGTH(components) < 1) {
+      throw std::invalid_argument(
+        "double dense core PLS requires integer component counts"
+      );
+    }
+    fastpls::core::Matrix<double> owned_y;
+    fastpls::core::ConstMatrixView<double> y;
+    if (Rf_isMatrix(responses) && TYPEOF(responses) == REALSXP) {
+      y = numeric_matrix_view(responses, "Ytrain");
+    } else {
+      owned_y = numeric_matrix_from_sexp(responses, "Ytrain");
+      y = fastpls::core::ConstMatrixView<double>(owned_y.view());
+    }
+    const int scaling_code = Rf_asInteger(scaling);
+    const int fit_code = Rf_asLogical(fit);
+    const int method_code = Rf_asInteger(method);
+    if (scaling_code < 1 || scaling_code > 3 || fit_code == NA_LOGICAL ||
+        (method_code != 1 && method_code != 3)) {
+      throw std::invalid_argument(
+        "double dense core PLS controls are invalid"
+      );
+    }
+    fastpls::runtime::CpuLinearAlgebraF64 backend;
+    if (scaling_code == static_cast<int>(
+        fastpls::core::PredictorScaling::none) &&
+        Rf_isMatrix(predictors) && TYPEOF(predictors) == REALSXP) {
+      const auto x = numeric_matrix_view(predictors, "Xtrain");
+      const auto prepared = fastpls::core::unscaled_dense_crossprod(
+        x, y, backend
+      );
+      return fit_dense_core_prepared(
+        x, y, prepared, components, fit_code, method_code,
+        Rf_asInteger(oversample), Rf_asInteger(power),
+        static_cast<unsigned int>(Rf_asInteger(seed)),
+        "float64_dense_crosscov", backend
+      );
+    }
+    fastpls::core::Matrix<double> x = numeric_matrix_from_sexp(
+      predictors, "Xtrain"
+    );
+    const auto prepared = fastpls::core::prepare_scaled_dense_crossprod(
+      x.view(), y,
+      static_cast<fastpls::core::PredictorScaling>(scaling_code), backend
+    );
+    return fit_dense_core_prepared(
+      fastpls::core::ConstMatrixView<double>(x.view()), y, prepared,
+      components, fit_code, method_code, Rf_asInteger(oversample),
+      Rf_asInteger(power), static_cast<unsigned int>(Rf_asInteger(seed)),
+      "float64_dense_crosscov", backend
+    );
+  });
+}
+
 extern "C" SEXP _fastPLS_pls_labels_core_predict_cpp(
     SEXP model, SEXP predictors, SEXP project) {
   return translate_exceptions("double core PLS-SVD prediction", [&] {
@@ -2025,7 +2221,14 @@ extern "C" SEXP _fastPLS_pls_labels_core_predict_cpp(
     SEXP components = list_element(model, "ncomp");
     SEXP stored_weights = list_element(model, "W_latent");
     SEXP response_loadings = list_element(model, "Q");
-    const bool plssvd_weights = TYPEOF(stored_weights) == VECSXP;
+    const bool plssvd_list = TYPEOF(stored_weights) == VECSXP;
+    const SEXP stored_dimensions = Rf_getAttrib(
+      stored_weights, R_DimSymbol
+    );
+    const bool plssvd_cube = TYPEOF(stored_weights) == REALSXP &&
+      TYPEOF(stored_dimensions) == INTSXP &&
+      XLENGTH(stored_dimensions) == 3;
+    const bool plssvd_weights = plssvd_list || plssvd_cube;
     fastpls::core::ConstMatrixView<double> simpls_loadings;
     if (!plssvd_weights) {
       simpls_loadings = numeric_matrix_view(response_loadings, "model$Q");
@@ -2034,8 +2237,12 @@ extern "C" SEXP _fastPLS_pls_labels_core_predict_cpp(
     if (x.columns() != projection.rows() ||
         center.size() != x.columns() || scale.size() != x.columns() ||
         response_mean.empty() || TYPEOF(components) != INTSXP ||
-        (plssvd_weights &&
+        (plssvd_list &&
           XLENGTH(components) != XLENGTH(stored_weights)) ||
+        (plssvd_cube &&
+          (INTEGER(stored_dimensions)[1] !=
+             static_cast<int>(response_mean.size()) ||
+           INTEGER(stored_dimensions)[2] != XLENGTH(components))) ||
         (!plssvd_weights &&
           (simpls_loadings.rows() != response_mean.size() ||
            simpls_loadings.columns() < projection.columns())) ||
@@ -2101,7 +2308,7 @@ extern "C" SEXP _fastPLS_pls_labels_core_predict_cpp(
       fastpls::core::Matrix<double> values(
         x.rows(), response_mean.size()
       );
-      if (plssvd_weights) {
+      if (plssvd_list) {
         const auto weights = numeric_matrix_view(
           VECTOR_ELT(stored_weights, index), "model$W_latent"
         );
@@ -2111,6 +2318,21 @@ extern "C" SEXP _fastPLS_pls_labels_core_predict_cpp(
             "double core PLS-SVD latent weights are inconsistent"
           );
         }
+        backend.gemm(prefix, weights, false, false, values.view());
+      } else if (plssvd_cube) {
+        const std::size_t stored_rows = static_cast<std::size_t>(
+          INTEGER(stored_dimensions)[0]
+        );
+        if (stored_rows < static_cast<std::size_t>(count)) {
+          throw std::invalid_argument(
+            "double core PLS-SVD latent cube is inconsistent"
+          );
+        }
+        const auto weights = fastpls::core::make_const_view(
+          REAL(stored_weights) + static_cast<std::size_t>(index) *
+            stored_rows * response_mean.size(),
+          static_cast<std::size_t>(count), response_mean.size(), stored_rows
+        );
         backend.gemm(prefix, weights, false, false, values.view());
       } else {
         const auto loadings = fastpls::core::make_const_view(

@@ -100,6 +100,10 @@ if(BUILD_TESTING)
   target_link_libraries(test_core_statistics PRIVATE fastpls_core)
   add_test(NAME core_statistics COMMAND test_core_statistics)
 
+  add_executable(test_core_supervised tests/test_core_supervised.cpp)
+  target_link_libraries(test_core_supervised PRIVATE fastpls_core)
+  add_test(NAME core_supervised COMMAND test_core_supervised)
+
   if(FASTPLS_BUILD_TRANSITIONAL_NATIVE)
     add_executable(test_native_simpls tests/test_simpls.cpp)
     target_link_libraries(test_native_simpls PRIVATE fastpls_native)

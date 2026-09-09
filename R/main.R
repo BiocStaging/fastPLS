@@ -6076,7 +6076,7 @@ pls.model2.fast.gpu <-
             object$pls_method %in% c("plssvd", "simpls") &&
             startsWith(
                 object$xprod_mode %||% "",
-                "float64_label_class_sums"
+                "float64_"
             )
     ) {
         return(pls_labels_core_predict_cpp(object, Xtest, proj))
@@ -11970,6 +11970,41 @@ model <- .maybe_attach_pls_variance_explained(model, Xtrain, return_variance)
     do.call(pls.model2.fast, arguments)
 }
 
+.pls_core_store_coefficients <- function(result, method_id) {
+    store <- .should_store_coefficients(
+        result$p, result$m, length(result$ncomp), TRUE
+    )
+    if (store) {
+        coefficients <- array(
+            0,
+            dim = c(result$p, result$m, length(result$ncomp))
+        )
+        for (index in seq_along(result$ncomp)) {
+            count <- result$ncomp[[index]]
+            coefficients[, , index] <- if (method_id == 1L) {
+                latent <- if (is.list(result$W_latent)) {
+                    result$W_latent[[index]]
+                } else {
+                    matrix(
+                        result$W_latent[seq_len(count), , index],
+                        nrow = count,
+                        ncol = result$m
+                    )
+                }
+                result$R[, seq_len(count), drop = FALSE] %*%
+                    latent
+            } else {
+                tcrossprod(
+                    result$R[, seq_len(count), drop = FALSE],
+                    result$Q[, seq_len(count), drop = FALSE]
+                )
+            }
+        }
+        result$B <- coefficients
+    }
+    .annotate_coefficient_storage(result, store)
+}
+
 .pls_cpu_fit <- function(context, config, cpu) {
     if (isTRUE(cpu$compact_labels)) {
         ctl <- context$control
@@ -12002,29 +12037,7 @@ model <- .maybe_attach_pls_variance_explained(model, Xtrain, return_variance)
                 power = ctl$rsvd_power,
                 seed = ctl$seed
             )
-            store <- .should_store_coefficients(
-                result$p, result$m, length(result$ncomp), TRUE
-            )
-            if (store) {
-                coefficients <- array(
-                    0,
-                    dim = c(result$p, result$m, length(result$ncomp))
-                )
-                for (index in seq_along(result$ncomp)) {
-                    count <- result$ncomp[[index]]
-                    coefficients[, , index] <- if (cpu$method_id == 1L) {
-                        result$R[, seq_len(count), drop = FALSE] %*%
-                            result$W_latent[[index]]
-                    } else {
-                        tcrossprod(
-                            result$R[, seq_len(count), drop = FALSE],
-                            result$Q[, seq_len(count), drop = FALSE]
-                        )
-                    }
-                }
-                result$B <- coefficients
-            }
-            .annotate_coefficient_storage(result, store)
+            .pls_core_store_coefficients(result, cpu$method_id)
         } else {
             pls_labels_cpp(
                 XtrainSEXP = cpu$X,
@@ -12041,6 +12054,34 @@ model <- .maybe_attach_pls_variance_explained(model, Xtrain, return_variance)
                 seed = ctl$seed
             )
         }
+        class(model) <- "fastPLS"
+        return(model)
+    }
+    core_dense <- cpu$method_id %in% c(1L, 3L) &&
+        cpu$solver_id == 4L && !cpu$xprod
+    if (core_dense) {
+        ncomp <- config$ncomp
+        if (cpu$method_id == 1L) {
+            ncomp <- .cap_plssvd_ncomp(
+                ncomp,
+                nrow(cpu$X),
+                ncol(cpu$X),
+                ncol(cpu$Y),
+                warn = TRUE
+            )$ncomp
+        }
+        model <- pls_matrix_core_cpp(
+            predictors = cpu$X,
+            responses = cpu$Y,
+            components = as.integer(ncomp),
+            scaling = context$scal,
+            fit = config$fit,
+            method = cpu$method_id,
+            oversample = context$control$rsvd_oversample,
+            power = context$control$rsvd_power,
+            seed = context$control$seed
+        )
+        model <- .pls_core_store_coefficients(model, cpu$method_id)
         class(model) <- "fastPLS"
         return(model)
     }

@@ -15,5 +15,6 @@
 #include <fastpls/core/rsvd.hpp>
 #include <fastpls/core/simpls.hpp>
 #include <fastpls/core/statistics.hpp>
+#include <fastpls/core/supervised.hpp>
 
 #endif

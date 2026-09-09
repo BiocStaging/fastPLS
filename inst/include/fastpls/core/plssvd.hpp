@@ -24,6 +24,7 @@ struct PlssvdModel {
   Matrix<T> weights;
   Matrix<T> response_loadings;
   Matrix<T> scores;
+  std::vector<Matrix<T>> latent_coefficients;
   std::vector<Matrix<T>> prediction_weights;
   std::vector<T> singular_values;
   std::vector<int> components;
@@ -99,6 +100,7 @@ PlssvdModel<T> fit_plssvd_preprocessed(
     full_gram.view()
   );
 
+  model.latent_coefficients.reserve(component_count);
   model.prediction_weights.reserve(component_count);
   for (const int requested : model.components) {
     const std::size_t count = static_cast<std::size_t>(requested);
@@ -122,6 +124,7 @@ PlssvdModel<T> fit_plssvd_preprocessed(
     backend.gemm(
       latent.view(), loadings, false, true, weights.view()
     );
+    model.latent_coefficients.push_back(std::move(latent));
     model.prediction_weights.push_back(std::move(weights));
   }
   return model;
