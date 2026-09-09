@@ -1,3 +1,18 @@
+# fastPLS 0.99.56
+
+* Completed the MIT-licensed core migration by removing the remaining Rcpp,
+  RcppArmadillo and Armadillo source boundaries, generated wrappers and
+  superseded numerical implementations.
+
+* Made the dependency-free C++17 headers installable through the standalone
+  `fastpls::core` CMake target and verified them from an external consumer.
+  Platform BLAS/LAPACK, CUDA and Metal adapters remain private to the R package
+  and do not cross the core interface.
+
+* Removed obsolete compiled routes and bundled third-party example datasets,
+  retained strict registered native calls, and preserved CPU, CUDA and Metal
+  behavior across PLS-SVD, SIMPLS, OPLS, kernel PLS and LDA tests.
+
 # fastPLS 0.99.55
 
 * Prevented Linux BLAS symbol interposition from routing the standalone
