@@ -29,7 +29,12 @@ test_that("CPU rSVD recovery rechecks slow spectra without another solver", {
                 sqrt(sum((tested %*% v[, j] - out$d[j] * u[, j])^2)),
                 sqrt(sum((crossprod(tested, u[, j]) - out$d[j] * v[, j])^2))
                 ) / out$d[1L], numeric(1))
-            expect_lte(max(residual), 2e-5)
+            residual_tolerance <- if (precision == "float32") {
+                3 * 2^-23 * max(dim(tested))
+            } else {
+                2e-12
+            }
+            expect_lte(max(residual), residual_tolerance)
         }
     }
 })

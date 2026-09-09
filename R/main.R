@@ -4075,18 +4075,16 @@ print.fastPLS <- function(x, ...) {
 }
 
 .cuda_matmul_available <- function() {
-    exists(
-        "cuda_matrix_multiply",
-        envir = asNamespace("fastPLS"),
-        inherits = FALSE
-    ) &&
+    is.loaded("_fastPLS_cuda_matrix_multiply", PACKAGE = "fastPLS") &&
         isTRUE(has_cuda())
 }
 
 .cuda_matmul <- function(A, B) {
-get("cuda_matrix_multiply", envir = asNamespace("fastPLS"), inherits = FALSE)(
+    .Call(
+        "_fastPLS_cuda_matrix_multiply",
         as.matrix(A),
-        as.matrix(B)
+        as.matrix(B),
+        PACKAGE = "fastPLS"
     )
 }
 

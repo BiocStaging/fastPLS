@@ -705,6 +705,7 @@ RcppExport SEXP _fastPLS_lda_cuda_native_available(void);
 RcppExport SEXP _fastPLS_rsvd_audit_reset_debug(void);
 RcppExport SEXP _fastPLS_rsvd_audit_summary_debug(void);
 RcppExport SEXP _fastPLS_spearman_correlation_cpp(SEXP, SEXP);
+RcppExport SEXP _fastPLS_cuda_matrix_multiply(SEXP, SEXP);
 
 static const R_CallMethodDef CallEntries[] = {
     {"_fastPLS_lda_train_prefix_float32_cuda", (DL_FUNC) &_fastPLS_lda_train_prefix_float32_cuda, 4},
@@ -772,6 +773,7 @@ static const R_CallMethodDef CallEntries[] = {
     {"_fastPLS_rsvd_audit_reset_debug",                   (DL_FUNC) &_fastPLS_rsvd_audit_reset_debug,                    0},
     {"_fastPLS_rsvd_audit_summary_debug",                 (DL_FUNC) &_fastPLS_rsvd_audit_summary_debug,                  0},
     {"_fastPLS_spearman_correlation_cpp",                 (DL_FUNC) &_fastPLS_spearman_correlation_cpp,                  2},
+    {"_fastPLS_cuda_matrix_multiply",                     (DL_FUNC) &_fastPLS_cuda_matrix_multiply,                      2},
     {"_fastPLS_lda_train_prefix_cpp",                     (DL_FUNC) &_fastPLS_lda_train_prefix_cpp,                      5},
     {"_fastPLS_lda_train_moments_prefix_cpp",             (DL_FUNC) &_fastPLS_lda_train_moments_prefix_cpp,              5},
     {"_fastPLS_lda_project_train_prefix_cpp",             (DL_FUNC) &_fastPLS_lda_project_train_prefix_cpp,              7},
