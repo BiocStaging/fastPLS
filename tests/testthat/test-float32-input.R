@@ -6,11 +6,7 @@ skip_native_float32_on_windows <- function() {
 }
 
 expected_float32_cpu_backend <- function() {
-  if (identical(.Platform$OS.type, "windows")) {
-    "float32_windows_float"
-  } else {
-    "float32_cpp"
-  }
+  "float32_cpp"
 }
 
 test_that("float32 CPU products use the native R C boundary", {
@@ -181,39 +177,24 @@ test_that("native float32 OPLS and portable LDA retain single precision", {
   expect_length(pred$pred, nrow(X))
 })
 
-test_that("portable Windows float32 CPU implementation preserves float32 PLS data", {
+test_that("portable core CPU implementation preserves float32 PLS data", {
   skip_if_not_installed("float")
-  skip_if_not(.Platform$OS.type == "windows", "Windows-only implementation")
   set.seed(149)
   X <- float::fl(as.matrix(mtcars[, c("disp", "hp", "wt", "qsec")]))
   y <- float::fl(matrix(mtcars$mpg, ncol = 1L))
-  prep <- fastPLS:::.float32_prepare_response(y)
-
-  fit <- fastPLS:::.float32_windows_cpu_fit(
-    Xtrain = X,
-    yprep = prep,
-    ncomp = 1:2,
-    scaling = 1L,
-    method = "simpls",
-    backend = "cpu",
-    svd.method = "cpu_rsvd",
-    rsvd_oversample = 5L,
-    rsvd_power = 1L,
-    seed = 149L,
-    fit = TRUE
+  fit <- pls(
+    X, y, ncomp = 1:2, scaling = "centering", method = "simpls",
+    backend = "cpu", svd.method = "rsvd", rsvd_oversample = 5L,
+    rsvd_power = 1L, seed = 149L, fit = TRUE,
+    return_variance = FALSE
   )
+  internal <- attr(fit, "fastPLS_internal")
 
-  expect_identical(fit$precision, "float32")
-  expect_identical(fit$predict_backend, "float32_windows_float")
+  expect_identical(internal$precision, "float32")
+  expect_identical(internal$predict_backend, "float32_cpp")
   expect_true(inherits(fit$R, "float32"))
   expect_true(inherits(fit$Q, "float32"))
   expect_true(all(is.finite(fit$R2Y)))
-  expect_error(
-    fastPLS:::.float32_windows_cpu_fit(
-      X, prep, 1L, 1L, "simpls", "cuda", "cpu_rsvd", 5L, 1L, 149L, FALSE
-    ),
-    "backend = 'cpu'"
-  )
 })
 
 test_that("Windows public float32 OPLS and nonlinear kernel PLS support LDA", {
