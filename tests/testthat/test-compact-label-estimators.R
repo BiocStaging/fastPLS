@@ -47,15 +47,11 @@ test_that("compact labels preserve the OPLS filtered design", {
         task$X, as.integer(task$labels), nlevels(task$labels), 2L, 1L
     )
     dense <- fastPLS:::opls_filter_core_cpp(task$X, task$Y, 2L, 1L)
-    retained <- fastPLS:::opls_filter_labels_cpp(
-        task$X, as.integer(task$labels), nlevels(task$labels), 2L, 1L
-    )
 
     expect_identical(compact$north, dense$north)
     expect_equal(compact$X, dense$X, tolerance = 1e-10)
     expect_equal(compact$W_orth, dense$W_orth, tolerance = 1e-10)
     expect_equal(compact$P_orth, dense$P_orth, tolerance = 1e-10)
-    expect_equal(compact$X, retained$X, tolerance = 1e-10)
 })
 
 test_that("factor and character labels use the same compact public route", {

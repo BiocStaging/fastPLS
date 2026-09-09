@@ -122,8 +122,8 @@ Matrix<T> retained_columns(ConstMatrixView<T> source, std::size_t columns) {
 }
 
 template<class T, class Backend, class RefreshCrosscov, class SolveDirection>
-OplsFilter<T> fit_preprocessed_filter(
-    Matrix<T> predictors, Matrix<T> crosscov, std::size_t components,
+OplsFilter<T> fit_preprocessed_filter_inplace(
+    MatrixView<T> predictors, Matrix<T> crosscov, std::size_t components,
     std::vector<T> predictor_center, std::vector<T> predictor_scale,
     Backend& backend, RefreshCrosscov&& refresh_crosscov,
     SolveDirection&& solve_direction) {
@@ -141,20 +141,22 @@ OplsFilter<T> fit_preprocessed_filter(
   Matrix<T> correction;
 
   for (std::size_t component = 0; component < components; ++component) {
-    if (component > 0) refresh_crosscov(predictors.view(), crosscov);
+    if (component > 0) {
+      refresh_crosscov(ConstMatrixView<T>(predictors), crosscov);
+    }
     if (!solve_direction(
           ConstMatrixView<T>(crosscov.view()), component, weight
         )) break;
 
     score.resize(predictors.rows(), 1);
     backend.gemm(
-      predictors.view(), weight.view(), false, false, score.view()
+      ConstMatrixView<T>(predictors), weight.view(), false, false, score.view()
     );
     const T score_sum_squares = vector_dot<T>(score.view(), score.view());
     if (!std::isfinite(score_sum_squares) || score_sum_squares <= T(0)) break;
     loading.resize(predictors.columns(), 1);
     backend.gemm(
-      predictors.view(), score.view(), true, false, loading.view()
+      ConstMatrixView<T>(predictors), score.view(), true, false, loading.view()
     );
     for (std::size_t row = 0; row < loading.rows(); ++row) {
       loading(row, 0) /= score_sum_squares;
@@ -174,7 +176,7 @@ OplsFilter<T> fit_preprocessed_filter(
 
     orthogonal_score.resize(predictors.rows(), 1);
     backend.gemm(
-      predictors.view(), orthogonal_weight.view(), false, false,
+      ConstMatrixView<T>(predictors), orthogonal_weight.view(), false, false,
       orthogonal_score.view()
     );
     const T orthogonal_sum_squares = vector_dot<T>(
@@ -184,7 +186,7 @@ OplsFilter<T> fit_preprocessed_filter(
         orthogonal_sum_squares <= T(0)) break;
     orthogonal_loading.resize(predictors.columns(), 1);
     backend.gemm(
-      predictors.view(), orthogonal_score.view(), true, false,
+      ConstMatrixView<T>(predictors), orthogonal_score.view(), true, false,
       orthogonal_loading.view()
     );
     for (std::size_t row = 0; row < orthogonal_loading.rows(); ++row) {
@@ -200,7 +202,9 @@ OplsFilter<T> fit_preprocessed_filter(
       orthogonal_score.view(), orthogonal_loading.view(), false, true,
       correction.view()
     );
-    for (std::size_t index = 0; index < predictors.size(); ++index) {
+    const std::size_t predictor_size =
+      predictors.rows() * predictors.columns();
+    for (std::size_t index = 0; index < predictor_size; ++index) {
       predictors.data()[index] -= correction.data()[index];
     }
     ++model.completed_components;
@@ -214,6 +218,37 @@ OplsFilter<T> fit_preprocessed_filter(
       model.loadings.view(), model.completed_components
     );
   }
+  return model;
+}
+
+template<class T, class Backend, class RefreshCrosscov>
+OplsFilter<T> fit_preprocessed_filter_inplace(
+    MatrixView<T> predictors, Matrix<T> crosscov, std::size_t components,
+    std::vector<T> predictor_center, std::vector<T> predictor_scale,
+    Backend& backend, RefreshCrosscov&& refresh_crosscov) {
+  auto solve = [&backend](ConstMatrixView<T> crosscov, std::size_t,
+                          Matrix<T>& direction) {
+    return leading_left_direction(crosscov, backend, direction);
+  };
+  return fit_preprocessed_filter_inplace<T>(
+    predictors, std::move(crosscov), components,
+    std::move(predictor_center), std::move(predictor_scale), backend,
+    std::forward<RefreshCrosscov>(refresh_crosscov), solve
+  );
+}
+
+template<class T, class Backend, class RefreshCrosscov, class SolveDirection>
+OplsFilter<T> fit_preprocessed_filter(
+    Matrix<T> predictors, Matrix<T> crosscov, std::size_t components,
+    std::vector<T> predictor_center, std::vector<T> predictor_scale,
+    Backend& backend, RefreshCrosscov&& refresh_crosscov,
+    SolveDirection&& solve_direction) {
+  OplsFilter<T> model = fit_preprocessed_filter_inplace<T>(
+    predictors.view(), std::move(crosscov), components,
+    std::move(predictor_center), std::move(predictor_scale), backend,
+    std::forward<RefreshCrosscov>(refresh_crosscov),
+    std::forward<SolveDirection>(solve_direction)
+  );
   model.predictors = std::move(predictors);
   return model;
 }
@@ -237,17 +272,17 @@ OplsFilter<T> fit_preprocessed_filter(
 }  // namespace opls_detail
 
 template<class T, class Backend>
-OplsFilter<T> fit_opls_filter(Matrix<T> predictors,
-                              ConstMatrixView<T> responses,
-                              std::size_t components,
-                              PredictorScaling scaling,
-                              Backend& backend) {
-  if (predictors.size() == 0 || responses.empty() ||
+OplsFilter<T> fit_opls_filter_inplace(MatrixView<T> predictors,
+                                      ConstMatrixView<T> responses,
+                                      std::size_t components,
+                                      PredictorScaling scaling,
+                                      Backend& backend) {
+  if (predictors.empty() || responses.empty() ||
       predictors.rows() != responses.rows()) {
     throw std::invalid_argument("fastPLS OPLS dimensions are invalid");
   }
   auto prepared = prepare_scaled_dense_crossprod(
-    predictors.view(), responses, scaling, backend
+    predictors, responses, scaling, backend
   );
   Matrix<T> centered_response(responses.rows(), responses.columns());
   for (std::size_t column = 0; column < responses.columns(); ++column) {
@@ -262,11 +297,24 @@ OplsFilter<T> fit_opls_filter(Matrix<T> predictors,
       current, centered_response.view(), true, false, crosscov.view()
     );
   };
-  return opls_detail::fit_preprocessed_filter<T>(
-    std::move(predictors), std::move(prepared.crossprod), components,
+  return opls_detail::fit_preprocessed_filter_inplace<T>(
+    predictors, std::move(prepared.crossprod), components,
     std::move(prepared.predictor_center),
     std::move(prepared.predictor_scale), backend, refresh
   );
+}
+
+template<class T, class Backend>
+OplsFilter<T> fit_opls_filter(Matrix<T> predictors,
+                              ConstMatrixView<T> responses,
+                              std::size_t components,
+                              PredictorScaling scaling,
+                              Backend& backend) {
+  OplsFilter<T> model = fit_opls_filter_inplace(
+    predictors.view(), responses, components, scaling, backend
+  );
+  model.predictors = std::move(predictors);
+  return model;
 }
 
 template<class T, class Backend>
@@ -363,8 +411,8 @@ OplsFilter<T> fit_opls_filter_labels(
 }
 
 template<class T, class Backend>
-Matrix<T> apply_opls_filter(
-    Matrix<T> predictors, const T* center, const T* scale,
+void apply_opls_filter_inplace(
+    MatrixView<T> predictors, const T* center, const T* scale,
     std::size_t statistic_count, ConstMatrixView<T> weights,
     ConstMatrixView<T> loadings, Backend& backend) {
   if (predictors.columns() != statistic_count || center == nullptr ||
@@ -390,12 +438,27 @@ Matrix<T> apply_opls_filter(
       loadings.data() + component * loadings.leading_dimension(),
       loadings.rows(), 1, loadings.leading_dimension()
     );
-    backend.gemm(predictors.view(), weight, false, false, score.view());
+    backend.gemm(
+      ConstMatrixView<T>(predictors), weight, false, false, score.view()
+    );
     backend.gemm(score.view(), loading, false, true, correction.view());
-    for (std::size_t index = 0; index < predictors.size(); ++index) {
+    const std::size_t predictor_size =
+      predictors.rows() * predictors.columns();
+    for (std::size_t index = 0; index < predictor_size; ++index) {
       predictors.data()[index] -= correction.data()[index];
     }
   }
+}
+
+template<class T, class Backend>
+Matrix<T> apply_opls_filter(
+    Matrix<T> predictors, const T* center, const T* scale,
+    std::size_t statistic_count, ConstMatrixView<T> weights,
+    ConstMatrixView<T> loadings, Backend& backend) {
+  apply_opls_filter_inplace(
+    predictors.view(), center, scale, statistic_count, weights, loadings,
+    backend
+  );
   return predictors;
 }
 

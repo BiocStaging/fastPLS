@@ -89,14 +89,6 @@ pls_class_predict_topk_cuda <- function(model, Xtest, top_k, proj) {
     .Call(`_fastPLS_pls_class_predict_topk_cuda`, model, Xtest, top_k, proj)
 }
 
-opls_filter_cpp <- function(X, Y, north, scaling) {
-    .Call(`_fastPLS_opls_filter_cpp`, X, Y, north, scaling)
-}
-
-opls_filter_labels_cpp <- function(X, labels, n_classes, north, scaling) {
-    .Call(`_fastPLS_opls_filter_labels_cpp`, X, labels, n_classes, north, scaling)
-}
-
 pls_model1 <- function(Xtrain, Ytrain, ncomp, scaling, fit, svd_method, rsvd_oversample, rsvd_power, svds_tol, seed) {
     .Call(`_fastPLS_pls_model1`, Xtrain, Ytrain, ncomp, scaling, fit, svd_method, rsvd_oversample, rsvd_power, svds_tol, seed)
 }

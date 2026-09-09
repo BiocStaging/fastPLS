@@ -21,6 +21,7 @@
 #include "svd_metal_backend.h"
 #include "float_crosscov_operator.h"
 #include <fastpls/core/lda.hpp>
+#include <fastpls/core/opls.hpp>
 #include <fastpls/core/rsvd.hpp>
 #include <fastpls/core/simpls.hpp>
 #include <fastpls/core/statistics.hpp>
@@ -5511,59 +5512,6 @@ arma::imat pls_predict_code_classes_compact_cuda(List& model, arma::mat Xtest, c
   return class_pred;
 }
 
-// [[Rcpp::export]]
-Rcpp::List opls_filter_cpp(arma::mat X, arma::mat Y, const int north, const int scaling) {
-  auto solve = [](const arma::mat& S, int, arma::vec& w) {
-    return fastpls::native::leading_left_from_smaller_gram(S, w);
-  };
-  auto filter = fastpls::native::fit_opls_filter_with_solver(
-    std::move(X), std::move(Y), north, scaling, solve);
-  return Rcpp::List::create(
-    Rcpp::Named("X") = filter.X,
-    Rcpp::Named("mX") = filter.x_mean,
-    Rcpp::Named("vX") = filter.x_scale,
-    Rcpp::Named("W_orth") = filter.W,
-    Rcpp::Named("P_orth") = filter.P,
-    Rcpp::Named("north") = filter.completed
-  );
-}
-
-// [[Rcpp::export]]
-Rcpp::List opls_filter_labels_cpp(
-    arma::mat X,
-    const Rcpp::IntegerVector& labels,
-    const int n_classes,
-    const int north,
-    const int scaling) {
-  if (labels.size() != static_cast<R_xlen_t>(X.n_rows) || n_classes < 2) {
-    stop("label-aware OPLS requires one valid label per row and at least two classes");
-  }
-  arma::uvec compact_labels(X.n_rows);
-  for (arma::uword row = 0; row < X.n_rows; ++row) {
-    const int label = labels[static_cast<R_xlen_t>(row)] - 1;
-    if (label < 0 || label >= n_classes) {
-      stop("label-aware OPLS labels must be encoded as 1..n_classes");
-    }
-    compact_labels(row) = static_cast<arma::uword>(label);
-  }
-  auto solve = [](const arma::mat& S, int, arma::vec& w) {
-    return fastpls::native::leading_left_from_smaller_gram(S, w);
-  };
-  const arma::mat no_dense_response;
-  auto filter = fastpls::native::fit_opls_filter_with_solver(
-    std::move(X), no_dense_response, north, scaling, solve,
-    &compact_labels, n_classes
-  );
-  return Rcpp::List::create(
-    Rcpp::Named("X") = filter.X,
-    Rcpp::Named("mX") = filter.x_mean,
-    Rcpp::Named("vX") = filter.x_scale,
-    Rcpp::Named("W_orth") = filter.W,
-    Rcpp::Named("P_orth") = filter.P,
-    Rcpp::Named("north") = filter.completed
-  );
-}
-
 // This function performs a random selection of the elements of a vector "yy".
 // The number of elements to select is defined by the variable "size".
 
@@ -7440,8 +7388,18 @@ List pls_cv_predict_compiled_impl(
     int fit_scaling = scaling;
     if (method == 4) {
       const int north_eff = std::max(opls_north, 0);
-      List filt = opls_filter_cpp(Xtrain, Ytrain, north_eff, scaling);
-      const int removed = Rcpp::as<int>(filt["north"]);
+      fastpls::runtime::CpuLinearAlgebraF64 core_backend;
+      auto filter = fastpls::core::fit_opls_filter_inplace(
+        fastpls::core::make_view(
+          Xtrain.memptr(), Xtrain.n_rows, Xtrain.n_cols, Xtrain.n_rows
+        ),
+        fastpls::core::make_const_view(
+          Ytrain.memptr(), Ytrain.n_rows, Ytrain.n_cols, Ytrain.n_rows
+        ),
+        static_cast<std::size_t>(north_eff),
+        static_cast<fastpls::core::PredictorScaling>(scaling), core_backend
+      );
+      const int removed = static_cast<int>(filter.completed_components);
       const int available = std::min(
         static_cast<int>(Xtrain.n_rows) - (scaling < 3 ? 1 : 0),
         static_cast<int>(Xtrain.n_cols)
@@ -7453,13 +7411,15 @@ List pls_cv_predict_compiled_impl(
           static_cast<int>(ncomp.max()), available, removed
         );
       }
-      Xtrain = Rcpp::as<arma::mat>(filt["X"]);
-      arma::rowvec mX = Rcpp::as<arma::rowvec>(filt["mX"]);
-      arma::rowvec vX = Rcpp::as<arma::rowvec>(filt["vX"]);
-      arma::mat W_orth = Rcpp::as<arma::mat>(filt["W_orth"]);
-      arma::mat P_orth = Rcpp::as<arma::mat>(filt["P_orth"]);
-      Xtest = fastpls::native::apply_opls_filter(
-        std::move(Xtest), mX, vX, W_orth, P_orth
+      fastpls::core::apply_opls_filter_inplace<double>(
+        fastpls::core::make_view(
+          Xtest.memptr(), Xtest.n_rows, Xtest.n_cols, Xtest.n_rows
+        ),
+        filter.predictor_center.data(), filter.predictor_scale.data(),
+        filter.predictor_center.size(),
+        fastpls::core::ConstMatrixView<double>(filter.weights.view()),
+        fastpls::core::ConstMatrixView<double>(filter.loadings.view()),
+        core_backend
       );
       fit_method = 3;
       fit_scaling = 3;
