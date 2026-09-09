@@ -11566,82 +11566,6 @@ model <- .maybe_attach_pls_variance_explained(model, Xtrain, return_variance)
     )
 }
 
-.pls_cpu_arguments <- function(context, config, cpu, X = cpu$X) {
-    ctl <- context$control
-    list(
-        Xtrain = X,
-        Ytrain = cpu$Y,
-        ncomp = config$ncomp,
-        fit = config$fit,
-        scaling = context$scal,
-        rsvd_oversample = ctl$rsvd_oversample,
-        rsvd_power = ctl$rsvd_power,
-        svds_tol = ctl$svds_tol,
-        seed = ctl$seed
-    )
-}
-
-.pls_cpu_plssvd <- function(context, config, cpu) {
-    config$ncomp <- .cap_plssvd_ncomp(
-        config$ncomp,
-        nrow(cpu$X),
-        ncol(cpu$X),
-        ncol(cpu$Y),
-        factor_response = cpu$response$classification,
-        warn = TRUE
-    )$ncomp
-    arguments <- .pls_cpu_arguments(context, config, cpu)
-    if (cpu$xprod) {
-        ctl <- context$control
-        result <- pls_matrix_core_xprod_cpp(
-            predictors = cpu$X,
-            responses = cpu$Y,
-            components = as.integer(config$ncomp),
-            scaling = context$scal,
-            fit = config$fit,
-            method = 1L,
-            oversample = ctl$rsvd_oversample,
-            power = ctl$rsvd_power,
-            seed = ctl$seed
-        )
-        result <- .pls_core_store_coefficients(result, 1L)
-        class(result) <- "fastPLS"
-        return(result)
-    }
-    arguments$svd.method <- cpu$solver_id
-    do.call(pls.model1, arguments)
-}
-
-.pls_cpu_simpls <- function(context, config, cpu) {
-    arguments <- .pls_cpu_arguments(context, config, cpu)
-    if (cpu$method_id == 2L) {
-        arguments$svd.method <- cpu$solver_id
-        return(do.call(pls.model2, arguments))
-    }
-    if (cpu$xprod) {
-        ctl <- context$control
-        result <- pls_matrix_core_xprod_cpp(
-            predictors = cpu$X,
-            responses = cpu$Y,
-            components = as.integer(config$ncomp),
-            scaling = context$scal,
-            fit = config$fit,
-            store_scores = config$fit ||
-                .is_lda_classifier(context$classifier),
-            method = 3L,
-            oversample = ctl$rsvd_oversample,
-            power = ctl$rsvd_power,
-            seed = ctl$seed
-        )
-        result <- .pls_core_store_coefficients(result, 3L)
-        class(result) <- "fastPLS"
-        return(result)
-    }
-    arguments$svd.method <- cpu$solver_id
-    arguments$return_ttrain <- FALSE
-    do.call(pls.model2.fast, arguments)
-}
-
 .pls_core_store_coefficients <- function(result, method_id) {
     store <- .should_store_coefficients(
         result$p, result$m, length(result$ncomp), TRUE
@@ -11678,106 +11602,75 @@ model <- .maybe_attach_pls_variance_explained(model, Xtrain, return_variance)
 }
 
 .pls_cpu_fit <- function(context, config, cpu) {
-    if (isTRUE(cpu$compact_labels)) {
-        ctl <- context$control
-        ncomp <- config$ncomp
-        if (cpu$method_id == 1L) {
-            ncomp <- .cap_plssvd_ncomp(
-                ncomp,
-                nrow(cpu$X),
-                ncol(cpu$X),
-                cpu$response$n_classes,
-                factor_response = TRUE,
-                warn = TRUE
-            )$ncomp
-        }
-        core_labels <- cpu$method_id %in% c(1L, 3L) && cpu$solver_id == 4L
-        model <- if (core_labels) {
-            fit_core <- if (cpu$method_id == 1L) {
-                pls_labels_core_cpp
-            } else {
-                pls_simpls_labels_core_cpp
-            }
-            result <- fit_core(
-                predictors = cpu$X,
-                labels = cpu$response$labels,
-                class_count = cpu$response$n_classes,
-                components = as.integer(ncomp),
-                scaling = context$scal,
-                fit = config$fit,
-                store_scores = config$fit ||
-                    .is_lda_classifier(context$classifier),
-                oversample = ctl$rsvd_oversample,
-                power = ctl$rsvd_power,
-                seed = ctl$seed
-            )
-            .pls_core_store_coefficients(result, cpu$method_id)
-        } else {
-            pls_labels_cpp(
-                XtrainSEXP = cpu$X,
-                labels = cpu$response$labels,
-                n_classes = cpu$response$n_classes,
-                ncomp = ncomp,
-                scaling = context$scal,
-                fit = config$fit,
-                method = cpu$method_id,
-                svd_method = cpu$solver_id,
-                rsvd_oversample = ctl$rsvd_oversample,
-                rsvd_power = ctl$rsvd_power,
-                svds_tol = ctl$svds_tol,
-                seed = ctl$seed
-            )
-        }
-        class(model) <- "fastPLS"
-        return(model)
+    if (!cpu$method_id %in% c(1L, 3L) || cpu$solver_id != 4L) {
+        stop(
+            "Internal error: the CPU package route supports native rSVD ",
+            "PLS-SVD and SIMPLS only.",
+            call. = FALSE
+        )
     }
-    core_dense <- cpu$method_id %in% c(1L, 3L) &&
-        cpu$solver_id == 4L && !cpu$xprod
-    if (core_dense) {
-        ncomp <- config$ncomp
-        if (cpu$method_id == 1L) {
-            ncomp <- .cap_plssvd_ncomp(
-                ncomp,
-                nrow(cpu$X),
-                ncol(cpu$X),
-                ncol(cpu$Y),
-                warn = TRUE
-            )$ncomp
+    ctl <- context$control
+    ncomp <- config$ncomp
+    if (cpu$method_id == 1L) {
+        ncomp <- .cap_plssvd_ncomp(
+            ncomp,
+            nrow(cpu$X),
+            ncol(cpu$X),
+            cpu$response_columns,
+            factor_response = cpu$response$classification,
+            warn = TRUE
+        )$ncomp
+    }
+    store_scores <- config$fit || .is_lda_classifier(context$classifier)
+    if (isTRUE(cpu$compact_labels)) {
+        fit_core <- if (cpu$method_id == 1L) {
+            pls_labels_core_cpp
+        } else {
+            pls_simpls_labels_core_cpp
         }
-        model <- pls_matrix_core_cpp(
+        result <- fit_core(
+            predictors = cpu$X,
+            labels = cpu$response$labels,
+            class_count = cpu$response$n_classes,
+            components = as.integer(ncomp),
+            scaling = context$scal,
+            fit = config$fit,
+            store_scores = store_scores,
+            oversample = ctl$rsvd_oversample,
+            power = ctl$rsvd_power,
+            seed = ctl$seed
+        )
+    } else {
+        fit_core <- if (isTRUE(cpu$xprod)) {
+            pls_matrix_core_xprod_cpp
+        } else {
+            pls_matrix_core_cpp
+        }
+        result <- fit_core(
             predictors = cpu$X,
             responses = cpu$Y,
             components = as.integer(ncomp),
             scaling = context$scal,
             fit = config$fit,
-            store_scores = config$fit ||
-                .is_lda_classifier(context$classifier),
+            store_scores = store_scores,
             method = cpu$method_id,
-            oversample = context$control$rsvd_oversample,
-            power = context$control$rsvd_power,
-            seed = context$control$seed
+            oversample = ctl$rsvd_oversample,
+            power = ctl$rsvd_power,
+            seed = ctl$seed
         )
-        model <- .pls_core_store_coefficients(model, cpu$method_id)
-        class(model) <- "fastPLS"
-        return(model)
     }
-    if (cpu$method_id == 1L) {
-        return(.pls_cpu_plssvd(context, config, cpu))
-    }
-    .pls_cpu_simpls(context, config, cpu)
+    model <- .pls_core_store_coefficients(result, cpu$method_id)
+    class(model) <- "fastPLS"
+    model
 }
 
 .pls_permutation_fit <- function(context, config, cpu, X) {
-    arguments <- .pls_cpu_arguments(context, config, cpu, X)
-    arguments$fit <- TRUE
-    function_ <- switch(
-        as.character(cpu$method_id),
-        "1" = pls.model1,
-        "2" = pls.model2,
-        "3" = pls.model2.fast
-    )
-    arguments$svd.method <- cpu$solver_id
-    do.call(function_, arguments)
+    permutation_cpu <- cpu
+    permutation_cpu$X <- X
+    permutation_config <- config
+    permutation_config$fit <- TRUE
+    permutation_config$perm.test <- FALSE
+    .pls_cpu_fit(context, permutation_config, permutation_cpu)
 }
 
 .pls_permutation_tables <- function(model, values, r2, correlations, ncomp) {
