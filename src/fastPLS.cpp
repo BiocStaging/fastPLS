@@ -26,7 +26,6 @@
 #include <fastpls/core/simpls.hpp>
 #include <fastpls/core/statistics.hpp>
 #include <fastpls/native/simpls.hpp>
-#include <fastpls/native/kernels.hpp>
 #include <fastpls/native/plssvd.hpp>
 #include <fastpls/native/operator_rsvd.hpp>
 
