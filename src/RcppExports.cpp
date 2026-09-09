@@ -794,6 +794,8 @@ RcppExport SEXP _fastPLS_float32_topk_cpp(SEXP, SEXP);
 RcppExport SEXP _fastPLS_has_cuda(void);
 RcppExport SEXP _fastPLS_has_metal(void);
 RcppExport SEXP _fastPLS_kernel_matrix_cpp(SEXP, SEXP, SEXP, SEXP, SEXP, SEXP);
+RcppExport SEXP _fastPLS_opls_filter_core_cpp(SEXP, SEXP, SEXP, SEXP);
+RcppExport SEXP _fastPLS_opls_filter_labels_core_cpp(SEXP, SEXP, SEXP, SEXP, SEXP);
 RcppExport SEXP _fastPLS_label_crossprod_scaled_cpp(SEXP, SEXP, SEXP, SEXP);
 RcppExport SEXP _fastPLS_lda_cuda_native_available(void);
 RcppExport SEXP _fastPLS_rsvd_audit_reset_debug(void);
@@ -887,6 +889,8 @@ static const R_CallMethodDef CallEntries[] = {
     {"_fastPLS_kernel_matrix_float32_cpp",                (DL_FUNC) &_fastPLS_kernel_matrix_float32_cpp,                 7},
     {"_fastPLS_opls_apply_filter_float32_cpp",            (DL_FUNC) &_fastPLS_opls_apply_filter_float32_cpp,             6},
     {"_fastPLS_opls_apply_filter_cpp",                    (DL_FUNC) &_fastPLS_opls_apply_filter_cpp,                     5},
+    {"_fastPLS_opls_filter_core_cpp",                     (DL_FUNC) &_fastPLS_opls_filter_core_cpp,                      4},
+    {"_fastPLS_opls_filter_labels_core_cpp",              (DL_FUNC) &_fastPLS_opls_filter_labels_core_cpp,               5},
     {"_fastPLS_pls_labels_core_cpp",                     (DL_FUNC) &_fastPLS_pls_labels_core_cpp,                      9},
     {"_fastPLS_pls_simpls_labels_core_cpp",              (DL_FUNC) &_fastPLS_pls_simpls_labels_core_cpp,               9},
     {"_fastPLS_pls_matrix_core_cpp",                     (DL_FUNC) &_fastPLS_pls_matrix_core_cpp,                      9},

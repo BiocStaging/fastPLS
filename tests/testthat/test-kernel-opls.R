@@ -133,3 +133,21 @@ test_that("double OPLS filtering uses the standalone matrix boundary", {
     "stored OPLS preprocessing"
   )
 })
+
+test_that("standalone OPLS fitting preserves the retained CPU estimator", {
+  set.seed(2210)
+  X <- matrix(rnorm(90 * 13), 90, 13)
+  Y <- cbind(
+    X[, 1] - 0.4 * X[, 2] + rnorm(90, sd = 0.1),
+    X[, 3] + 0.2 * X[, 4] + rnorm(90, sd = 0.1)
+  )
+
+  for (scaling in 1:3) {
+    retained <- fastPLS:::opls_filter_cpp(X, Y, 2L, scaling)
+    core <- fastPLS:::opls_filter_core_cpp(X, Y, 2L, scaling)
+    expect_identical(core$north, retained$north)
+    expect_equal(core$X, retained$X, tolerance = 1e-11)
+    expect_equal(abs(core$W_orth), abs(retained$W_orth), tolerance = 1e-11)
+    expect_equal(abs(core$P_orth), abs(retained$P_orth), tolerance = 1e-11)
+  }
+})

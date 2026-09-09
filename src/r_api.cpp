@@ -9,6 +9,7 @@
 #include <fastpls/core/lda.hpp>
 #include <fastpls/core/matrix.hpp>
 #include <fastpls/core/operators.hpp>
+#include <fastpls/core/opls.hpp>
 #include <fastpls/core/plssvd.hpp>
 #include <fastpls/core/simpls.hpp>
 #include <fastpls/core/statistics.hpp>
@@ -521,6 +522,32 @@ class ProtectStack {
  private:
   int count_ = 0;
 };
+
+template<class T, class MatrixSerializer>
+SEXP serialize_opls_filter(const fastpls::core::OplsFilter<T>& filter,
+                           MatrixSerializer&& serialize_matrix) {
+  ProtectStack protect;
+  SEXP output = protect.add(Rf_allocVector(VECSXP, 6));
+  SEXP names = protect.add(Rf_allocVector(STRSXP, 6));
+  const char* labels[] = {
+    "X", "mX", "vX", "W_orth", "P_orth", "north"
+  };
+  for (int index = 0; index < 6; ++index) {
+    SET_STRING_ELT(names, index, Rf_mkChar(labels[index]));
+  }
+  const fastpls::core::Matrix<T> center = row_matrix(filter.predictor_center);
+  const fastpls::core::Matrix<T> scale = row_matrix(filter.predictor_scale);
+  SET_VECTOR_ELT(output, 0, serialize_matrix(filter.predictors));
+  SET_VECTOR_ELT(output, 1, serialize_matrix(center));
+  SET_VECTOR_ELT(output, 2, serialize_matrix(scale));
+  SET_VECTOR_ELT(output, 3, serialize_matrix(filter.weights));
+  SET_VECTOR_ELT(output, 4, serialize_matrix(filter.loadings));
+  SET_VECTOR_ELT(
+    output, 5, Rf_ScalarInteger(static_cast<int>(filter.completed_components))
+  );
+  Rf_setAttrib(output, R_NamesSymbol, names);
+  return output;
+}
 
 template<class Callable>
 SEXP translate_exceptions(const char* context, Callable&& callable) {
@@ -2174,6 +2201,67 @@ extern "C" SEXP _fastPLS_label_crossprod_scaled_cpp(SEXP predictors,
     Rf_error("Unknown error in label-aware cross-product");
   }
   return R_NilValue;
+}
+
+extern "C" SEXP _fastPLS_opls_filter_core_cpp(
+    SEXP predictors, SEXP responses, SEXP north, SEXP scaling) {
+  return translate_exceptions("standalone-core OPLS filtering", [&] {
+    fastpls::core::Matrix<double> x = numeric_matrix_from_sexp(
+      predictors, "Xtrain"
+    );
+    const fastpls::core::Matrix<double> y = numeric_matrix_from_sexp(
+      responses, "Ytrain"
+    );
+    const int component_count = Rf_asInteger(north);
+    const int scaling_code = Rf_asInteger(scaling);
+    if (x.rows() != y.rows() || component_count < 0 ||
+        scaling_code < 1 || scaling_code > 3) {
+      throw std::invalid_argument("standalone-core OPLS controls are invalid");
+    }
+    fastpls::runtime::CpuLinearAlgebraF64 backend;
+    const auto filter = fastpls::core::fit_opls_filter(
+      std::move(x), y.view(), static_cast<std::size_t>(component_count),
+      static_cast<fastpls::core::PredictorScaling>(scaling_code), backend
+    );
+    return serialize_opls_filter<double>(
+      filter, [](const fastpls::core::Matrix<double>& value) {
+        return numeric_matrix(value);
+      }
+    );
+  });
+}
+
+extern "C" SEXP _fastPLS_opls_filter_labels_core_cpp(
+    SEXP predictors, SEXP labels, SEXP class_count, SEXP north,
+    SEXP scaling) {
+  return translate_exceptions("standalone-core label-aware OPLS filtering", [&] {
+    fastpls::core::Matrix<double> x = numeric_matrix_from_sexp(
+      predictors, "Xtrain"
+    );
+    const int classes = Rf_asInteger(class_count);
+    const int component_count = Rf_asInteger(north);
+    const int scaling_code = Rf_asInteger(scaling);
+    if (component_count < 0 || scaling_code < 1 || scaling_code > 3) {
+      throw std::invalid_argument(
+        "standalone-core label-aware OPLS controls are invalid"
+      );
+    }
+    const auto encoded = encoded_class_labels(
+      labels, x.rows(), classes, "standalone-core label-aware OPLS"
+    );
+    fastpls::runtime::CpuLinearAlgebraF64 backend;
+    const auto filter = fastpls::core::fit_opls_filter_labels(
+      std::move(x), encoded.data(), encoded.size(),
+      static_cast<std::size_t>(classes),
+      static_cast<std::size_t>(component_count),
+      static_cast<fastpls::core::PredictorScaling>(scaling_code), backend
+    );
+    return serialize_opls_filter<double>(
+      filter, [](const fastpls::core::Matrix<double>& value) {
+        return numeric_matrix(value);
+      }
+    );
+  });
 }
 
 extern "C" SEXP _fastPLS_pls_labels_core_cpp(

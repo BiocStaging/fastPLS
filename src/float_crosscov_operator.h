@@ -28,14 +28,18 @@ class FloatCrosscovOperator {
       metal_.reset(new MetalFloatCrossproduct(X, Y));
     }
     else if (backend == 0) {
-      cpu_.reset(new CpuCrosscov(
+      response_mean_.assign(Y.n_cols, 0.0f);
+      cpu_base_.reset(new CpuBase(
         fastpls::core::make_const_view(
           X.memptr(), X.n_rows, X.n_cols, X.n_rows
         ),
         fastpls::core::make_const_view(
           Y.memptr(), Y.n_rows, Y.n_cols, Y.n_rows
         ),
-        max_components, cpu_backend_
+        response_mean_.data(), response_mean_.size(), cpu_backend_
+      ));
+      cpu_.reset(new CpuCrosscov(
+        *cpu_base_, std::max<arma::uword>(max_components, 1), cpu_backend_
       ));
     }
     else throw std::runtime_error("Invalid float32 cross-product backend");
@@ -147,11 +151,16 @@ class FloatCrosscovOperator {
   const arma::uword n_rows, n_cols;
 
  private:
-  using CpuCrosscov = fastpls::core::CrosscovOperator<
+  using CpuBase = fastpls::core::CenteredCrosscovOperator<
     float, fastpls::runtime::CpuLinearAlgebraF32
+  >;
+  using CpuCrosscov = fastpls::core::ProjectedOperator<
+    float, CpuBase, fastpls::runtime::CpuLinearAlgebraF32
   >;
   const arma::fmat& Y_;
   fastpls::runtime::CpuLinearAlgebraF32 cpu_backend_;
+  std::vector<float> response_mean_;
+  std::unique_ptr<CpuBase> cpu_base_;
   std::unique_ptr<CpuCrosscov> cpu_;
   const arma::uword capacity_;
   arma::uword active_ = 0;

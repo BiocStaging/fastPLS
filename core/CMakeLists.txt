@@ -104,6 +104,10 @@ if(BUILD_TESTING)
   target_link_libraries(test_core_supervised PRIVATE fastpls_core)
   add_test(NAME core_supervised COMMAND test_core_supervised)
 
+  add_executable(test_core_opls tests/test_core_opls.cpp)
+  target_link_libraries(test_core_opls PRIVATE fastpls_core)
+  add_test(NAME core_opls COMMAND test_core_opls)
+
   if(FASTPLS_BUILD_TRANSITIONAL_NATIVE)
     add_executable(test_native_simpls tests/test_simpls.cpp)
     target_link_libraries(test_native_simpls PRIVATE fastpls_native)

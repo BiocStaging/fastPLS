@@ -6633,13 +6633,13 @@ predict.fastPLSKernel <- function(object, newdata, Ytest = NULL, proj = FALSE,
     scaling_id <- pmatch(scaling, c("centering", "autoscaling", "none"))[1]
     if (is.factor(Ytrain) || is.character(Ytrain)) {
         labels <- droplevels(factor(Ytrain))
-        filt <- opls_filter_labels_cpp(
+        filt <- opls_filter_labels_core_cpp(
             as.matrix(Xtrain), as.integer(labels), nlevels(labels),
             as.integer(north), scaling_id
         )
     } else {
         Yfilter <- .supervised_response_matrix(Ytrain)
-        filt <- opls_filter_cpp(
+        filt <- opls_filter_core_cpp(
             as.matrix(Xtrain), Yfilter, as.integer(north), scaling_id
         )
     }
