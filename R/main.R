@@ -5099,111 +5099,6 @@ get("cuda_matrix_multiply", envir = asNamespace("fastPLS"), inherits = FALSE)(
     )
 }
 
-.float32_opls_component <- function(X, Y, oversample, power, seed) {
-    singular <- .float32_rsvd(
-        crossprod(X, Y),
-        1L,
-        oversample,
-        power,
-        seed
-    )
-    weight <- singular$u[, 1L, drop = FALSE]
-    weight_norm <- sqrt(sum(weight * weight))
-    if (!is.finite(as.numeric(weight_norm)) || weight_norm <= 0) {
-        return(NULL)
-    }
-    weight <- weight / weight_norm
-    score <- X %*% weight
-    score_ss <- sum(score * score)
-    if (!is.finite(as.numeric(score_ss)) || score_ss <= 0) {
-        return(NULL)
-    }
-    loading <- crossprod(X, score) / score_ss
-    projection <- float::fl(as.numeric(
-        crossprod(weight, loading) / crossprod(weight, weight)
-    ))
-    orthogonal_weight <- loading - weight %*% projection
-    orthogonal_norm <- sqrt(sum(orthogonal_weight * orthogonal_weight))
-    if (!is.finite(as.numeric(orthogonal_norm)) || orthogonal_norm <= 0) {
-        return(NULL)
-    }
-    orthogonal_weight <- orthogonal_weight / orthogonal_norm
-    orthogonal_score <- X %*% orthogonal_weight
-    orthogonal_ss <- sum(orthogonal_score * orthogonal_score)
-    if (!is.finite(as.numeric(orthogonal_ss)) || orthogonal_ss <= 0) {
-        return(NULL)
-    }
-    orthogonal_loading <- crossprod(X, orthogonal_score) / orthogonal_ss
-    list(
-        X = X - orthogonal_score %*% t(orthogonal_loading),
-        weight = orthogonal_weight,
-        loading = orthogonal_loading
-    )
-}
-
-.float32_portable_opls_filter <- function(
-    Xtrain,
-    Ytrain,
-    north,
-    scaling,
-    rsvd_oversample,
-    rsvd_power,
-    seed
-) {
-    Xtrain <- .as_float32_matrix(Xtrain, "Xtrain")
-    Ytrain <- .as_float32_matrix(Ytrain, "Ytrain")
-    prep <- .float32_center_scale(Xtrain, scaling)
-    X <- prep$X
-    mY <- t(colMeans(Ytrain))
-    Y <- .float32_sweep_cols(Ytrain, mY, "-")
-    north <- max(0L, as.integer(north)[1L])
-    W <- .float32_zeros(ncol(X), north)
-    P <- .float32_zeros(ncol(X), north)
-    used <- 0L
-
-    for (component in seq_len(north)) {
-        result <- .float32_opls_component(
-            X,
-            Y,
-            rsvd_oversample,
-            rsvd_power,
-            seed + component - 1L
-        )
-        if (is.null(result)) {
-            break
-        }
-        X <- result$X
-        used <- used + 1L
-        W[, used] <- result$weight
-        P[, used] <- result$loading
-    }
-
-    if (used < north) {
-        W <- W[, seq_len(used), drop = FALSE]
-        P <- P[, seq_len(used), drop = FALSE]
-    }
-    list(
-        X = X,
-        mX = prep$mX,
-        vX = prep$vX,
-        W_orth = W,
-        P_orth = P,
-        north = used
-    )
-}
-
-.float32_portable_opls_apply <- function(X, mX, vX, W, P) {
-    X <- .as_float32_matrix(X, "newdata")
-    X <- .float32_standardize(X, mX, vX)
-    if (ncol(W) > 0L) {
-        for (component in seq_len(ncol(W))) {
-            score <- X %*% W[, component, drop = FALSE]
-            X <- X - score %*% t(P[, component, drop = FALSE])
-        }
-    }
-    X
-}
-
 .float32_lda_moments <- function(Ttrain, y, n_classes, kmax) {
     counts <- tabulate(y, nbins = n_classes)
     if (any(counts == 0L)) {
@@ -5338,29 +5233,22 @@ get("cuda_matrix_multiply", envir = asNamespace("fastPLS"), inherits = FALSE)(
     power,
     seed
 ) {
-    if (identical(.Platform$OS.type, "windows")) {
-        return(.float32_portable_opls_filter(
-            .as_float32_matrix(Xtrain, "Xtrain"),
-            response,
-            north,
-            scaling,
-            oversample,
-            power,
-            seed
-        ))
-    }
     filter_backend <- backend
-    raw <- opls_filter_float32_cpp(
-        .as_float32_matrix(Xtrain, "Xtrain"),
-        response,
-        as.integer(north),
-        as.integer(scaling),
-        .float32_backend_id(filter_backend),
-        .float32_svd_id(svd.method),
-        as.integer(oversample),
-        as.integer(power),
-        as.integer(seed)
-    )
+    raw <- if (identical(filter_backend, "cpu")) {
+        opls_filter_float32_core_cpp(
+            .as_float32_matrix(Xtrain, "Xtrain"), response,
+            as.integer(north), as.integer(scaling), as.integer(oversample),
+            as.integer(power), as.integer(seed)
+        )
+    } else {
+        opls_filter_float32_cpp(
+            .as_float32_matrix(Xtrain, "Xtrain"), response,
+            as.integer(north), as.integer(scaling),
+            .float32_backend_id(filter_backend),
+            .float32_svd_id(svd.method), as.integer(oversample),
+            as.integer(power), as.integer(seed)
+        )
+    }
     out <- lapply(
         raw[c("X", "mX", "vX", "W_orth", "P_orth")],
         .float32_from_bits
@@ -5382,25 +5270,21 @@ get("cuda_matrix_multiply", envir = asNamespace("fastPLS"), inherits = FALSE)(
     power,
     seed
 ) {
-    if (identical(.Platform$OS.type, "windows")) {
-        stop(
-            "Native label-aware float32 OPLS is unavailable on Windows.",
-            call. = FALSE
+    filter_backend <- backend
+    raw <- if (identical(filter_backend, "cpu")) {
+        opls_filter_float32_labels_core_cpp(
+            .as_float32_matrix(Xtrain, "Xtrain"), as.integer(labels),
+            as.integer(n_classes), as.integer(north), as.integer(scaling)
+        )
+    } else {
+        opls_filter_float32_labels_cpp(
+            .as_float32_matrix(Xtrain, "Xtrain"), as.integer(labels),
+            as.integer(n_classes), as.integer(north), as.integer(scaling),
+            .float32_backend_id(filter_backend),
+            .float32_svd_id(svd.method), as.integer(oversample),
+            as.integer(power), as.integer(seed)
         )
     }
-    filter_backend <- backend
-    raw <- opls_filter_float32_labels_cpp(
-        .as_float32_matrix(Xtrain, "Xtrain"),
-        as.integer(labels),
-        as.integer(n_classes),
-        as.integer(north),
-        as.integer(scaling),
-        .float32_backend_id(filter_backend),
-        .float32_svd_id(svd.method),
-        as.integer(oversample),
-        as.integer(power),
-        as.integer(seed)
-    )
     out <- lapply(
         raw[c("X", "mX", "vX", "W_orth", "P_orth")],
         .float32_from_bits
@@ -6766,18 +6650,17 @@ predict.fastPLSOpls <- function(object, newdata, Ytest = NULL, proj = FALSE,
             "^float32_", "",
             object$opls_filter_engine %||% object$opls_engine
         )
-        filtered <- if (identical(.Platform$OS.type, "windows")) {
-            .float32_portable_opls_apply(newdata, object$mX, object$vX,
-                object$W_orth,
-                object$P_orth)
+        filter_backend <- if (identical(engine, "metal")) {
+            2L
+        } else {
+            .float32_backend_id(engine)
         }
-        else {
-            raw <- opls_apply_filter_float32_cpp(.as_float32_matrix(newdata,
-                "newdata"),
+        raw <- opls_apply_filter_float32_cpp(
+            .as_float32_matrix(newdata, "newdata"),
             object$mX, object$vX, object$W_orth, object$P_orth,
-            .float32_backend_id(engine))
-            .float32_from_bits(raw$X)
-        }
+            filter_backend
+        )
+        filtered <- .float32_from_bits(raw$X)
         return(predict.fastPLS(object$inner_model, filtered, Ytest = Ytest,
             proj = proj,
             ...))

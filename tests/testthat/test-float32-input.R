@@ -148,20 +148,25 @@ test_that("Windows float32 argmax uses the portable compiled entry point", {
   expect_identical(fastPLS:::float32_argmax_cpp(scores), c(2L, 2L))
 })
 
-test_that("portable float32 OPLS and LDA helpers retain single precision", {
+test_that("native float32 OPLS and portable LDA retain single precision", {
   skip_if_not_installed("float")
   set.seed(148)
   X <- float::fl(matrix(rnorm(72L * 8L), 72L, 8L))
   y <- factor(rep(letters[1:3], each = 24L))
   Y <- float::fl(fastPLS:::transformy(y))
 
-  filtered <- fastPLS:::.float32_portable_opls_filter(
-    X, Y, north = 1L, scaling = 1L,
-    rsvd_oversample = 8L, rsvd_power = 2L, seed = 148L
+  raw_filter <- fastPLS:::opls_filter_float32_core_cpp(
+    X, Y, north = 1L, scaling = 1L, oversample = 8L, power = 2L,
+    seed = 148L
   )
-  reapplied <- fastPLS:::.float32_portable_opls_apply(
-    X, filtered$mX, filtered$vX, filtered$W_orth, filtered$P_orth
+  filtered <- lapply(
+    raw_filter[c("X", "mX", "vX", "W_orth", "P_orth")],
+    fastPLS:::.float32_from_bits
   )
+  raw_apply <- fastPLS:::opls_apply_filter_float32_cpp(
+    X, filtered$mX, filtered$vX, filtered$W_orth, filtered$P_orth, 0L
+  )
+  reapplied <- fastPLS:::.float32_from_bits(raw_apply$X)
   expect_true(inherits(filtered$X, "float32"))
   expect_true(inherits(reapplied, "float32"))
   expect_equal(dim(reapplied), dim(X))

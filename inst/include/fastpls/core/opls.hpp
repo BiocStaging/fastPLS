@@ -5,6 +5,7 @@
 
 #include <fastpls/core/classification.hpp>
 #include <fastpls/core/matrix.hpp>
+#include <fastpls/core/rsvd.hpp>
 #include <fastpls/core/supervised.hpp>
 
 #include <algorithm>
@@ -12,6 +13,7 @@
 #include <cstddef>
 #include <limits>
 #include <stdexcept>
+#include <utility>
 #include <vector>
 
 namespace fastpls {
@@ -119,11 +121,12 @@ Matrix<T> retained_columns(ConstMatrixView<T> source, std::size_t columns) {
   return result;
 }
 
-template<class T, class Backend, class RefreshCrosscov>
+template<class T, class Backend, class RefreshCrosscov, class SolveDirection>
 OplsFilter<T> fit_preprocessed_filter(
     Matrix<T> predictors, Matrix<T> crosscov, std::size_t components,
     std::vector<T> predictor_center, std::vector<T> predictor_scale,
-    Backend& backend, RefreshCrosscov&& refresh_crosscov) {
+    Backend& backend, RefreshCrosscov&& refresh_crosscov,
+    SolveDirection&& solve_direction) {
   OplsFilter<T> model;
   model.predictor_center = std::move(predictor_center);
   model.predictor_scale = std::move(predictor_scale);
@@ -139,8 +142,8 @@ OplsFilter<T> fit_preprocessed_filter(
 
   for (std::size_t component = 0; component < components; ++component) {
     if (component > 0) refresh_crosscov(predictors.view(), crosscov);
-    if (!leading_left_direction(
-          ConstMatrixView<T>(crosscov.view()), backend, weight
+    if (!solve_direction(
+          ConstMatrixView<T>(crosscov.view()), component, weight
         )) break;
 
     score.resize(predictors.rows(), 1);
@@ -215,6 +218,22 @@ OplsFilter<T> fit_preprocessed_filter(
   return model;
 }
 
+template<class T, class Backend, class RefreshCrosscov>
+OplsFilter<T> fit_preprocessed_filter(
+    Matrix<T> predictors, Matrix<T> crosscov, std::size_t components,
+    std::vector<T> predictor_center, std::vector<T> predictor_scale,
+    Backend& backend, RefreshCrosscov&& refresh_crosscov) {
+  auto solve = [&backend](ConstMatrixView<T> crosscov, std::size_t,
+                          Matrix<T>& direction) {
+    return leading_left_direction(crosscov, backend, direction);
+  };
+  return fit_preprocessed_filter<T>(
+    std::move(predictors), std::move(crosscov), components,
+    std::move(predictor_center), std::move(predictor_scale), backend,
+    std::forward<RefreshCrosscov>(refresh_crosscov), solve
+  );
+}
+
 }  // namespace opls_detail
 
 template<class T, class Backend>
@@ -247,6 +266,57 @@ OplsFilter<T> fit_opls_filter(Matrix<T> predictors,
     std::move(predictors), std::move(prepared.crossprod), components,
     std::move(prepared.predictor_center),
     std::move(prepared.predictor_scale), backend, refresh
+  );
+}
+
+template<class T, class Backend>
+OplsFilter<T> fit_opls_filter_rsvd(Matrix<T> predictors,
+                                   ConstMatrixView<T> responses,
+                                   std::size_t components,
+                                   PredictorScaling scaling,
+                                   RsvdControls controls,
+                                   Backend& backend) {
+  if (predictors.size() == 0 || responses.empty() ||
+      predictors.rows() != responses.rows()) {
+    throw std::invalid_argument("fastPLS OPLS dimensions are invalid");
+  }
+  auto prepared = prepare_scaled_dense_crossprod(
+    predictors.view(), responses, scaling, backend
+  );
+  Matrix<T> centered_response(responses.rows(), responses.columns());
+  for (std::size_t column = 0; column < responses.columns(); ++column) {
+    for (std::size_t row = 0; row < responses.rows(); ++row) {
+      centered_response(row, column) = responses(row, column) -
+        prepared.response_mean[column];
+    }
+  }
+  auto refresh = [&centered_response, &backend](
+      ConstMatrixView<T> current, Matrix<T>& crosscov) {
+    backend.gemm(
+      current, centered_response.view(), true, false, crosscov.view()
+    );
+  };
+  auto solve = [controls, &backend](
+      ConstMatrixView<T> crosscov, std::size_t component,
+      Matrix<T>& direction) mutable {
+    RsvdControls component_controls = controls;
+    component_controls.seed += static_cast<unsigned int>(component);
+    component_controls.left_only = true;
+    auto decomposition = randomized_svd(
+      crosscov, 1, component_controls, backend
+    );
+    if (decomposition.U.columns() == 0) return false;
+    direction.resize(decomposition.U.rows(), 1);
+    std::copy_n(
+      decomposition.U.data(), decomposition.U.rows(), direction.data()
+    );
+    opls_detail::normalize(direction);
+    return direction.size() != 0;
+  };
+  return opls_detail::fit_preprocessed_filter<T>(
+    std::move(predictors), std::move(prepared.crossprod), components,
+    std::move(prepared.predictor_center),
+    std::move(prepared.predictor_scale), backend, refresh, solve
   );
 }
 

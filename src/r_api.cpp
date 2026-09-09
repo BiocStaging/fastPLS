@@ -2264,6 +2264,83 @@ extern "C" SEXP _fastPLS_opls_filter_labels_core_cpp(
   });
 }
 
+extern "C" SEXP _fastPLS_opls_filter_float32_core_cpp(
+    SEXP predictors, SEXP responses, SEXP north, SEXP scaling,
+    SEXP oversample, SEXP power, SEXP seed) {
+  return translate_exceptions("standalone-core float32 OPLS filtering", [&] {
+    fastpls::core::Matrix<float> x = float_matrix_from_s4(
+      predictors, "Xtrain"
+    );
+    const fastpls::core::Matrix<float> y = float_matrix_from_s4(
+      responses, "Ytrain"
+    );
+    const int component_count = Rf_asInteger(north);
+    const int scaling_code = Rf_asInteger(scaling);
+    const int oversample_count = Rf_asInteger(oversample);
+    const int power_count = Rf_asInteger(power);
+    const int seed_value = Rf_asInteger(seed);
+    if (x.rows() != y.rows() || component_count < 0 ||
+        scaling_code < 1 || scaling_code > 3 || oversample_count < 0 ||
+        power_count < 0 || seed_value == NA_INTEGER) {
+      throw std::invalid_argument(
+        "standalone-core float32 OPLS controls are invalid"
+      );
+    }
+    fastpls::core::RsvdControls controls;
+    controls.oversample = oversample_count;
+    controls.power = power_count;
+    controls.seed = static_cast<unsigned int>(seed_value);
+    controls.left_only = true;
+    fastpls::runtime::CpuLinearAlgebraF32 backend;
+    const auto filter = fastpls::core::fit_opls_filter_rsvd(
+      std::move(x), y.view(), static_cast<std::size_t>(component_count),
+      static_cast<fastpls::core::PredictorScaling>(scaling_code), controls,
+      backend
+    );
+    return serialize_opls_filter<float>(
+      filter, [](const fastpls::core::Matrix<float>& value) {
+        return float_bits_matrix(value);
+      }
+    );
+  });
+}
+
+extern "C" SEXP _fastPLS_opls_filter_float32_labels_core_cpp(
+    SEXP predictors, SEXP labels, SEXP class_count, SEXP north,
+    SEXP scaling) {
+  return translate_exceptions(
+    "standalone-core label-aware float32 OPLS filtering", [&] {
+      fastpls::core::Matrix<float> x = float_matrix_from_s4(
+        predictors, "Xtrain"
+      );
+      const int classes = Rf_asInteger(class_count);
+      const int component_count = Rf_asInteger(north);
+      const int scaling_code = Rf_asInteger(scaling);
+      if (component_count < 0 || scaling_code < 1 || scaling_code > 3) {
+        throw std::invalid_argument(
+          "standalone-core label-aware float32 OPLS controls are invalid"
+        );
+      }
+      const auto encoded = encoded_class_labels(
+        labels, x.rows(), classes,
+        "standalone-core label-aware float32 OPLS"
+      );
+      fastpls::runtime::CpuLinearAlgebraF32 backend;
+      const auto filter = fastpls::core::fit_opls_filter_labels(
+        std::move(x), encoded.data(), encoded.size(),
+        static_cast<std::size_t>(classes),
+        static_cast<std::size_t>(component_count),
+        static_cast<fastpls::core::PredictorScaling>(scaling_code), backend
+      );
+      return serialize_opls_filter<float>(
+        filter, [](const fastpls::core::Matrix<float>& value) {
+          return float_bits_matrix(value);
+        }
+      );
+    }
+  );
+}
+
 extern "C" SEXP _fastPLS_pls_labels_core_cpp(
     SEXP predictors, SEXP labels, SEXP class_count, SEXP components,
     SEXP scaling, SEXP fit, SEXP oversample, SEXP power, SEXP seed) {

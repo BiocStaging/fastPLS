@@ -198,6 +198,24 @@ opls_filter_labels_core_cpp <- function(
     )
 }
 
+opls_filter_float32_core_cpp <- function(
+    predictors, responses, north, scaling, oversample, power, seed
+) {
+    .Call(
+        "_fastPLS_opls_filter_float32_core_cpp", predictors, responses,
+        north, scaling, oversample, power, seed, PACKAGE = "fastPLS"
+    )
+}
+
+opls_filter_float32_labels_core_cpp <- function(
+    predictors, labels, class_count, north, scaling
+) {
+    .Call(
+        "_fastPLS_opls_filter_float32_labels_core_cpp", predictors, labels,
+        class_count, north, scaling, PACKAGE = "fastPLS"
+    )
+}
+
 cuda_resident_project_cpp <- function(object, X, ncomp) {
     .Call(
         "_fastPLS_cuda_resident_project_cpp",

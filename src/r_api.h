@@ -88,6 +88,13 @@ SEXP _fastPLS_opls_filter_core_cpp(
 SEXP _fastPLS_opls_filter_labels_core_cpp(
   SEXP predictors, SEXP labels, SEXP class_count, SEXP north, SEXP scaling
 );
+SEXP _fastPLS_opls_filter_float32_core_cpp(
+  SEXP predictors, SEXP responses, SEXP north, SEXP scaling,
+  SEXP oversample, SEXP power, SEXP seed
+);
+SEXP _fastPLS_opls_filter_float32_labels_core_cpp(
+  SEXP predictors, SEXP labels, SEXP class_count, SEXP north, SEXP scaling
+);
 SEXP _fastPLS_lda_train_prefix_float32_cpp(SEXP scores, SEXP labels,
                                             SEXP class_count,
                                             SEXP components);
