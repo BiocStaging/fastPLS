@@ -5048,8 +5048,7 @@ get("cuda_matrix_multiply", envir = asNamespace("fastPLS"), inherits = FALSE)(
     fit_args <- .float32_cpp_fit_args(Xtrain, response, ncomp, scaling, method,
         backend, svd.method, rsvd_oversample, rsvd_power,
         seed, fit)
-    raw_model <- if (use_label_products && identical(backend, "cpu") &&
-        (identical(method, "plssvd") || !isTRUE(fit))) {
+    raw_model <- if (use_label_products && identical(backend, "cpu")) {
         pls_float32_labels_core_cpp(
             fit_args[[1L]], fit_args[[2L]], yprep$n_classes,
             fit_args[[3L]], fit_args[[4L]], fit_args[[5L]], fit_args[[6L]],
@@ -6074,8 +6073,11 @@ pls.model2.fast.gpu <-
 .predict_backend_result <- function(object, Xtest, proj, route) {
     if (
         !route$cuda && !route$metal &&
-            identical(object$pls_method, "plssvd") &&
-            is.list(object$W_latent)
+            object$pls_method %in% c("plssvd", "simpls") &&
+            startsWith(
+                object$xprod_mode %||% "",
+                "float64_label_class_sums"
+            )
     ) {
         return(pls_labels_core_predict_cpp(object, Xtest, proj))
     }
@@ -11982,13 +11984,18 @@ model <- .maybe_attach_pls_variance_explained(model, Xtrain, return_variance)
                 warn = TRUE
             )$ncomp
         }
-        core_plssvd <- cpu$method_id == 1L && cpu$solver_id == 4L
-        model <- if (core_plssvd) {
-            result <- pls_labels_core_cpp(
+        core_labels <- cpu$method_id %in% c(1L, 3L) && cpu$solver_id == 4L
+        model <- if (core_labels) {
+            fit_core <- if (cpu$method_id == 1L) {
+                pls_labels_core_cpp
+            } else {
+                pls_simpls_labels_core_cpp
+            }
+            result <- fit_core(
                 predictors = cpu$X,
                 labels = cpu$response$labels,
                 class_count = cpu$response$n_classes,
-                components = ncomp,
+                components = as.integer(ncomp),
                 scaling = context$scal,
                 fit = config$fit,
                 oversample = ctl$rsvd_oversample,
@@ -12005,9 +12012,15 @@ model <- .maybe_attach_pls_variance_explained(model, Xtrain, return_variance)
                 )
                 for (index in seq_along(result$ncomp)) {
                     count <- result$ncomp[[index]]
-                    coefficients[, , index] <-
+                    coefficients[, , index] <- if (cpu$method_id == 1L) {
                         result$R[, seq_len(count), drop = FALSE] %*%
-                        result$W_latent[[index]]
+                            result$W_latent[[index]]
+                    } else {
+                        tcrossprod(
+                            result$R[, seq_len(count), drop = FALSE],
+                            result$Q[, seq_len(count), drop = FALSE]
+                        )
+                    }
                 }
                 result$B <- coefficients
             }
