@@ -48,6 +48,14 @@ test_that("compiled CV preserves ordered fold draws and input ownership", {
                         groups, if (classification) labels else NULL, fold_count
                     )
                     set.seed(seed)
+                    core_fold <- fastPLS:::cv_folds_core_cpp(
+                        groups = groups,
+                        labels = if (classification) labels else NULL,
+                        class_count = if (classification) 3L else 0L,
+                        folds = fold_count
+                    )
+                    expect_identical(as.integer(core_fold), expected)
+                    set.seed(seed)
                     result <- fastPLS:::pls_cv_predict_compiled(
                         Xdata = X, Ydata = Y, constrain = groups, ncomp = 1:2,
                         scaling = 1L, kfold = fold_count, method = 3L,

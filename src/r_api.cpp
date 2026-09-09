@@ -4,9 +4,11 @@
 #include "rsvd_audit.h"
 
 #include <R_ext/Error.h>
+#include <R_ext/Random.h>
 #include <fastpls/core/audited_rsvd.hpp>
 #include <fastpls/core/classification.hpp>
 #include <fastpls/core/diagnostics.hpp>
+#include <fastpls/core/folds.hpp>
 #include <fastpls/core/kernels.hpp>
 #include <fastpls/core/lda.hpp>
 #include <fastpls/core/matrix.hpp>
@@ -1469,6 +1471,52 @@ extern "C" SEXP _fastPLS_fastsvd_float32_core_cpp(
       );
       throw;
     }
+  });
+}
+
+extern "C" SEXP _fastPLS_cv_folds_core_cpp(
+    SEXP groups, SEXP labels, SEXP class_count, SEXP folds) {
+  return translate_exceptions("grouped cross-validation folds", [&] {
+    ProtectStack protect;
+    SEXP group_values = protect.add(Rf_coerceVector(groups, INTSXP));
+    const std::size_t samples = static_cast<std::size_t>(
+      XLENGTH(group_values)
+    );
+    if (samples < 2) {
+      throw std::invalid_argument(
+        "cross-validation requires at least two group assignments"
+      );
+    }
+    SEXP label_values = R_NilValue;
+    const int classes = Rf_asInteger(class_count);
+    const int* label_data = nullptr;
+    if (labels != R_NilValue) {
+      label_values = protect.add(Rf_coerceVector(labels, INTSXP));
+      if (XLENGTH(label_values) != static_cast<R_xlen_t>(samples)) {
+        throw std::invalid_argument(
+          "cross-validation labels must match group assignments"
+        );
+      }
+      label_data = INTEGER(label_values);
+    }
+    GetRNGstate();
+    std::vector<int> result;
+    try {
+      result = fastpls::core::grouped_folds(
+        INTEGER(group_values), samples, label_data,
+        static_cast<std::size_t>(std::max(classes, 0)), Rf_asInteger(folds),
+        [](std::size_t remaining) {
+          return static_cast<std::size_t>(
+            unif_rand() * static_cast<double>(remaining)
+          );
+        }
+      );
+    } catch (...) {
+      PutRNGstate();
+      throw;
+    }
+    PutRNGstate();
+    return integer_predictions(result);
   });
 }
 

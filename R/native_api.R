@@ -22,6 +22,14 @@ fastsvd_float32_core_cpp <- function(
     )
 }
 
+cv_folds_core_cpp <- function(groups, labels = NULL, class_count = 0L,
+                              folds = 10L) {
+    .Call(
+        "_fastPLS_cv_folds_core_cpp", groups, labels, class_count, folds,
+        PACKAGE = "fastPLS"
+    )
+}
+
 pls_labels_core_cpp <- function(
     predictors, labels, class_count, components, scaling, fit,
     oversample, power, seed, store_scores = TRUE
