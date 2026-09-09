@@ -157,18 +157,6 @@ metal_resident_response_sums_cpp <- function(object, X, Y, labels, ncomp) {
     .Call(`_fastPLS_metal_resident_response_sums_cpp`, object, X, Y, labels, ncomp)
 }
 
-metal_xprod_workspace_cpp <- function(X, Y) {
-    .Call(`_fastPLS_metal_xprod_workspace_cpp`, X, Y)
-}
-
-metal_xprod_workspace_multiply_cpp <- function(workspace, B, transpose) {
-    .Call(`_fastPLS_metal_xprod_workspace_multiply_cpp`, workspace, B, transpose)
-}
-
-metal_xprod_workspace_release_cpp <- function(workspace) {
-    invisible(.Call(`_fastPLS_metal_xprod_workspace_release_cpp`, workspace))
-}
-
 metal_xprod_rsvd_cpp <- function(X, Y, omega, target, power, left_only) {
     .Call(`_fastPLS_metal_xprod_rsvd_cpp`, X, Y, omega, target, power, left_only)
 }

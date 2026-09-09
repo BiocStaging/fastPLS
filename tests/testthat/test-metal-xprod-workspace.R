@@ -1,41 +1,3 @@
-test_that("resident Metal cross-products retain values, precision and ownership", {
-    skip_if_not(has_metal(), "Metal backend not available")
-    set.seed(947)
-    X <- matrix(rnorm(73L * 41L), 73L, 41L)
-    Y <- matrix(rnorm(73L * 57L), 73L, 57L)
-    initial <- serialize(list(X, Y), NULL)
-    rng <- .Random.seed
-    workspace <- fastPLS:::metal_xprod_workspace_cpp(X, Y)
-    on.exit(fastPLS:::metal_xprod_workspace_release_cpp(workspace), add = TRUE)
-    expect_identical(.Random.seed, rng)
-    for (width in c(1L, 4L, 17L, 4L, 0L)) {
-        B <- matrix(sin(seq_len(ncol(Y) * width)), ncol(Y), width)
-        C <- matrix(cos(seq_len(ncol(X) * width)), ncol(X), width)
-        forward <- fastPLS:::.metal_xprod_multiply(X, Y, B)
-        reverse <- fastPLS:::.metal_xprod_transpose_multiply(X, Y, C)
-        expect_equal(fastPLS:::metal_xprod_workspace_multiply_cpp(workspace, B, FALSE),
-            forward, tolerance = 0)
-        expect_equal(fastPLS:::metal_xprod_workspace_multiply_cpp(workspace, C, TRUE),
-            reverse, tolerance = 0)
-    }
-    expect_identical(serialize(list(X, Y), NULL), initial)
-    expect_identical(.Random.seed, rng)
-    expect_error(fastPLS:::metal_xprod_workspace_multiply_cpp(workspace,
-        matrix(0, 3L, 1L), FALSE), "non-conformable")
-    other <- fastPLS:::metal_xprod_workspace_cpp(X + 1, Y - 2)
-    on.exit(fastPLS:::metal_xprod_workspace_release_cpp(other), add = TRUE)
-    B <- matrix(1, ncol(Y), 3L)
-    expect_equal(fastPLS:::metal_xprod_workspace_multiply_cpp(other, B, FALSE),
-        fastPLS:::.metal_xprod_multiply(X + 1, Y - 2, B), tolerance = 0)
-    expect_equal(fastPLS:::metal_xprod_workspace_multiply_cpp(workspace, B, FALSE),
-        fastPLS:::.metal_xprod_multiply(X, Y, B), tolerance = 0)
-    fastPLS:::metal_xprod_workspace_release_cpp(workspace)
-    expect_error(fastPLS:::metal_xprod_workspace_multiply_cpp(workspace, B, FALSE),
-        "released")
-    expect_error(fastPLS:::metal_xprod_workspace_release_cpp(NULL), "Invalid")
-    expect_error(fastPLS:::metal_xprod_workspace_cpp(X[-1, ], Y), "matching rows")
-})
-
 test_that("Metal matrix-free rSVD retains its seed and direction calculation", {
     skip_if_not(has_metal(), "Metal backend not available")
     set.seed(948)
@@ -89,10 +51,4 @@ test_that("compiled Metal matrix-free decomposition handles deficient shapes", {
         matrix(1, ncol(Y), 2), 3L, 0L, FALSE), "Invalid")
     X[1, 1] <- NaN
     expect_error(fastPLS:::.truncated_rsvd_metal_xprod(X, Y, 3L), "QR factorization")
-})
-
-test_that("unavailable Metal workspace allocation fails without a CPU fallback", {
-    skip_if(has_metal(), "Metal is available")
-    expect_error(fastPLS:::metal_xprod_workspace_cpp(matrix(1, 2, 3),
-        matrix(1, 2, 4)), "no CPU fallback")
 })

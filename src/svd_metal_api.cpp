@@ -4,38 +4,6 @@
 
 namespace {
 using Crossproduct = fastpls_svd::MetalFloatCrossproduct;
-
-Rcpp::XPtr<Crossproduct> checked_crossproduct(SEXP workspace) {
-  if (TYPEOF(workspace) != EXTPTRSXP ||
-      R_ExternalPtrTag(workspace) != Rf_install("fastPLS_metal_crossproduct")) {
-    Rcpp::stop("Invalid Metal cross-product workspace");
-  }
-  return Rcpp::XPtr<Crossproduct>(workspace);
-}
-}
-
-// [[Rcpp::export(rng = false)]]
-SEXP metal_xprod_workspace_cpp(const arma::mat& X, const arma::mat& Y) {
-  if (!fastpls_svd::has_metal_backend()) {
-    Rcpp::stop("Metal cross-product unavailable; no CPU fallback is performed");
-  }
-  return Rcpp::XPtr<Crossproduct>(new Crossproduct(X, Y), true,
-      Rf_install("fastPLS_metal_crossproduct"));
-}
-
-// [[Rcpp::export(rng = false)]]
-arma::mat metal_xprod_workspace_multiply_cpp(SEXP workspace, const arma::mat& B,
-                                            bool transpose) {
-  auto pointer = checked_crossproduct(workspace);
-  if (!pointer.get()) Rcpp::stop("Metal cross-product workspace has been released");
-  return pointer->multiply(B, transpose);
-}
-
-// [[Rcpp::export(rng = false)]]
-void metal_xprod_workspace_release_cpp(SEXP workspace) {
-  auto pointer = checked_crossproduct(workspace);
-  delete pointer.get();
-  R_ClearExternalPtr(workspace);
 }
 
 // [[Rcpp::export(rng = false)]]

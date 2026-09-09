@@ -686,38 +686,6 @@ BEGIN_RCPP
     return rcpp_result_gen;
 END_RCPP
 }
-// metal_xprod_workspace_cpp
-SEXP metal_xprod_workspace_cpp(const arma::mat& X, const arma::mat& Y);
-RcppExport SEXP _fastPLS_metal_xprod_workspace_cpp(SEXP XSEXP, SEXP YSEXP) {
-BEGIN_RCPP
-    Rcpp::RObject rcpp_result_gen;
-    Rcpp::traits::input_parameter< const arma::mat& >::type X(XSEXP);
-    Rcpp::traits::input_parameter< const arma::mat& >::type Y(YSEXP);
-    rcpp_result_gen = Rcpp::wrap(metal_xprod_workspace_cpp(X, Y));
-    return rcpp_result_gen;
-END_RCPP
-}
-// metal_xprod_workspace_multiply_cpp
-arma::mat metal_xprod_workspace_multiply_cpp(SEXP workspace, const arma::mat& B, bool transpose);
-RcppExport SEXP _fastPLS_metal_xprod_workspace_multiply_cpp(SEXP workspaceSEXP, SEXP BSEXP, SEXP transposeSEXP) {
-BEGIN_RCPP
-    Rcpp::RObject rcpp_result_gen;
-    Rcpp::traits::input_parameter< SEXP >::type workspace(workspaceSEXP);
-    Rcpp::traits::input_parameter< const arma::mat& >::type B(BSEXP);
-    Rcpp::traits::input_parameter< bool >::type transpose(transposeSEXP);
-    rcpp_result_gen = Rcpp::wrap(metal_xprod_workspace_multiply_cpp(workspace, B, transpose));
-    return rcpp_result_gen;
-END_RCPP
-}
-// metal_xprod_workspace_release_cpp
-void metal_xprod_workspace_release_cpp(SEXP workspace);
-RcppExport SEXP _fastPLS_metal_xprod_workspace_release_cpp(SEXP workspaceSEXP) {
-BEGIN_RCPP
-    Rcpp::traits::input_parameter< SEXP >::type workspace(workspaceSEXP);
-    metal_xprod_workspace_release_cpp(workspace);
-    return R_NilValue;
-END_RCPP
-}
 // metal_xprod_rsvd_cpp
 Rcpp::List metal_xprod_rsvd_cpp(const arma::mat& X, const arma::mat& Y, const arma::mat& omega, int target, int power, bool left_only);
 RcppExport SEXP _fastPLS_metal_xprod_rsvd_cpp(SEXP XSEXP, SEXP YSEXP, SEXP omegaSEXP, SEXP targetSEXP, SEXP powerSEXP, SEXP left_onlySEXP) {
@@ -844,9 +812,6 @@ static const R_CallMethodDef CallEntries[] = {
     {"_fastPLS_metal_resident_classify_path_cpp", (DL_FUNC) &_fastPLS_metal_resident_classify_path_cpp, 5},
     {"_fastPLS_metal_resident_classify_response_path_cpp", (DL_FUNC) &_fastPLS_metal_resident_classify_response_path_cpp, 5},
     {"_fastPLS_metal_resident_response_sums_cpp", (DL_FUNC) &_fastPLS_metal_resident_response_sums_cpp, 5},
-    {"_fastPLS_metal_xprod_workspace_cpp", (DL_FUNC) &_fastPLS_metal_xprod_workspace_cpp, 2},
-    {"_fastPLS_metal_xprod_workspace_multiply_cpp", (DL_FUNC) &_fastPLS_metal_xprod_workspace_multiply_cpp, 3},
-    {"_fastPLS_metal_xprod_workspace_release_cpp", (DL_FUNC) &_fastPLS_metal_xprod_workspace_release_cpp, 1},
     {"_fastPLS_metal_xprod_rsvd_cpp", (DL_FUNC) &_fastPLS_metal_xprod_rsvd_cpp, 6},
     {"_fastPLS_metal_matrix_multiply_cpp", (DL_FUNC) &_fastPLS_metal_matrix_multiply_cpp, 2},
     {"_fastPLS_metal_crossprod_cpp", (DL_FUNC) &_fastPLS_metal_crossprod_cpp, 2},
