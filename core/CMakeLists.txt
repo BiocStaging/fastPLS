@@ -92,6 +92,10 @@ if(BUILD_TESTING)
   target_link_libraries(test_core_kernels PRIVATE fastpls_core)
   add_test(NAME core_kernels COMMAND test_core_kernels)
 
+  add_executable(test_core_kernelpls tests/test_core_kernelpls.cpp)
+  target_link_libraries(test_core_kernelpls PRIVATE fastpls_core)
+  add_test(NAME core_kernelpls COMMAND test_core_kernelpls)
+
   add_executable(test_core_lda tests/test_core_lda.cpp)
   target_link_libraries(test_core_lda PRIVATE fastpls_core)
   add_test(NAME core_lda COMMAND test_core_lda)

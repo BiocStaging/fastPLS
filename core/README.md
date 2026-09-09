@@ -27,9 +27,10 @@ no previous latent direction initializes the next sketch.
 | `plssvd.hpp` | CPU double-precision explicit PLS-SVD and its compiled CV callers |
 | `operators.hpp` | CPU float32 explicit/matrix-free products and factor-product reduction |
 | `operator_rsvd.hpp` | Typed operator rSVD and checked CPU recovery without IRLBA |
-| `opls.hpp` | CPU double-precision OPLS filtering and held-out filter application |
-| `kernels.hpp` | CPU float64 kernels and non-Windows float32 kernel transforms/centering |
-| `models.hpp` | Standalone CPU composition of the shared OPLS/kernel and SIMPLS stages |
+| `opls.hpp` | Float32/float64 OPLS filtering and held-out filter application |
+| `kernels.hpp` | Float32/float64 kernel transforms and train/test centering |
+| `kernelpls.hpp` | Dependency-free float32/float64 kernel-PLS model composition and prediction |
+| `native/models.hpp` | Transitional Armadillo OPLS/kernel model oracle retained during migration |
 | `lda.hpp` | CPU float64 and non-Windows CPU float32 LDA Cholesky/triangular solves |
 
 The dependency-free target can be configured and tested without discovering
@@ -50,10 +51,11 @@ ctest --test-dir /tmp/fastpls-core-consumer --output-on-failure
 The generic solver callbacks permit separate solver adapters without copying
 the PLS engines. They do not load or depend on IRLBA. IRLBA integration has
 moved to the GPL companion; the main package no longer bundles that solver.
-Float32 PLS fitting, implicit float64 PLS, accelerator OPLS filtering,
-classification heads, complete CV orchestration and GPU engines have not all
-been extracted. This is not yet a complete standalone replacement for the R
-package. GPU product wrappers remain outside these headers.
+The R package now uses the core for dense and implicit CPU PLS-SVD/SIMPLS,
+float32 CPU OPLS filtering, double OPLS filtering, and kernel arithmetic.
+Accelerator fitting, classification orchestration, complete cross-validation,
+and GPU workspace ownership have not all been extracted. This is not yet a
+complete standalone replacement for the R package.
 
 Our native headers are MIT-licensed. They use external Apache-2.0 Armadillo headers
 and an external BLAS/LAPACK implementation, each retaining its own license.
@@ -115,17 +117,16 @@ accelerator adapters can keep their product on the selected backend before
 applying the shared host-side transform. This does not imply GPU residency
 for centering or a complete standalone kernel-PLS prediction interface.
 
-For complete standalone CPU prediction, `models.hpp` provides `fit_opls` /
-`predict_opls` and `fit_kernelpls` / `predict_kernelpls` for both scalar types.
-They compose the shared stages rather than duplicate PLS engines. OPLS drops
-its filtered training matrix after fitting. Linear kernel PLS dispatches
+For dependency-free kernel PLS, `core/kernelpls.hpp` provides `fit_kernelpls`
+and `predict_kernelpls` for float32 and float64. A caller supplies a backend
+implementing the core linear-algebra contract. Linear kernel PLS dispatches
 directly to SIMPLS without retaining a Gram matrix or training reference;
 nonlinear prediction retains the standardized reference and training kernel
-means. `KernelPlsOptions` defaults to a linear kernel; set nonlinear gamma
-explicitly (its native default is 1, not R's automatic gamma selection).
-These wrappers return numeric multivariate predictions. They do not implement
-LDA, class-label decoding or cross-validation, and are not yet replacements
-for the R package's outer-model orchestration.
+means. `KernelPlsControls` defaults to a linear kernel; set nonlinear gamma
+explicitly because the core does not infer R-specific defaults. The functions
+return numeric multivariate predictions and do not implement LDA, label
+decoding, or cross-validation. Transitional `native/models.hpp` remains an
+Armadillo oracle until dependency-free OPLS model composition is complete.
 
 The shared LDA solver preserves separate double-precision LAPACK and float32
 workspace-based Cholesky implementations. It does not form an inverse.

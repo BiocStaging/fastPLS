@@ -75,6 +75,37 @@ Matrix<T> kernel_matrix_reference(ConstMatrixView<T> left,
   return result;
 }
 
+template<class T, class Backend>
+Matrix<T> kernel_matrix(ConstMatrixView<T> left,
+                        ConstMatrixView<T> right,
+                        KernelType kernel,
+                        T gamma,
+                        int degree,
+                        T offset,
+                        Backend& backend) {
+  if (left.columns() != right.columns()) {
+    throw std::invalid_argument("Kernel inputs must have equal column counts");
+  }
+  Matrix<T> result(left.rows(), right.rows());
+  backend.gemm(left, right, false, true, result.view());
+  kernel_from_dots(left, right, result.view(), kernel, gamma, degree, offset);
+  return result;
+}
+
+template<class T, class Backend>
+Matrix<T> kernel_matrix(MatrixView<T> left,
+                        MatrixView<T> right,
+                        KernelType kernel,
+                        T gamma,
+                        int degree,
+                        T offset,
+                        Backend& backend) {
+  return kernel_matrix(
+    ConstMatrixView<T>(left), ConstMatrixView<T>(right), kernel, gamma,
+    degree, offset, backend
+  );
+}
+
 template<class T>
 Matrix<T> kernel_matrix_reference(MatrixView<T> left,
                                   MatrixView<T> right,

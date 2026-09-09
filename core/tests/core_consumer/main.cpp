@@ -21,5 +21,12 @@ int main() {
       !std::isfinite(centered.grand_mean)) {
     return 1;
   }
+  fastpls::core::KernelPlsControls controls;
+  controls.kernel = fastpls::core::KernelType::radial_basis;
+  controls.gamma = 0.5;
+  controls.simpls.components = 2;
+  fastpls::core::KernelPlsModel<float> model;
+  model.kernel = controls.kernel;
+  if (model.kernel != fastpls::core::KernelType::radial_basis) return 1;
   return 0;
 }
