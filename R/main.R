@@ -7878,6 +7878,90 @@ if (is.null(fit_data) || is.null(fit_data$Xdata) || is.null(fit_data$Ydata)) {
     if (!is.null(controls$seed)) {
         .fastpls_set_seed(controls$seed)
     }
+    core_route <- identical(context$backend, "cpp") &&
+        context$method %in% c("plssvd", "simpls") &&
+        !isTRUE(context$xprod) &&
+        length(context$response$codes) == 0L
+    if (core_route) {
+        labels <- if (context$response$classification) {
+            as.integer(context$response$matrix[, 1L])
+        } else {
+            NULL
+        }
+        folds <- cv_folds_core_cpp(
+            groups = context$constrain,
+            labels = labels,
+            class_count = if (is.null(labels)) 0L else context$response$responses,
+            folds = .compiled_cv_kfold_arg(controls$kfold, context$constrain)
+        )
+        method_id <- if (identical(context$method, "plssvd")) 1L else 3L
+        if (context$response$classification) {
+            result <- pls_cv_classification_core_cpp(
+                predictors = context$X,
+                labels = labels,
+                class_count = context$response$responses,
+                folds = folds,
+                components = context$ncomp,
+                scaling = context$scaling,
+                method = method_id,
+                classifier = context$classifier_id,
+                oversample = as.integer(controls$oversample),
+                power = as.integer(controls$power),
+                seed = as.integer(controls$seed),
+                store_predictions = isTRUE(controls$store_predictions),
+                store_scores = isTRUE(controls$store_predictions) &&
+                    isTRUE(controls$return_scores)
+            )
+        } else {
+            result <- pls_cv_regression_core_cpp(
+                predictors = context$X,
+                responses = context$response$matrix,
+                folds = folds,
+                components = context$ncomp,
+                scaling = context$scaling,
+                method = method_id,
+                metric = .cv_metric_id(
+                    controls$selection_metric,
+                    context$response$classification
+                ),
+                oversample = as.integer(controls$oversample),
+                power = as.integer(controls$power),
+                seed = as.integer(controls$seed),
+                store_predictions = isTRUE(controls$store_predictions)
+            )
+        }
+        metric_name <- if (context$response$classification) {
+            "accuracy"
+        } else {
+            switch(
+                as.character(.cv_metric_id(
+                    controls$selection_metric,
+                    context$response$classification
+                )),
+                `2` = "r2", `3` = "q2", "rmsd"
+            )
+        }
+        result$metrics <- data.frame(
+            ncomp_index = seq_along(context$ncomp),
+            metric_name = rep(metric_name, length(context$ncomp)),
+            metric_value = as.numeric(result$metric_value),
+            stringsAsFactors = FALSE
+        )
+        result$metric_value <- NULL
+        result$method <- context$method
+        result$backend <- "cpp"
+        result$prediction_backend <- if (context$response$classification &&
+            identical(context$classifier, "lda")) {
+            "cpp_lda_cv"
+        } else {
+            "cpu"
+        }
+        result$classifier <- context$classifier
+        result$xprod <- FALSE
+        result$stratified_folds <- context$response$classification
+        result$score_predictions_stored <- !is.null(result$Ypred)
+        return(result)
+    }
     pls_cv_predict_compiled(
         Xdata = context$X,
         Ydata = context$response$matrix,

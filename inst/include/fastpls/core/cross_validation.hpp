@@ -41,6 +41,7 @@ struct ClassificationCvResult {
   std::vector<int> status;
   std::vector<double> metrics;
   Matrix<int> predictions;
+  std::vector<Matrix<T>> scores;
 };
 
 template<class T>
@@ -281,6 +282,31 @@ void store_values(Matrix<T>& destination,
   }
 }
 
+template<class T>
+void store_active_scores(Matrix<T>& destination,
+                         const std::vector<std::size_t>& rows,
+                         ConstMatrixView<T> values,
+                         const std::vector<int>& active) {
+  if (rows.size() != values.rows() || values.columns() != active.size()) {
+    throw std::invalid_argument(
+      "cross-validation response-score dimensions are invalid"
+    );
+  }
+  for (std::size_t column = 0; column < values.columns(); ++column) {
+    const std::size_t destination_column = static_cast<std::size_t>(
+      active[column] - 1
+    );
+    if (destination_column >= destination.columns()) {
+      throw std::invalid_argument(
+        "cross-validation response-score class mapping is invalid"
+      );
+    }
+    for (std::size_t index = 0; index < rows.size(); ++index) {
+      destination(rows[index], destination_column) = values(index, column);
+    }
+  }
+}
+
 }  // namespace cv_detail
 
 template<class T, class Backend>
@@ -291,7 +317,7 @@ ClassificationCvResult<T> cross_validate_classification(
     PredictorScaling scaling, LinearPlsFamily family,
     ClassificationHead head, const PlssvdControls& plssvd_controls,
     const SimplsControls& simpls_controls, Backend& backend,
-    bool store_predictions) {
+    bool store_predictions, bool store_scores) {
   if (predictors.empty() || labels == nullptr || class_count < 2 ||
       components == nullptr || prefix_count < 1) {
     throw std::invalid_argument(
@@ -307,6 +333,12 @@ ClassificationCvResult<T> cross_validate_classification(
   result.metrics.assign(prefix_count, 0.0);
   if (store_predictions) {
     result.predictions.resize(predictors.rows(), prefix_count);
+  }
+  if (store_scores) {
+    result.scores.reserve(prefix_count);
+    for (std::size_t prefix = 0; prefix < prefix_count; ++prefix) {
+      result.scores.emplace_back(predictors.rows(), class_count);
+    }
   }
   std::vector<double> totals(prefix_count, 0.0);
 
@@ -327,6 +359,13 @@ ClassificationCvResult<T> cross_validate_classification(
           cv_detail::store_classes<T>(
             result.predictions, partition.test, prefix, predicted
           );
+        }
+        if (store_scores) {
+          for (const std::size_t row : partition.test) {
+            result.scores[prefix](
+              row, static_cast<std::size_t>(fallback - 1)
+            ) = T(1);
+          }
         }
         for (const std::size_t row : partition.test) {
           result.metrics[prefix] += labels[row] == fallback ? 1.0 : 0.0;
@@ -392,6 +431,22 @@ ClassificationCvResult<T> cross_validate_classification(
           predicted = cv_detail::predicted_classes<T>(
             ConstMatrixView<T>(scores.view()), active
           );
+          if (store_scores) {
+            cv_detail::store_active_scores<T>(
+              result.scores[prefix], partition.test,
+              ConstMatrixView<T>(scores.view()), active
+            );
+          }
+        }
+        if (head == ClassificationHead::lda && store_scores) {
+          const auto scores = cv_detail::predict_plssvd<T>(
+            model, ConstMatrixView<T>(test.view()), prefix,
+            prepared.response_mean, backend
+          );
+          cv_detail::store_active_scores<T>(
+            result.scores[prefix], partition.test,
+            ConstMatrixView<T>(scores.view()), active
+          );
         }
         if (store_predictions) {
           cv_detail::store_classes<T>(
@@ -446,6 +501,23 @@ ClassificationCvResult<T> cross_validate_classification(
             prepared.response_mean, backend
           );
           predicted = cv_detail::predicted_classes<T>(
+            ConstMatrixView<T>(scores.view()), active
+          );
+          if (store_scores) {
+            cv_detail::store_active_scores<T>(
+              result.scores[prefix], partition.test,
+              ConstMatrixView<T>(scores.view()), active
+            );
+          }
+        }
+        if (head == ClassificationHead::lda && store_scores) {
+          const auto scores = cv_detail::predict_simpls<T>(
+            model, ConstMatrixView<T>(test.view()),
+            static_cast<std::size_t>(components[prefix]),
+            prepared.response_mean, backend
+          );
+          cv_detail::store_active_scores<T>(
+            result.scores[prefix], partition.test,
             ConstMatrixView<T>(scores.view()), active
           );
         }

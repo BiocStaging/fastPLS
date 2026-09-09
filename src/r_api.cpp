@@ -1524,7 +1524,8 @@ extern "C" SEXP _fastPLS_cv_folds_core_cpp(
 extern "C" SEXP _fastPLS_pls_cv_classification_core_cpp(
     SEXP predictors, SEXP labels, SEXP class_count, SEXP folds,
     SEXP components, SEXP scaling, SEXP method, SEXP classifier,
-    SEXP oversample, SEXP power, SEXP seed, SEXP store_predictions) {
+    SEXP oversample, SEXP power, SEXP seed, SEXP store_predictions,
+    SEXP store_scores) {
   return translate_exceptions("core classification cross-validation", [&] {
     ProtectStack protect;
     const auto x = numeric_matrix_view(predictors, "Xdata");
@@ -1543,10 +1544,11 @@ extern "C" SEXP _fastPLS_pls_cv_classification_core_cpp(
     const int method_code = Rf_asInteger(method);
     const int classifier_code = Rf_asInteger(classifier);
     const int retain = Rf_asLogical(store_predictions);
+    const int retain_scores = Rf_asLogical(store_scores);
     if (classes < 2 || scaling_code < 1 || scaling_code > 3 ||
         (method_code != 1 && method_code != 3) ||
         (classifier_code != 0 && classifier_code != 1) ||
-        retain == NA_LOGICAL) {
+        retain == NA_LOGICAL || retain_scores == NA_LOGICAL) {
       throw std::invalid_argument(
         "core classification CV controls are invalid"
       );
@@ -1573,15 +1575,15 @@ extern "C" SEXP _fastPLS_pls_cv_classification_core_cpp(
       static_cast<fastpls::core::PredictorScaling>(scaling_code),
       static_cast<fastpls::core::LinearPlsFamily>(method_code),
       static_cast<fastpls::core::ClassificationHead>(classifier_code),
-      plssvd, simpls, backend, retain == TRUE
+      plssvd, simpls, backend, retain == TRUE, retain_scores == TRUE
     );
 
-    SEXP output = protect.add(Rf_allocVector(VECSXP, 5));
-    SEXP names = protect.add(Rf_allocVector(STRSXP, 5));
-    const char* field_names[5] = {
-      "fold", "status", "ncomp", "metric_value", "class_pred"
+    SEXP output = protect.add(Rf_allocVector(VECSXP, 6));
+    SEXP names = protect.add(Rf_allocVector(STRSXP, 6));
+    const char* field_names[6] = {
+      "fold", "status", "ncomp", "metric_value", "class_pred", "Ypred"
     };
-    for (int index = 0; index < 5; ++index) {
+    for (int index = 0; index < 6; ++index) {
       SET_STRING_ELT(names, index, Rf_mkChar(field_names[index]));
     }
     SET_VECTOR_ELT(output, 0, integer_predictions(result.folds));
@@ -1601,6 +1603,11 @@ extern "C" SEXP _fastPLS_pls_cv_classification_core_cpp(
       );
       SET_VECTOR_ELT(output, 4, predictions);
     }
+    SET_VECTOR_ELT(
+      output, 5, retain_scores == TRUE ? core_matrix_cube(
+        result.scores, x.rows(), static_cast<std::size_t>(classes)
+      ) : R_NilValue
+    );
     Rf_setAttrib(output, R_NamesSymbol, names);
     return output;
   });
@@ -1666,8 +1673,8 @@ extern "C" SEXP _fastPLS_pls_cv_regression_core_cpp(
     SET_VECTOR_ELT(output, 2, component_values);
     SET_VECTOR_ELT(output, 3, numeric_vector(result.metrics));
     SET_VECTOR_ELT(
-      output, 4, retain == TRUE ? core_matrix_list(
-        result.predictions, INTEGER(component_values)
+      output, 4, retain == TRUE ? core_matrix_cube(
+        result.predictions, x.rows(), y.columns()
       ) : R_NilValue
     );
     Rf_setAttrib(output, R_NamesSymbol, names);

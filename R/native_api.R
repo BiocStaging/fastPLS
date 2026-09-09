@@ -32,12 +32,14 @@ cv_folds_core_cpp <- function(groups, labels = NULL, class_count = 0L,
 
 pls_cv_classification_core_cpp <- function(
     predictors, labels, class_count, folds, components, scaling, method,
-    classifier, oversample, power, seed, store_predictions = TRUE
+    classifier, oversample, power, seed, store_predictions = TRUE,
+    store_scores = TRUE
 ) {
     .Call(
         "_fastPLS_pls_cv_classification_core_cpp", predictors, labels,
         class_count, folds, components, scaling, method, classifier,
-        oversample, power, seed, store_predictions, PACKAGE = "fastPLS"
+        oversample, power, seed, store_predictions, store_scores,
+        PACKAGE = "fastPLS"
     )
 }
 

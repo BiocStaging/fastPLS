@@ -1,5 +1,6 @@
 legacy_cv_call <- function(X, Y, groups, components, method,
-                           classification, classes, classifier, seed) {
+                           classification, classes, classifier, seed,
+                           return_scores = FALSE) {
     set.seed(seed)
     fastPLS:::pls_cv_predict_compiled(
         Xdata = X,
@@ -19,7 +20,7 @@ legacy_cv_call <- function(X, Y, groups, components, method,
         n_response = classes,
         xprod = FALSE,
         opls_north = 0L,
-        return_scores = FALSE,
+        return_scores = return_scores,
         class_codes = matrix(numeric(), 0, 0),
         classifier = classifier,
         lda_ridge = 0,
@@ -40,11 +41,12 @@ test_that("standalone core CV preserves linear classification workflows", {
         for (classifier in c(0L, 1L)) {
             legacy <- legacy_cv_call(
                 X, matrix(as.double(labels), ncol = 1), groups, components,
-                method, TRUE, 3L, classifier, 41L
+                method, TRUE, 3L, classifier, 41L,
+                return_scores = classifier == 0L
             )
             core <- fastPLS:::pls_cv_classification_core_cpp(
                 X, labels, 3L, legacy$fold, components, 1L, method,
-                classifier, 16L, 3L, 41L, TRUE
+                classifier, 16L, 3L, 41L, TRUE, classifier == 0L
             )
             expect_identical(core$fold, as.integer(legacy$fold))
             expect_identical(core$status, as.integer(legacy$status))
@@ -56,6 +58,9 @@ test_that("standalone core CV preserves linear classification workflows", {
                 core$metric_value, legacy$metrics$metric_value,
                 tolerance = 1e-12
             )
+            if (classifier == 0L) {
+                expect_equal(core$Ypred, legacy$Ypred, tolerance = 1e-10)
+            }
         }
     }
 })
@@ -87,7 +92,7 @@ test_that("standalone core CV preserves linear regression workflows", {
         )
         for (index in seq_along(components)) {
             expect_equal(
-                core$Ypred[[index]], legacy$Ypred[, , index],
+                core$Ypred[, , index], legacy$Ypred[, , index],
                 tolerance = 1e-9
             )
         }
