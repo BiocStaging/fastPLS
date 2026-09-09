@@ -44,6 +44,18 @@ int main() {
   assert(std::abs(scaled.crossprod(0, 0) + 0.7745967f) < 1e-6f);
   assert(std::abs(scaled.crossprod(0, 1) - 0.7745967f) < 1e-6f);
 
+  fastpls::core::Matrix<float> perfect(4, 2);
+  for (std::size_t row = 0; row < perfect.rows(); ++row) {
+    for (std::size_t column = 0; column < perfect.columns(); ++column) {
+      perfect(row, column) =
+        (labels[row] == column ? 1.0f : 0.0f) -
+        scaled.response_mean[column];
+    }
+  }
+  assert(std::abs(fastpls::core::dummy_response_r2(
+    labels, 4, scaled.response_mean.data(), 2, perfect.view()
+  ) - 1.0) < 1e-12);
+
   fastpls::core::Matrix<double> x_double(4, 1);
   for (std::size_t row = 0; row < x_double.rows(); ++row) {
     x_double(row, 0) = static_cast<double>(1 + row);

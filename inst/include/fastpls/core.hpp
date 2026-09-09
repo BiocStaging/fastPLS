@@ -11,6 +11,7 @@
 #include <fastpls/core/matrix.hpp>
 #include <fastpls/core/operator_rsvd.hpp>
 #include <fastpls/core/operators.hpp>
+#include <fastpls/core/plssvd.hpp>
 #include <fastpls/core/rsvd.hpp>
 #include <fastpls/core/simpls.hpp>
 #include <fastpls/core/statistics.hpp>

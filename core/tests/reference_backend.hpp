@@ -131,10 +131,67 @@ class ReferenceBackend {
     return false;
   }
 
-  bool svd_economy(fastpls::core::ConstMatrixView<T>, bool,
-                   fastpls::core::Matrix<T>&, std::vector<T>&,
-                   fastpls::core::Matrix<T>&) {
-    return false;
+  bool svd_economy(fastpls::core::ConstMatrixView<T> input, bool left_only,
+                   fastpls::core::Matrix<T>& left,
+                   std::vector<T>& singular_values,
+                   fastpls::core::Matrix<T>& right_transpose) {
+    const std::size_t rank = std::min(input.rows(), input.columns());
+    if (rank == 0) return false;
+
+    const bool left_gram = input.rows() <= input.columns();
+    fastpls::core::Matrix<T> gram(
+      left_gram ? input.rows() : input.columns(),
+      left_gram ? input.rows() : input.columns()
+    );
+    fastpls::core::reference_gemm(
+      input, input, !left_gram, left_gram, gram.view()
+    );
+    std::vector<T> eigenvalues;
+    if (!symmetric_eigen(gram, eigenvalues)) return false;
+
+    left.resize(input.rows(), rank);
+    if (!left_only) right_transpose.resize(rank, input.columns());
+    singular_values.resize(rank);
+    const T largest = std::max(eigenvalues.back(), T(1));
+    const T tolerance = std::numeric_limits<T>::epsilon() *
+      static_cast<T>(std::max(input.rows(), input.columns())) * largest;
+    for (std::size_t column = 0; column < rank; ++column) {
+      const std::size_t source = rank - 1 - column;
+      const T value = std::max(eigenvalues[source], T(0));
+      singular_values[column] = std::sqrt(value);
+      if (value <= tolerance) return false;
+      const T inverse = T(1) / singular_values[column];
+      if (left_gram) {
+        for (std::size_t row = 0; row < input.rows(); ++row) {
+          left(row, column) = gram(row, source);
+        }
+        if (!left_only) {
+          for (std::size_t feature = 0; feature < input.columns(); ++feature) {
+            T value_at = T(0);
+            for (std::size_t row = 0; row < input.rows(); ++row) {
+              value_at += left(row, column) * input(row, feature);
+            }
+            right_transpose(column, feature) = value_at * inverse;
+          }
+        }
+      } else {
+        for (std::size_t row = 0; row < input.rows(); ++row) {
+          T value_at = T(0);
+          for (std::size_t feature = 0;
+               feature < input.columns(); ++feature) {
+            value_at += input(row, feature) * gram(feature, source);
+          }
+          left(row, column) = value_at * inverse;
+        }
+        if (!left_only) {
+          for (std::size_t feature = 0;
+               feature < input.columns(); ++feature) {
+            right_transpose(column, feature) = gram(feature, source);
+          }
+        }
+      }
+    }
+    return true;
   }
 };
 

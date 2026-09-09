@@ -8,6 +8,7 @@
 #include <fastpls/core/kernels.hpp>
 #include <fastpls/core/lda.hpp>
 #include <fastpls/core/matrix.hpp>
+#include <fastpls/core/plssvd.hpp>
 #include <fastpls/core/simpls.hpp>
 #include <fastpls/core/statistics.hpp>
 
@@ -219,6 +220,22 @@ SEXP float_bits_matrix(const fastpls::core::Matrix<float>& values) {
     INTEGER(result)[index] = encode_float32(values.data()[index]);
   }
   return result;
+}
+
+SEXP float_bits_matrix_list(
+    const std::vector<fastpls::core::Matrix<float>>& values,
+    const int* components) {
+  SEXP output = PROTECT(Rf_allocVector(VECSXP, values.size()));
+  SEXP names = PROTECT(Rf_allocVector(STRSXP, values.size()));
+  for (std::size_t index = 0; index < values.size(); ++index) {
+    SET_VECTOR_ELT(output, index, float_bits_matrix(values[index]));
+    const std::string name =
+      "ncomp=" + std::to_string(components[index]);
+    SET_STRING_ELT(names, index, Rf_mkChar(name.c_str()));
+  }
+  Rf_setAttrib(output, R_NamesSymbol, names);
+  UNPROTECT(2);
+  return output;
 }
 
 SEXP numeric_matrix(const fastpls::core::Matrix<double>& values) {
@@ -1529,22 +1546,27 @@ extern "C" SEXP _fastPLS_label_crossprod_scaled_cpp(SEXP predictors,
 
 extern "C" SEXP _fastPLS_pls_float32_labels_core_cpp(
     SEXP predictors, SEXP labels, SEXP class_count, SEXP components,
-    SEXP scaling, SEXP oversample, SEXP power, SEXP seed) {
-  return translate_exceptions("float32 core SIMPLS fitting", [&] {
+    SEXP scaling, SEXP fit, SEXP method, SEXP oversample, SEXP power,
+    SEXP seed) {
+  return translate_exceptions("float32 core PLS fitting", [&] {
     if (TYPEOF(labels) != INTSXP || TYPEOF(components) != INTSXP ||
         XLENGTH(components) < 1) {
       throw std::invalid_argument(
-        "float32 core SIMPLS requires integer labels and component counts"
+        "float32 core PLS requires integer labels and component counts"
       );
     }
     fastpls::core::Matrix<float> x =
       float_matrix_from_s4(predictors, "Xtrain");
     const int classes = Rf_asInteger(class_count);
     const int scaling_code = Rf_asInteger(scaling);
+    const int fit_code = Rf_asLogical(fit);
+    const int method_code = Rf_asInteger(method);
     if (classes < 2 || scaling_code < 1 || scaling_code > 3 ||
+        fit_code == NA_LOGICAL ||
+        (method_code != 1 && method_code != 3) ||
         XLENGTH(labels) != static_cast<R_xlen_t>(x.rows())) {
       throw std::invalid_argument(
-        "float32 core SIMPLS training dimensions or controls are invalid"
+        "float32 core PLS training dimensions or controls are invalid"
       );
     }
     std::vector<std::size_t> encoded(x.rows());
@@ -1552,7 +1574,7 @@ extern "C" SEXP _fastPLS_pls_float32_labels_core_cpp(
       const int value = INTEGER(labels)[row] - 1;
       if (value < 0 || value >= classes) {
         throw std::invalid_argument(
-          "float32 core SIMPLS labels must be encoded as 1..n_classes"
+          "float32 core PLS labels must be encoded as 1..n_classes"
         );
       }
       encoded[row] = static_cast<std::size_t>(value);
@@ -1566,9 +1588,12 @@ extern "C" SEXP _fastPLS_pls_float32_labels_core_cpp(
 
     ProtectStack protect;
     SEXP effective_components = protect.add(Rf_duplicate(components));
-    const int rank_cap = static_cast<int>(std::min(
-      x.columns(), std::max<std::size_t>(x.rows() - 1, 1)
-    ));
+    const std::size_t sample_rank = std::max<std::size_t>(x.rows() - 1, 1);
+    const std::size_t response_rank = method_code == 1 ?
+      static_cast<std::size_t>(classes - 1) : x.columns();
+    const int rank_cap = static_cast<int>(std::min({
+      x.columns(), sample_rank, response_rank
+    }));
     int maximum_components = 1;
     for (R_xlen_t index = 0; index < XLENGTH(effective_components); ++index) {
       const int value = INTEGER(effective_components)[index];
@@ -1581,6 +1606,98 @@ extern "C" SEXP _fastPLS_pls_float32_labels_core_cpp(
       maximum_components = std::max(
         maximum_components, INTEGER(effective_components)[index]
       );
+    }
+
+    if (method_code == 1) {
+      fastpls::core::PlssvdControls controls;
+      controls.rsvd.oversample = Rf_asInteger(oversample);
+      controls.rsvd.power = Rf_asInteger(power);
+      controls.rsvd.seed = static_cast<unsigned int>(Rf_asInteger(seed));
+      const auto model = fastpls::core::fit_plssvd_preprocessed<float>(
+        x.view(), prepared.crossprod.view(), INTEGER(effective_components),
+        static_cast<std::size_t>(XLENGTH(effective_components)), controls,
+        backend
+      );
+      std::vector<fastpls::core::Matrix<float>> fitted_values;
+      std::vector<double> r2_values(
+        static_cast<std::size_t>(XLENGTH(effective_components)), NA_REAL
+      );
+      if (fit_code) {
+        fitted_values.reserve(r2_values.size());
+        for (std::size_t index = 0; index < r2_values.size(); ++index) {
+          const std::size_t count = static_cast<std::size_t>(
+            INTEGER(effective_components)[index]
+          );
+          const auto scores = fastpls::core::make_const_view(
+            model.scores.data(), model.scores.rows(), count,
+            model.scores.rows()
+          );
+          fastpls::core::Matrix<float> fitted(x.rows(), classes);
+          backend.gemm(
+            scores, model.prediction_weights[index].view(), false, false,
+            fitted.view()
+          );
+          r2_values[index] = fastpls::core::dummy_response_r2(
+            encoded.data(), encoded.size(), prepared.response_mean.data(),
+            static_cast<std::size_t>(classes), fitted.view()
+          );
+          for (std::size_t response = 0;
+               response < static_cast<std::size_t>(classes); ++response) {
+            for (std::size_t row = 0; row < fitted.rows(); ++row) {
+              fitted(row, response) += prepared.response_mean[response];
+            }
+          }
+          fitted_values.push_back(std::move(fitted));
+        }
+      }
+
+      constexpr int field_count = 15;
+      SEXP output = protect.add(Rf_allocVector(VECSXP, field_count));
+      SEXP names = protect.add(Rf_allocVector(STRSXP, field_count));
+      const char* field_names[field_count] = {
+        "P", "R", "Q", "Ttrain", "W_latent", "mX", "vX", "mY",
+        "p", "m", "ncomp", "Yfit", "R2Y", "pls_method", "xprod_mode"
+      };
+      for (int index = 0; index < field_count; ++index) {
+        SET_STRING_ELT(names, index, Rf_mkChar(field_names[index]));
+      }
+      SET_VECTOR_ELT(output, 0, R_NilValue);
+      SET_VECTOR_ELT(output, 1, float_bits_matrix(model.weights));
+      SET_VECTOR_ELT(output, 2, float_bits_matrix(model.response_loadings));
+      SET_VECTOR_ELT(output, 3, float_bits_matrix(model.scores));
+      SET_VECTOR_ELT(
+        output, 4, float_bits_matrix_list(
+          model.prediction_weights, INTEGER(effective_components)
+        )
+      );
+      SET_VECTOR_ELT(output, 5, float_bits_matrix(row_matrix(
+        prepared.predictor_center
+      )));
+      SET_VECTOR_ELT(output, 6, float_bits_matrix(row_matrix(
+        prepared.predictor_scale
+      )));
+      SET_VECTOR_ELT(output, 7, float_bits_matrix(row_matrix(
+        prepared.response_mean
+      )));
+      SET_VECTOR_ELT(output, 8, Rf_ScalarInteger(
+        static_cast<int>(x.columns())
+      ));
+      SET_VECTOR_ELT(output, 9, Rf_ScalarInteger(classes));
+      SET_VECTOR_ELT(output, 10, effective_components);
+      SET_VECTOR_ELT(
+        output, 11, fit_code ? float_bits_matrix_list(
+          fitted_values, INTEGER(effective_components)
+        ) : R_NilValue
+      );
+      SEXP r2 = protect.add(Rf_allocVector(REALSXP, XLENGTH(components)));
+      std::copy(r2_values.begin(), r2_values.end(), REAL(r2));
+      SET_VECTOR_ELT(output, 12, r2);
+      SET_VECTOR_ELT(output, 13, Rf_mkString("plssvd"));
+      SET_VECTOR_ELT(
+        output, 14, Rf_mkString("float32_label_class_sums")
+      );
+      Rf_setAttrib(output, R_NamesSymbol, names);
+      return output;
     }
 
     fastpls::core::SimplsControls controls;

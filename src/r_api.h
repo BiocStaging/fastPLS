@@ -100,7 +100,7 @@ SEXP _fastPLS_label_crossprod_scaled_cpp(SEXP predictors, SEXP labels,
                                          SEXP class_count, SEXP scaling);
 SEXP _fastPLS_pls_float32_labels_core_cpp(
   SEXP predictors, SEXP labels, SEXP class_count, SEXP components,
-  SEXP scaling, SEXP oversample, SEXP power, SEXP seed
+  SEXP scaling, SEXP fit, SEXP method, SEXP oversample, SEXP power, SEXP seed
 );
 }
 

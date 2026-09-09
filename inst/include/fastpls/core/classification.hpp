@@ -8,6 +8,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstddef>
+#include <limits>
 #include <stdexcept>
 #include <vector>
 
@@ -19,6 +20,58 @@ enum class PredictorScaling {
   autoscaling = 2,
   none = 3
 };
+
+template<class T, class Label>
+double dummy_response_r2(
+    const Label* labels, std::size_t label_count, const T* response_mean,
+    std::size_t class_count, ConstMatrixView<T> predicted_centered) {
+  if (labels == nullptr || response_mean == nullptr || label_count == 0 ||
+      predicted_centered.rows() != label_count ||
+      predicted_centered.columns() != class_count) {
+    throw std::invalid_argument(
+      "fastPLS dummy-response R2 dimensions are invalid"
+    );
+  }
+  long double mean_square = 0.0L;
+  for (std::size_t response = 0; response < class_count; ++response) {
+    mean_square += static_cast<long double>(response_mean[response]) *
+      static_cast<long double>(response_mean[response]);
+  }
+  const long double total = static_cast<long double>(label_count) *
+    (1.0L - mean_square);
+  if (!std::isfinite(static_cast<double>(total)) || total <= 0.0L) {
+    return std::numeric_limits<double>::quiet_NaN();
+  }
+  long double prediction_square = 0.0L;
+  long double cross = 0.0L;
+  for (std::size_t sample = 0; sample < label_count; ++sample) {
+    const std::size_t observed = static_cast<std::size_t>(labels[sample]);
+    if (observed >= class_count) {
+      throw std::invalid_argument(
+        "fastPLS dummy-response R2 contains an invalid class index"
+      );
+    }
+    long double mean_projection = 0.0L;
+    for (std::size_t response = 0; response < class_count; ++response) {
+      const long double prediction = predicted_centered(sample, response);
+      prediction_square += prediction * prediction;
+      mean_projection += prediction * response_mean[response];
+    }
+    cross += predicted_centered(sample, observed) - mean_projection;
+  }
+  const long double residual = total + prediction_square - 2.0L * cross;
+  return static_cast<double>(1.0L - residual / total);
+}
+
+template<class T, class Label>
+double dummy_response_r2(
+    const Label* labels, std::size_t label_count, const T* response_mean,
+    std::size_t class_count, MatrixView<T> predicted_centered) {
+  return dummy_response_r2(
+    labels, label_count, response_mean, class_count,
+    ConstMatrixView<T>(predicted_centered)
+  );
+}
 
 template<class T>
 struct LabelCrossprodResult {

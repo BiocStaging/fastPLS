@@ -383,6 +383,85 @@ test_that("float32 label-aware products match dense one-hot fitting", {
   }
 })
 
+test_that("dependency-free float32 PLS-SVD preserves compact predictions", {
+  skip_if_not_installed("float")
+  skip_native_float32_on_windows()
+  set.seed(177)
+  n <- 600L
+  X <- float::fl(matrix(rnorm(n * 64L), n, 64L))
+  y <- factor(sample(letters[1:8], n, replace = TRUE))
+  components <- c(2L, 5L)
+  dense_y <- float::fl(fastPLS:::transformy(as.integer(y)))
+
+  core <- fastPLS:::pls_float32_labels_core_cpp(
+    X, as.integer(y), nlevels(y), components, 1L, FALSE, 1L, 12L, 2L, 177L
+  )
+  reference <- fastPLS:::pls_float32_cpu_cpp(
+    X, dense_y, components, 1L, FALSE, 1L, 0L, 3L, 12L, 2L, 177L
+  )
+  core_scores <- fastPLS:::.float32_from_bits(core$Ttrain)
+  reference_scores <- fastPLS:::.float32_from_bits(reference$Ttrain)
+  core_weights <- fastPLS:::.float32_bits_list_to_float(core$W_latent)
+  reference_weights <- fastPLS:::.float32_bits_list_to_float(
+    reference$W_latent
+  )
+
+  for (name in names(core_weights)) {
+    count <- as.integer(sub("ncomp=", "", name, fixed = TRUE))
+    core_prediction <- core_scores[, seq_len(count), drop = FALSE] %*%
+      core_weights[[name]]
+    reference_prediction <-
+      reference_scores[, seq_len(count), drop = FALSE] %*%
+      reference_weights[[name]]
+    expect_equal(
+      float::dbl(core_prediction), float::dbl(reference_prediction),
+      tolerance = 2e-5
+    )
+    expect_identical(
+      max.col(float::dbl(core_prediction)),
+      max.col(float::dbl(reference_prediction))
+    )
+  }
+
+  fit <- suppressWarnings(pls(
+    X, y, X, y,
+    ncomp = components,
+    method = "plssvd",
+    backend = "cpu",
+    svd.method = "rsvd",
+    classifier = "argmax",
+    fit = FALSE,
+    return_variance = FALSE,
+    oversample = 12L,
+    power = 2L,
+    seed = 177L
+  ))
+  expect_identical(fit$xprod_mode, "float32_label_class_sums")
+  expect_named(fit$W_latent, paste0("ncomp=", components))
+
+  core_fitted <- fastPLS:::pls_float32_labels_core_cpp(
+    X, as.integer(y), nlevels(y), components, 1L, TRUE, 1L, 12L, 2L, 177L
+  )
+  reference_fitted <- fastPLS:::pls_float32_labels_cpp(
+    X, as.integer(y), nlevels(y), components, 1L, TRUE,
+    1L, 0L, 3L, 12L, 2L, 177L
+  )
+  expect_equal(
+    as.numeric(core_fitted$R2Y), as.numeric(reference_fitted$R2Y),
+    tolerance = 2e-5
+  )
+  core_values <- fastPLS:::.float32_bits_list_to_float(core_fitted$Yfit)
+  reference_values <- fastPLS:::.float32_bits_list_to_float(
+    reference_fitted$Yfit
+  )
+  for (name in names(core_values)) {
+    expect_equal(
+      float::dbl(core_values[[name]]), float::dbl(reference_values[[name]]),
+      tolerance = 2e-5
+    )
+  }
+})
+
 test_that("float32 classification avoids fitted and double-score work by default", {
   skip_if_not_installed("float")
   skip_native_float32_on_windows()

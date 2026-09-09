@@ -35,5 +35,32 @@ int main() {
     left.view(), left.view(), true, false, gram.view()
   );
   assert(std::abs(gram(0, 1) - gram(1, 0)) < 1e-12);
+
+  fastpls::core::Matrix<double> system(2, 2);
+  system(0, 0) = 4.0;
+  system(1, 0) = 1.0;
+  system(0, 1) = 1.0;
+  system(1, 1) = 3.0;
+  fastpls::core::Matrix<double> rhs(2, 1);
+  rhs(0, 0) = 1.0;
+  rhs(1, 0) = 2.0;
+  fastpls::core::Matrix<double> solution;
+  assert(fastpls::core::solve_symmetric_system(
+    system.view(), rhs.view(), solution
+  ));
+  assert(std::abs(solution(0, 0) - 1.0 / 11.0) < 1e-12);
+  assert(std::abs(solution(1, 0) - 7.0 / 11.0) < 1e-12);
+
+  system(0, 0) = 0.0;
+  system(1, 0) = 1.0;
+  system(0, 1) = 1.0;
+  system(1, 1) = 1.0;
+  rhs(0, 0) = 1.0;
+  rhs(1, 0) = 2.0;
+  assert(fastpls::core::solve_symmetric_system(
+    system.view(), rhs.view(), solution
+  ));
+  assert(std::abs(solution(0, 0) - 1.0) < 1e-12);
+  assert(std::abs(solution(1, 0) - 1.0) < 1e-12);
   return 0;
 }

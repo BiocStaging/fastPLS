@@ -5,12 +5,12 @@ cpu_backend_description_cpp <- function() {
 }
 
 pls_float32_labels_core_cpp <- function(
-    predictors, labels, class_count, components, scaling, oversample, power,
-    seed
+    predictors, labels, class_count, components, scaling, fit, method,
+    oversample, power, seed
 ) {
     .Call(
         "_fastPLS_pls_float32_labels_core_cpp", predictors, labels,
-        class_count, components, scaling, oversample, power, seed,
+        class_count, components, scaling, fit, method, oversample, power, seed,
         PACKAGE = "fastPLS"
     )
 }
