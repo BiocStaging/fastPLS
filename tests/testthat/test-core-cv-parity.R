@@ -238,3 +238,186 @@ test_that("standalone OPLS CV preserves legacy and float32 workflows", {
         tolerance = 1e-4
     )
 })
+
+kernel_fold_reference <- function(X, Y, folds, components, kernel, gamma,
+                                  degree, coef0, classifier, seed) {
+    classification <- is.factor(Y)
+    predictions <- if (classification) {
+        matrix(NA_integer_, nrow(X), length(components))
+    } else {
+        array(NA_real_, c(nrow(X), ncol(Y), length(components)))
+    }
+    for (fold in sort(unique(folds))) {
+        test <- which(folds == fold)
+        train <- which(folds != fold)
+        fitted <- pls(
+            X[train, , drop = FALSE],
+            if (classification) Y[train] else Y[train, , drop = FALSE],
+            X[test, , drop = FALSE],
+            ncomp = components,
+            scaling = "centering",
+            method = "kernelpls",
+            backend = "cpu",
+            kernel = kernel,
+            gamma = gamma,
+            degree = degree,
+            coef0 = coef0,
+            classifier = classifier,
+            fit = FALSE,
+            return_variance = FALSE,
+            oversample = 16L,
+            power = 3L,
+            seed = seed + fold - 1L
+        )
+        if (classification) {
+            for (index in seq_along(components)) {
+                predictions[test, index] <- as.integer(fitted$Ypred[[index]])
+            }
+        } else {
+            for (index in seq_along(components)) {
+                predictions[test, , index] <- fitted$Ypred[, , index]
+            }
+        }
+    }
+    predictions
+}
+
+test_that("standalone nonlinear kernel CV preserves independent fold fits", {
+    set.seed(703)
+    labels <- rep(1:3, each = 24)
+    factor_labels <- factor(labels)
+    X <- matrix(rnorm(72 * 9), 72, 9)
+    X[, 1:3] <- X[, 1:3] + 2.5 * model.matrix(~ factor(labels) - 1)
+    Y <- cbind(
+        sin(X[, 1]) + 0.2 * X[, 4],
+        X[, 2]^2 - 0.3 * X[, 5]
+    )
+    groups <- rep(seq_len(36), each = 2)
+    components <- 1:2
+    set.seed(37)
+    folds <- fastPLS:::cv_folds_core_cpp(groups, labels, 3L, 3L)
+
+    for (kernel in c("rbf", "poly")) {
+        kernel_id <- if (kernel == "rbf") 2L else 3L
+        gamma <- if (kernel == "rbf") 0.2 else 0.1
+        for (classifier in c("argmax", "lda")) {
+            classifier_id <- if (classifier == "argmax") 0L else 1L
+            reference <- kernel_fold_reference(
+                X, factor_labels, folds, components, kernel, gamma,
+                2L, 0.5, classifier, 37L
+            )
+            core <- fastPLS:::pls_cv_kernel_classification_core_cpp(
+                X, labels, 3L, folds, components, 1L, classifier_id,
+                kernel_id, gamma, 2L, 0.5, 16L, 3L, 37L, TRUE, TRUE
+            )
+            expect_identical(core$class_pred, reference)
+            expect_equal(
+                core$metric_value,
+                colMeans(reference == labels),
+                tolerance = 1e-12
+            )
+        }
+
+        reference <- kernel_fold_reference(
+            X, Y, folds, components, kernel, gamma, 2L, 0.5,
+            "argmax", 37L
+        )
+        core <- fastPLS:::pls_cv_kernel_regression_core_cpp(
+            X, Y, folds, components, 1L, 4L, kernel_id, gamma, 2L, 0.5,
+            16L, 3L, 37L, TRUE
+        )
+        expect_equal(core$Ypred, reference, tolerance = 1e-9)
+        expect_equal(
+            core$metric_value,
+            vapply(
+                seq_along(components),
+                function(index) sqrt(mean((reference[, , index] - Y)^2)),
+                numeric(1)
+            ),
+            tolerance = 1e-10
+        )
+    }
+})
+
+test_that("float32 and public nonlinear kernel CV use the standalone core", {
+    set.seed(181)
+    labels <- rep(1:3, each = 20)
+    y <- factor(labels)
+    X <- matrix(rnorm(60 * 8), 60, 8)
+    X[, 1:3] <- X[, 1:3] + 2 * model.matrix(~ factor(labels) - 1)
+    Y <- cbind(cos(X[, 1]), X[, 2] * X[, 3])
+    groups <- rep(seq_len(30), each = 2)
+    components <- 1:2
+    set.seed(11)
+    folds <- fastPLS:::cv_folds_core_cpp(groups, labels, 3L, 3L)
+
+    class64 <- fastPLS:::pls_cv_kernel_classification_core_cpp(
+        X, labels, 3L, folds, components, 1L, 1L, 2L, 0.2, 3L, 1,
+        16L, 3L, 11L, TRUE, TRUE
+    )
+    class32 <- fastPLS:::pls_cv_kernel_classification_float32_core_cpp(
+        float::fl(X), labels, 3L, folds, components, 1L, 1L, 2L, 0.2,
+        3L, 1, 16L, 3L, 11L, TRUE, TRUE
+    )
+    expect_identical(class32$class_pred, class64$class_pred)
+    expect_equal(class32$Ypred, class64$Ypred, tolerance = 2e-4)
+
+    regression64 <- fastPLS:::pls_cv_kernel_regression_core_cpp(
+        X, Y, folds, components, 1L, 4L, 2L, 0.2, 3L, 1,
+        16L, 3L, 11L, TRUE
+    )
+    regression32 <- fastPLS:::pls_cv_kernel_regression_float32_core_cpp(
+        float::fl(X), float::fl(Y), folds, components, 1L, 4L, 2L, 0.2,
+        3L, 1, 16L, 3L, 11L, TRUE
+    )
+    expect_equal(regression32$metric_value, regression64$metric_value,
+        tolerance = 2e-4)
+    expect_equal(regression32$Ypred, regression64$Ypred, tolerance = 2e-4)
+
+    arguments <- list(
+        Ydata = y, constrain = groups, ncomp = components, kfold = 3L,
+        method = "kernelpls", kernel = "rbf", gamma = 0.2,
+        backend = "cpu", classifier = "lda", fit = FALSE,
+        oversample = 16L, power = 3L, seed = 11L
+    )
+    public64 <- do.call(pls.single.cv, c(list(Xdata = X), arguments))
+    public32 <- do.call(
+        pls.single.cv,
+        c(list(Xdata = float::fl(X)), arguments)
+    )
+    expect_identical(public32$best_ncomp, public64$best_ncomp)
+    expect_equal(public32$accuracy, public64$accuracy)
+    expect_true(all(vapply(
+        seq_along(public64$pred),
+        function(index) identical(
+            as.character(public32$pred[[index]]),
+            as.character(public64$pred[[index]])
+        ),
+        logical(1)
+    )))
+
+    regression_arguments <- list(
+        constrain = groups, ncomp = components, kfold = 3L,
+        method = "kernelpls", kernel = "poly", gamma = 0.1,
+        degree = 2L, coef0 = 0.5, backend = "cpu", fit = FALSE,
+        oversample = 16L, power = 3L, seed = 11L
+    )
+    public_regression64 <- do.call(
+        pls.single.cv,
+        c(list(Xdata = X, Ydata = Y), regression_arguments)
+    )
+    public_regression32 <- do.call(
+        pls.single.cv,
+        c(list(Xdata = float::fl(X), Ydata = float::fl(Y)),
+            regression_arguments)
+    )
+    expect_identical(
+        public_regression32$best_ncomp,
+        public_regression64$best_ncomp
+    )
+    expect_equal(
+        public_regression32$RMSD,
+        public_regression64$RMSD,
+        tolerance = 2e-4
+    )
+})

@@ -711,10 +711,14 @@ RcppExport SEXP _fastPLS_pls_cv_classification_core_cpp(SEXP, SEXP, SEXP, SEXP, 
 RcppExport SEXP _fastPLS_pls_cv_classification_float32_core_cpp(SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP);
 RcppExport SEXP _fastPLS_pls_cv_opls_classification_core_cpp(SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP);
 RcppExport SEXP _fastPLS_pls_cv_opls_classification_float32_core_cpp(SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP);
+RcppExport SEXP _fastPLS_pls_cv_kernel_classification_core_cpp(SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP);
+RcppExport SEXP _fastPLS_pls_cv_kernel_classification_float32_core_cpp(SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP);
 RcppExport SEXP _fastPLS_pls_cv_regression_core_cpp(SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP);
 RcppExport SEXP _fastPLS_pls_cv_regression_float32_core_cpp(SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP);
 RcppExport SEXP _fastPLS_pls_cv_opls_regression_core_cpp(SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP);
 RcppExport SEXP _fastPLS_pls_cv_opls_regression_float32_core_cpp(SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP);
+RcppExport SEXP _fastPLS_pls_cv_kernel_regression_core_cpp(SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP);
+RcppExport SEXP _fastPLS_pls_cv_kernel_regression_float32_core_cpp(SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP, SEXP);
 RcppExport SEXP _fastPLS_spearman_correlation_cpp(SEXP, SEXP);
 RcppExport SEXP _fastPLS_cuda_matrix_multiply(SEXP, SEXP);
 
@@ -790,10 +794,14 @@ static const R_CallMethodDef CallEntries[] = {
     {"_fastPLS_pls_cv_classification_float32_core_cpp",  (DL_FUNC) &_fastPLS_pls_cv_classification_float32_core_cpp,  13},
     {"_fastPLS_pls_cv_opls_classification_core_cpp",     (DL_FUNC) &_fastPLS_pls_cv_opls_classification_core_cpp,     13},
     {"_fastPLS_pls_cv_opls_classification_float32_core_cpp", (DL_FUNC) &_fastPLS_pls_cv_opls_classification_float32_core_cpp, 13},
+    {"_fastPLS_pls_cv_kernel_classification_core_cpp",   (DL_FUNC) &_fastPLS_pls_cv_kernel_classification_core_cpp,   16},
+    {"_fastPLS_pls_cv_kernel_classification_float32_core_cpp", (DL_FUNC) &_fastPLS_pls_cv_kernel_classification_float32_core_cpp, 16},
     {"_fastPLS_pls_cv_regression_core_cpp",              (DL_FUNC) &_fastPLS_pls_cv_regression_core_cpp,              11},
     {"_fastPLS_pls_cv_regression_float32_core_cpp",      (DL_FUNC) &_fastPLS_pls_cv_regression_float32_core_cpp,      11},
     {"_fastPLS_pls_cv_opls_regression_core_cpp",         (DL_FUNC) &_fastPLS_pls_cv_opls_regression_core_cpp,         11},
     {"_fastPLS_pls_cv_opls_regression_float32_core_cpp", (DL_FUNC) &_fastPLS_pls_cv_opls_regression_float32_core_cpp, 11},
+    {"_fastPLS_pls_cv_kernel_regression_core_cpp",       (DL_FUNC) &_fastPLS_pls_cv_kernel_regression_core_cpp,       14},
+    {"_fastPLS_pls_cv_kernel_regression_float32_core_cpp", (DL_FUNC) &_fastPLS_pls_cv_kernel_regression_float32_core_cpp, 14},
     {"_fastPLS_spearman_correlation_cpp",                 (DL_FUNC) &_fastPLS_spearman_correlation_cpp,                  2},
     {"_fastPLS_cuda_matrix_multiply",                     (DL_FUNC) &_fastPLS_cuda_matrix_multiply,                      2},
     {"_fastPLS_lda_train_prefix_cpp",                     (DL_FUNC) &_fastPLS_lda_train_prefix_cpp,                      5},

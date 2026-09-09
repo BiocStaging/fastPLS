@@ -7843,10 +7843,12 @@ if (is.null(fit_data) || is.null(fit_data$Xdata) || is.null(fit_data$Ydata)) {
 
 .compiled_cv_context <- function(Xdata, Ydata, constrain, ncomp, scaling,
     method,
-    backend, svd.method, xprod, kodama_class_codes, classifier) {
+    backend, svd.method, xprod, kodama_class_codes, classifier,
+    kernel = "linear") {
     method <- match.arg(method, c("plssvd", "simpls", "opls", "kernelpls"))
     backend <- match.arg(backend, c("cpp", "cuda", "metal"))
     classifier <- .normalize_classifier_public(classifier)
+    kernel <- match.arg(kernel, c("linear", "rbf", "poly"))
     float32 <- .has_float32_input(Xdata, Ydata)
     Xdata <- if (float32) {
         .as_float32_matrix(Xdata, "Xdata")
@@ -7878,10 +7880,12 @@ if (is.null(fit_data) || is.null(fit_data$Xdata) || is.null(fit_data$Ydata)) {
             1L, scaling = pmatch(scaling, c("centering", "autoscaling",
             "none"))[1L],
         solver = solver, response = response, classifier = classifier,
+        kernel = kernel,
         float32 = float32,
         classifier_id = switch(classifier,
             argmax = 0L, lda = 1L), xprod = .compiled_cv_xprod(xprod, backend,
-            solver$name, Xdata, response$backend_responses, ncomp))
+            solver$name, Xdata, response$backend_responses, ncomp) &&
+            !identical(method, "kernelpls"))
 }
 
 .compiled_cv_call <- function(context, controls) {
@@ -7889,7 +7893,7 @@ if (is.null(fit_data) || is.null(fit_data$Xdata) || is.null(fit_data$Ydata)) {
         .fastpls_set_seed(controls$seed)
     }
     core_route <- identical(context$backend, "cpp") &&
-        context$method %in% c("plssvd", "simpls", "opls") &&
+        context$method %in% c("plssvd", "simpls", "opls", "kernelpls") &&
         !isTRUE(context$xprod) &&
         length(context$response$codes) == 0L
     if (core_route) {
@@ -7906,7 +7910,37 @@ if (is.null(fit_data) || is.null(fit_data$Xdata) || is.null(fit_data$Ydata)) {
         )
         method_id <- if (identical(context$method, "plssvd")) 1L else 3L
         if (context$response$classification) {
-            if (identical(context$method, "opls")) {
+            if (identical(context$method, "kernelpls") &&
+                !identical(context$kernel, "linear")) {
+                .kernel_pls_memory_guard(
+                    nrow(context$X), if (context$float32) 4 else 8,
+                    sprintf("Cross-validated %s kernel PLS", context$kernel)
+                )
+                runner <- if (context$float32) {
+                    pls_cv_kernel_classification_float32_core_cpp
+                } else {
+                    pls_cv_kernel_classification_core_cpp
+                }
+                result <- runner(
+                    predictors = context$X,
+                    labels = labels,
+                    class_count = context$response$responses,
+                    folds = folds,
+                    components = context$ncomp,
+                    scaling = context$scaling,
+                    classifier = context$classifier_id,
+                    kernel = .kernel_pls_kernel_id(context$kernel),
+                    gamma = controls$gamma,
+                    degree = as.integer(controls$degree),
+                    coef0 = as.numeric(controls$coef0),
+                    oversample = as.integer(controls$oversample),
+                    power = as.integer(controls$power),
+                    seed = as.integer(controls$seed),
+                    store_predictions = isTRUE(controls$store_predictions),
+                    store_scores = isTRUE(controls$store_predictions) &&
+                        isTRUE(controls$return_scores)
+                )
+            } else if (identical(context$method, "opls")) {
                 runner <- if (context$float32) {
                     pls_cv_opls_classification_float32_core_cpp
                 } else {
@@ -7952,7 +7986,37 @@ if (is.null(fit_data) || is.null(fit_data$Xdata) || is.null(fit_data$Ydata)) {
                 )
             }
         } else {
-            if (identical(context$method, "opls")) {
+            if (identical(context$method, "kernelpls") &&
+                !identical(context$kernel, "linear")) {
+                .kernel_pls_memory_guard(
+                    nrow(context$X), if (context$float32) 4 else 8,
+                    sprintf("Cross-validated %s kernel PLS", context$kernel)
+                )
+                runner <- if (context$float32) {
+                    pls_cv_kernel_regression_float32_core_cpp
+                } else {
+                    pls_cv_kernel_regression_core_cpp
+                }
+                result <- runner(
+                    predictors = context$X,
+                    responses = context$response$matrix,
+                    folds = folds,
+                    components = context$ncomp,
+                    scaling = context$scaling,
+                    metric = .cv_metric_id(
+                        controls$selection_metric,
+                        context$response$classification
+                    ),
+                    kernel = .kernel_pls_kernel_id(context$kernel),
+                    gamma = controls$gamma,
+                    degree = as.integer(controls$degree),
+                    coef0 = as.numeric(controls$coef0),
+                    oversample = as.integer(controls$oversample),
+                    power = as.integer(controls$power),
+                    seed = as.integer(controls$seed),
+                    store_predictions = isTRUE(controls$store_predictions)
+                )
+            } else if (identical(context$method, "opls")) {
                 runner <- if (context$float32) {
                     pls_cv_opls_regression_float32_core_cpp
                 } else {
@@ -8138,7 +8202,8 @@ if (is.null(fit_data) || is.null(fit_data$Xdata) || is.null(fit_data$Ydata)) {
         "opls", "kernelpls"), backend = c("cpp", "cuda", "metal"),
     svd.method = "rsvd", rsvd_oversample = 32L,
     rsvd_power = 5L, svds_tol = 0,
-    seed = 1L, xprod = NULL, north = 1L, return_scores = FALSE,
+    seed = 1L, xprod = NULL, north = 1L, kernel = "linear", gamma = NULL,
+    degree = 3L, coef0 = 1, return_scores = FALSE,
     kodama_class_codes = NULL,
     classifier = c("argmax", "lda"), lda_ridge = 1e-08, gpu_qr = TRUE,
     gpu_eig = TRUE,
@@ -8146,10 +8211,17 @@ if (is.null(fit_data) || is.null(fit_data$Xdata) || is.null(fit_data$Ydata)) {
     selection_metric = "auto") {
     context <- .compiled_cv_context(Xdata, Ydata, constrain, ncomp, scaling,
         method,
-        backend, svd.method, xprod, kodama_class_codes, classifier)
+        backend, svd.method, xprod, kodama_class_codes, classifier, kernel)
+    gamma <- if (identical(context$method, "kernelpls") &&
+        !identical(context$kernel, "linear")) {
+        .kernel_pls_gamma(gamma, context$X)
+    } else {
+        gamma
+    }
     controls <- list(kfold = kfold, oversample = rsvd_oversample,
         power = rsvd_power,
         svds_tol = svds_tol, seed = seed, north = north,
+        gamma = gamma, degree = degree, coef0 = coef0,
         return_scores = return_scores,
         lda_ridge = lda_ridge, store_predictions = store_predictions,
         selection_metric = selection_metric,
@@ -13041,6 +13113,10 @@ keep <- c("scaling", "method", "backend", "svd.method", "classifier", "xprod")
         seed = control$seed,
         xprod = config$xprod,
         north = config$north,
+        kernel = config$kernel,
+        gamma = config$gamma,
+        degree = config$degree,
+        coef0 = config$coef0,
         return_scores = TRUE,
         classifier = config$classifier,
         lda_ridge = .fixed_lda_relative_ridge,
@@ -13051,13 +13127,8 @@ keep <- c("scaling", "method", "backend", "svd.method", "classifier", "xprod")
 
 .single_cv_run_engine <- function(context, ncomp, kfold) {
     arguments <- .single_cv_engine_arguments(context, ncomp, kfold)
-    if (context$backend %in% c("cuda", "metal") ||
-        !identical(context$config$kernel, "linear")) {
+    if (context$backend %in% c("cuda", "metal")) {
         arguments$backend <- context$backend
-        arguments$kernel <- context$config$kernel
-        arguments$gamma <- context$config$gamma
-        arguments$degree <- context$config$degree
-        arguments$coef0 <- context$config$coef0
         return(do.call(.pls_cv_via_pls, arguments))
     }
     arguments$backend <- context$backend_compiled

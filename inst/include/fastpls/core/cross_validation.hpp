@@ -4,6 +4,7 @@
 #define FASTPLS_CORE_CROSS_VALIDATION_HPP
 
 #include <fastpls/core/classification.hpp>
+#include <fastpls/core/kernels.hpp>
 #include <fastpls/core/lda.hpp>
 #include <fastpls/core/opls.hpp>
 #include <fastpls/core/plssvd.hpp>
@@ -23,7 +24,15 @@ namespace core {
 enum class LinearPlsFamily {
   plssvd = 1,
   simpls = 3,
-  opls = 4
+  opls = 4,
+  kernelpls = 5
+};
+
+struct KernelCvControls {
+  KernelType kernel = KernelType::radial_basis;
+  double gamma = 1.0;
+  int degree = 3;
+  double offset = 1.0;
 };
 
 enum class ClassificationHead {
@@ -116,6 +125,37 @@ void standardize(MatrixView<T> values, const std::vector<T>& center,
         (values(row, column) - center[column]) / scale[column];
     }
   }
+}
+
+template<class T, class Backend>
+void make_kernel_fold(Matrix<T>& train, Matrix<T>& test,
+                      const KernelCvControls& controls, Backend& backend) {
+  if (controls.kernel == KernelType::linear) {
+    throw std::invalid_argument(
+      "linear kernel PLS must use the direct SIMPLS route"
+    );
+  }
+  const T gamma = static_cast<T>(controls.gamma);
+  const T offset = static_cast<T>(controls.offset);
+  if (!std::isfinite(gamma) || gamma <= T(0) ||
+      !std::isfinite(offset) || controls.degree < 1) {
+    throw std::invalid_argument("kernel PLS controls are invalid");
+  }
+  Matrix<T> train_kernel = kernel_matrix(
+    train.view(), train.view(), controls.kernel, gamma,
+    controls.degree, offset, backend
+  );
+  const auto centering = center_kernel_train(train_kernel.view());
+  Matrix<T> test_kernel = kernel_matrix(
+    test.view(), train.view(), controls.kernel, gamma,
+    controls.degree, offset, backend
+  );
+  center_kernel_test(
+    test_kernel.view(), centering.column_means.data(),
+    centering.column_means.size(), centering.grand_mean
+  );
+  train = std::move(train_kernel);
+  test = std::move(test_kernel);
 }
 
 template<class T, class Backend>
@@ -320,7 +360,8 @@ ClassificationCvResult<T> cross_validate_classification(
     ClassificationHead head, const PlssvdControls& plssvd_controls,
     const SimplsControls& simpls_controls, Backend& backend,
     bool store_predictions, bool store_scores,
-    std::size_t orthogonal_components = 0) {
+    std::size_t orthogonal_components = 0,
+    const KernelCvControls& kernel_controls = KernelCvControls()) {
   if (predictors.empty() || labels == nullptr || class_count < 2 ||
       components == nullptr || prefix_count < 1) {
     throw std::invalid_argument(
@@ -401,6 +442,23 @@ ClassificationCvResult<T> cross_validate_classification(
         filter.weights.view(), filter.loadings.view(), backend
       );
       train = std::move(filter.predictors);
+      prepared = prepare_scaled_label_crossprod(
+        train.view(), compact.data(), compact.size(), active.size(),
+        PredictorScaling::none, backend
+      );
+    } else if (family == LinearPlsFamily::kernelpls) {
+      auto input_preprocessing = scaled_label_crossprod_impl(
+        ConstMatrixView<T>(train.view()), train.data(),
+        train.view().leading_dimension(), compact.data(), compact.size(),
+        active.size(), scaling, false
+      );
+      cv_detail::standardize(
+        test.view(), input_preprocessing.predictor_center,
+        input_preprocessing.predictor_scale
+      );
+      cv_detail::make_kernel_fold(
+        train, test, kernel_controls, backend
+      );
       prepared = prepare_scaled_label_crossprod(
         train.view(), compact.data(), compact.size(), active.size(),
         PredictorScaling::none, backend
@@ -486,7 +544,8 @@ ClassificationCvResult<T> cross_validate_classification(
         }
       }
     } else if (family == LinearPlsFamily::simpls ||
-               family == LinearPlsFamily::opls) {
+               family == LinearPlsFamily::opls ||
+               family == LinearPlsFamily::kernelpls) {
       SimplsControls controls = simpls_controls;
       controls.rsvd.seed += static_cast<unsigned int>(fold);
       controls.store_scores = head == ClassificationHead::lda;
@@ -561,7 +620,7 @@ ClassificationCvResult<T> cross_validate_classification(
       }
     } else {
       throw std::invalid_argument(
-        "classification CV supports PLS-SVD, SIMPLS, and OPLS"
+        "classification CV received an unsupported PLS family"
       );
     }
     result.status[fold] = 1;
@@ -581,7 +640,8 @@ RegressionCvResult<T> cross_validate_regression(
     PredictorScaling scaling, LinearPlsFamily family,
     RegressionMetric metric, const PlssvdControls& plssvd_controls,
     const SimplsControls& simpls_controls, Backend& backend,
-    bool store_predictions, std::size_t orthogonal_components = 0) {
+    bool store_predictions, std::size_t orthogonal_components = 0,
+    const KernelCvControls& kernel_controls = KernelCvControls()) {
   if (predictors.empty() || responses.empty() ||
       predictors.rows() != responses.rows() || components == nullptr ||
       prefix_count < 1) {
@@ -647,6 +707,21 @@ RegressionCvResult<T> cross_validate_regression(
       prepared = prepare_scaled_dense_crossprod(
         train.view(), train_response.view(), PredictorScaling::none, backend
       );
+    } else if (family == LinearPlsFamily::kernelpls) {
+      auto input_preprocessing = prepare_scaled_dense_operator(
+        train.view(), ConstMatrixView<T>(train_response.view()), scaling,
+        backend
+      );
+      cv_detail::standardize(
+        test.view(), input_preprocessing.predictor_center,
+        input_preprocessing.predictor_scale
+      );
+      cv_detail::make_kernel_fold(
+        train, test, kernel_controls, backend
+      );
+      prepared = prepare_scaled_dense_crossprod(
+        train.view(), train_response.view(), PredictorScaling::none, backend
+      );
     } else {
       prepared = prepare_scaled_dense_crossprod(
         train.view(), train_response.view(), scaling, backend
@@ -683,7 +758,8 @@ RegressionCvResult<T> cross_validate_regression(
         }
       }
     } else if (family == LinearPlsFamily::simpls ||
-               family == LinearPlsFamily::opls) {
+               family == LinearPlsFamily::opls ||
+               family == LinearPlsFamily::kernelpls) {
       SimplsControls controls = simpls_controls;
       controls.rsvd.seed += static_cast<unsigned int>(fold);
       controls.store_scores = false;
@@ -713,7 +789,7 @@ RegressionCvResult<T> cross_validate_regression(
       }
     } else {
       throw std::invalid_argument(
-        "regression CV supports PLS-SVD, SIMPLS, and OPLS"
+        "regression CV received an unsupported PLS family"
       );
     }
     result.status[fold] = 1;
