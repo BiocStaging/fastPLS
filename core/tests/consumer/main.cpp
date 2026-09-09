@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: MIT
 // Copyright (c) 2026 Stefano Cacciatore
-#include <fastpls/native/models.hpp>
 #include <fastpls/native/plssvd.hpp>
 #include <type_traits>
 
@@ -31,18 +30,6 @@ void check() {
   svd_controls.fitted = true;
   auto svd_model = fastpls::native::fit_plssvd(x, y, arma::ivec{1, 2}, svd_controls);
   same(fastpls::native::predict_plssvd(svd_model, x, 1), svd_model.fitted.slice(1));
-  auto opls = fastpls::native::fit_opls(x, y, arma::ivec{1, 2}, 1, controls);
-  same(fastpls::native::predict_opls(opls, x, 2), opls.inner.fitted.slice(1));
-  for (int kernel : {1, 2, 3}) {
-    fastpls::native::KernelPlsOptions kernel_controls;
-    kernel_controls.pls = controls;
-    kernel_controls.kernel = kernel;
-    kernel_controls.gamma = 0.2;
-    auto kernel_model = fastpls::native::fit_kernelpls(
-      x, y, arma::ivec{1, 2}, kernel_controls);
-    same(fastpls::native::predict_kernelpls(kernel_model, x, 2),
-         kernel_model.inner.fitted.slice(1));
-  }
 }
 
 int main() {

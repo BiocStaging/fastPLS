@@ -13,6 +13,7 @@
 #include <fastpls/core/operator_rsvd.hpp>
 #include <fastpls/core/operators.hpp>
 #include <fastpls/core/opls.hpp>
+#include <fastpls/core/oplspls.hpp>
 #include <fastpls/core/plssvd.hpp>
 #include <fastpls/core/rsvd.hpp>
 #include <fastpls/core/simpls.hpp>

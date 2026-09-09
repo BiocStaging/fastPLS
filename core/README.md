@@ -30,7 +30,7 @@ no previous latent direction initializes the next sketch.
 | `opls.hpp` | Float32/float64 OPLS filtering and held-out filter application |
 | `kernels.hpp` | Float32/float64 kernel transforms and train/test centering |
 | `kernelpls.hpp` | Dependency-free float32/float64 kernel-PLS model composition and prediction |
-| `native/models.hpp` | Transitional Armadillo OPLS/kernel model oracle retained during migration |
+| `oplspls.hpp` | Dependency-free float32/float64 OPLS model composition and prediction |
 | `lda.hpp` | CPU float64 and non-Windows CPU float32 LDA Cholesky/triangular solves |
 
 The dependency-free target can be configured and tested without discovering
@@ -125,8 +125,9 @@ nonlinear prediction retains the standardized reference and training kernel
 means. `KernelPlsControls` defaults to a linear kernel; set nonlinear gamma
 explicitly because the core does not infer R-specific defaults. The functions
 return numeric multivariate predictions and do not implement LDA, label
-decoding, or cross-validation. Transitional `native/models.hpp` remains an
-Armadillo oracle until dependency-free OPLS model composition is complete.
+decoding, or cross-validation. `core/oplspls.hpp` provides the same
+dependency-free fit/predict composition for OPLS and releases the filtered
+training matrix after fitting.
 
 The shared LDA solver preserves separate double-precision LAPACK and float32
 workspace-based Cholesky implementations. It does not form an inverse.

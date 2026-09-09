@@ -28,5 +28,10 @@ int main() {
   fastpls::core::KernelPlsModel<float> model;
   model.kernel = controls.kernel;
   if (model.kernel != fastpls::core::KernelType::radial_basis) return 1;
+  fastpls::core::OplsControls opls_controls;
+  opls_controls.orthogonal_components = 1;
+  opls_controls.simpls.components = 2;
+  fastpls::core::OplsModel<double> opls_model;
+  if (opls_model.filter.completed_components != 0) return 1;
   return 0;
 }
