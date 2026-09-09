@@ -159,24 +159,6 @@ bool cpu_gemv_f32(core::ConstMatrixView<float> matrix,
 
 }  // namespace
 
-std::string cpu_backend_description() {
-#if defined(FASTPLS_USE_ACCELERATE)
-  return "Apple Accelerate";
-#elif defined(FASTPLS_USE_OPENBLAS)
-  configure_openblas_threads();
-  const char* configuration = openblas_get_config();
-  return configuration == nullptr ? "OpenBLAS" :
-    std::string("OpenBLAS: ") + configuration;
-#elif defined(_WIN32)
-  return "R BLAS/LAPACK with reference float32 products";
-#elif defined(__APPLE__)
-  return "Apple system BLAS";
-#else
-  return system_cblas_sgemm() == nullptr ?
-    "R BLAS with reference float32 products" : "system CBLAS";
-#endif
-}
-
 void cpu_gemm_f32(core::ConstMatrixView<float> left,
                   core::ConstMatrixView<float> right,
                   bool transpose_left,

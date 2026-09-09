@@ -247,7 +247,7 @@ test_that("Metal rejects float64 and uses its assigned CPU prediction", {
     )
     default_prediction <- predict(fit, float::fl(x))$Ypred[[1L]]
     expect_equal(
-        predict(fit, float::fl(x), backend = "cpu")$Ypred[[1L]],
+        predict(fit, float::fl(x), backend = "metal")$Ypred[[1L]],
         default_prediction,
         tolerance = 0
     )

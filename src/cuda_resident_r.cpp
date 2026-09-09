@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MIT
+// Copyright (c) 2026 Stefano Cacciatore
+
 #include "r_api.h"
 #include "cuda_resident_api.h"
 
@@ -472,34 +475,6 @@ extern "C" SEXP _fastPLS_cuda_resident_compact_cpp(
 #endif
 }
 
-extern "C" SEXP _fastPLS_cuda_resident_classify_cpp(
-    SEXP object, SEXP predictors, SEXP components, SEXP classifier_value,
-    SEXP top_value) {
-#ifdef FASTPLS_HAS_CUDA
-  ResidentRModel* state = checked_state(object);
-  MatrixInput input = matrix_input(predictors, state->precision, "X");
-  const int top = scalar_integer(top_value, "top");
-  if (input.columns != state->p || top < 1 || top > state->q) {
-    Rf_error("invalid predictor dimension or top-k request");
-  }
-  SEXP result = PROTECT(Rf_allocMatrix(INTSXP, input.rows, top));
-  char error[1024] = {};
-  if (fastpls_resident_classify(
-      state->handle, input.values, input.rows,
-      scalar_integer(components, "ncomp"),
-      scalar_integer(classifier_value, "classifier"), top,
-      INTEGER(result), error, sizeof(error))) {
-    UNPROTECT(1);
-    Rf_error("%s", error);
-  }
-  UNPROTECT(1);
-  return result;
-#else
-  ignore(object, predictors, components, classifier_value, top_value);
-  unavailable("classification");
-#endif
-}
-
 extern "C" SEXP _fastPLS_cuda_resident_classify_path_cpp(
     SEXP object, SEXP predictors, SEXP components, SEXP classifier_value,
     SEXP top_value) {
@@ -570,40 +545,6 @@ extern "C" SEXP _fastPLS_cuda_resident_classify_response_path_cpp(
 #else
   ignore(object, predictors, components, classifier_value, top_value);
   unavailable("classification-response path");
-#endif
-}
-
-extern "C" SEXP _fastPLS_cuda_resident_simpls_predict_cpp(
-    SEXP object, SEXP predictors, SEXP components, SEXP classifier_value) {
-#ifdef FASTPLS_HAS_CUDA
-  ResidentRModel* state = checked_state(object);
-  MatrixInput input = matrix_input(predictors, state->precision, "X");
-  if (input.columns != state->p) {
-    Rf_error("test predictor dimension differs from the fitted model");
-  }
-  const int classifier = scalar_integer(classifier_value, "classifier");
-  if (classifier != 0 && classifier != 1) {
-    Rf_error("invalid resident classifier");
-  }
-  SEXP result = PROTECT(allocate_matrix(
-    state->precision, input.rows, state->q
-  ));
-  char error[1024] = {};
-  const auto predict = classifier == 1
-    ? fastpls_resident_lda_predict
-    : fastpls_resident_simpls_predict;
-  if (predict(
-      state->handle, input.values, input.rows,
-      scalar_integer(components, "ncomp"),
-      matrix_output(result, state->precision), error, sizeof(error))) {
-    UNPROTECT(1);
-    Rf_error("%s", error);
-  }
-  UNPROTECT(1);
-  return result;
-#else
-  ignore(object, predictors, components, classifier_value);
-  unavailable("prediction");
 #endif
 }
 

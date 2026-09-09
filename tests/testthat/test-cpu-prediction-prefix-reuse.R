@@ -25,7 +25,9 @@ test_that("compiled CPU prediction reuses scores for rSVD and IRLBA paths", {
                 model <- raw
                 if (weights == "factorized") model$W_latent <- NULL
                 for (projection in c(FALSE, TRUE)) {
-                    actual <- fastPLS:::pls_predict(model, test, projection)
+                    actual <- fastPLS:::pls_labels_core_predict_cpp(
+                        model, test, projection
+                    )
                     for (i in seq_along(model$ncomp)) {
                         prefix <- model
                         prefix$ncomp <- model$ncomp[[i]]
@@ -35,7 +37,9 @@ test_that("compiled CPU prediction reuses scores for rSVD and IRLBA paths", {
                                     drop = FALSE]
                             }
                         }
-                        expected <- fastPLS:::pls_predict(prefix, test, FALSE)
+                        expected <- fastPLS:::pls_labels_core_predict_cpp(
+                            prefix, test, FALSE
+                        )
                         expect_equal(actual$Ypred[, , i], expected$Ypred[, , 1],
                             tolerance = 2e-12)
                     }
@@ -45,7 +49,7 @@ test_that("compiled CPU prediction reuses scores for rSVD and IRLBA paths", {
                         expect_equal(actual$Ttest, centered %*% model$R,
                             tolerance = 2e-12)
                     } else {
-                        expect_equal(dim(actual$Ttest), c(0L, 0L))
+                        expect_equal(dim(actual$Ttest), c(nrow(test), 0L))
                     }
                     expect_identical(test, original)
                 }
@@ -54,19 +58,15 @@ test_that("compiled CPU prediction reuses scores for rSVD and IRLBA paths", {
     }
 })
 
-test_that("invalid latent counts do not bypass the existing coefficient fallback", {
+test_that("invalid latent counts are rejected by the core predictor", {
     model <- list(m = 1L, ncomp = 3L, mX = matrix(0, 1, 2),
         vX = matrix(1, 1, 2), mY = matrix(0, 1, 1),
         R = matrix(c(1, 0), 2, 1), Q = matrix(1, 1, 1),
         B = array(c(1, 2), c(2, 1, 1)), pls_method = "simpls",
         predict_latent_ok = TRUE)
     X <- matrix(as.numeric(seq_len(8)), 4, 2)
-    result <- fastPLS:::pls_predict(model, X, TRUE)
-    expect_equal(drop(result$Ypred), drop(X %*% c(1, 2)))
-    expect_equal(result$Ttest, X[, 1, drop = FALSE])
-    model$B <- NULL
-    expect_error(fastPLS:::pls_predict(model, X, TRUE),
-        "compact latent prediction was not available")
+    expect_error(fastPLS:::pls_labels_core_predict_cpp(model, X, TRUE),
+        "component counts are inconsistent")
 })
 
 test_that("compact CPU SIMPLS omits unused training scores", {

@@ -5,7 +5,6 @@
 
 #include <fastpls/core/matrix.hpp>
 
-#include <string>
 #include <vector>
 
 namespace fastpls {
@@ -64,8 +63,6 @@ class CpuLinearAlgebraF64 {
                    std::vector<double>& singular_values,
                    core::Matrix<double>& vt) const;
 };
-
-std::string cpu_backend_description();
 
 }  // namespace runtime
 }  // namespace fastpls

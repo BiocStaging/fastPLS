@@ -60,40 +60,5 @@ for (rank_backend in c("cpu", "cuda", "metal")) {
                 }
             }
         })
-        test_that(paste("compiled OPLS CV guards each fold rank on", backend), {
-            if (backend == "cuda") skip_if_not(has_cuda())
-            if (backend == "metal") skip_if_not(has_metal())
-            task <- opls_rank_task()
-            if (backend %in% c("cuda", "metal")) {
-                X <- if (backend == "metal") float::fl(task$X) else task$X
-                Y <- if (backend == "metal") float::fl(task$Y) else task$Y
-                expect_error(
-                    pls.single.cv(
-                        X, Y, method = "opls", north = 1L, ncomp = 8L,
-                        kfold = 3L, backend = backend, seed = 12L
-                    ),
-                    "OPLS requested 8 predictive components"
-                )
-                return(invisible())
-            }
-            for (classifier in 0:1) {
-                set.seed(12)
-                expect_error(fastPLS:::pls_cv_predict_compiled(
-                    Xdata = task$X,
-                    Ydata = matrix(as.double(task$y), ncol = 1),
-                    constrain = seq_len(nrow(task$X)), ncomp = 8L,
-                    scaling = 1L, kfold = 3L, method = 4L,
-                    backend = match(backend, c("cpu", "cuda", "metal")) - 1L,
-                    svd_method = fastPLS:::.svd_method_id(
-                        if (backend == "cuda") "cuda_rsvd" else "cpu_rsvd"),
-                    rsvd_oversample = 32L, rsvd_power = 5L,
-                    svds_tol = 0, seed = 12L, classification = TRUE,
-                    n_response = 3L, xprod = FALSE, opls_north = 1L,
-                    return_scores = TRUE, class_codes = matrix(numeric(), 0, 0),
-                    classifier = classifier, lda_ridge = 0,
-                    store_predictions = TRUE, metric_id = 4L),
-                    "OPLS requested 8 predictive components, but at most 7 remain")
-            }
-        })
     })
 }

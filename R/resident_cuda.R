@@ -243,8 +243,8 @@
     }
     if (!is.null(ss)) {
         ss <- as.vector(.resident_cuda_summary(ss, precision))
-        total <- tail(ss, 1L)
-        component_ss <- head(ss, -1L)
+        total <- utils::tail(ss, 1L)
+        component_ss <- utils::head(ss, -1L)
         if (is.finite(total) && total > 0) {
             model$variance <- .fastpls_named_components(component_ss / max(1L, nrow(x) - 1L), "LV")
             model$variance_explained <- .fastpls_named_components(component_ss / total, "LV")

@@ -141,8 +141,11 @@ fi
 
 have_metal=0
 if [ "$(uname -s)" = "Darwin" ]; then
-  metal_sdk="$(xcrun --sdk macosx --show-sdk-path 2>/dev/null || true)"
   system_metal_framework="/System/Library/Frameworks/Metal.framework"
+  metal_sdk=""
+  if [ ! -d "${system_metal_framework}" ]; then
+    metal_sdk="$(xcrun --sdk macosx --show-sdk-path 2>/dev/null || true)"
+  fi
   if [ "${use_metal}" = "0" ] || [ "${use_metal}" = "false" ] || [ "${use_metal}" = "FALSE" ]; then
     have_metal=0
   elif [ "${use_metal}" = "1" ]; then

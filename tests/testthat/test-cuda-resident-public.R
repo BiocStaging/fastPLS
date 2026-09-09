@@ -92,10 +92,13 @@ test_that("resident CUDA class paths match independent prefix prediction", {
         )
         expect_identical(dim(path), c(21L, 3L, length(components)))
         for (index in seq_along(components)) {
-            independent <- fastPLS:::cuda_resident_classify_cpp(
+            independent <- fastPLS:::cuda_resident_classify_path_cpp(
                 raw$resident_state, bits, components[[index]], lda, 3L
             )
-            expect_equal(path[, , index], independent, tolerance = 0)
+            expect_equal(
+                path[, , index], independent[, , 1L, drop = TRUE],
+                tolerance = 0
+            )
         }
     }
 })

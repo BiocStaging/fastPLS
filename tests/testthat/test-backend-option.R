@@ -122,69 +122,6 @@ test_that("the backend getter rejects an unavailable configured accelerator", {
   expect_identical(getOption("backend"), unavailable)
 })
 
-test_that("native CUDA helpers do not substitute CPU", {
-  skip_if(isTRUE(has_cuda()), "CUDA is available on this test host")
-  scores <- matrix(c(-1, 0, 1, 0, 1, -1), nrow = 3)
-  labels <- c(1L, 2L, 1L)
-  components <- 1L
-
-  expect_error(
-    fastPLS:::lda_train_prefix_cuda(
-      scores, labels, 2L, components, 1e-8
-    ),
-    "No CPU fallback"
-  )
-  expect_error(
-    fastPLS:::lda_project_train_prefix_cuda(
-      scores, diag(2), c(0, 0), labels, 2L, components, 1e-8
-    ),
-    "No CPU fallback"
-  )
-  expect_error(
-    fastPLS:::truncated_svd_debug(
-      diag(3), 1L, 5L, 2L, 1L, 0, 1L, FALSE
-    ),
-    "no CPU fallback"
-  )
-  expect_error(
-    fastPLS:::fastsvd_float32_cpp(
-      float::fl(diag(3)), 1L, 1L, 2L, 2L, 1L, 1L, FALSE
-    ),
-    "No CPU fallback"
-  )
-  expect_error(
-    fastPLS:::pls_model1_gpu(
-      diag(3), matrix(1, 3, 1), 1L, 1L, FALSE, 2L, 2L, 1L, 0, 1L
-    ),
-    "No CPU fallback"
-  )
-  expect_error(
-    fastPLS:::pls_model2_fast_gpu(
-      diag(3), matrix(1, 3, 1), 1L, 1L, FALSE, 2L, 2L, 1L, 0, 1L
-    ),
-    "No CPU fallback"
-  )
-  expect_error(
-    fastPLS:::pls_predict_flash_cuda(list(), diag(2), FALSE),
-    "No CPU fallback"
-  )
-})
-
-test_that("native Metal helpers do not substitute CPU", {
-  skip_if(isTRUE(has_metal()), "Metal is available on this test host")
-
-  expect_error(
-    fastPLS:::metal_matrix_multiply_cpp(diag(2), diag(2)),
-    "[Mm]etal.*not available|[Nn]o CPU fallback"
-  )
-  expect_error(
-    fastPLS:::fastsvd_float32_cpp(
-      float::fl(diag(3)), 1L, 2L, 2L, 2L, 1L, 1L, FALSE
-    ),
-    "No CPU fallback|Metal backend is not available"
-  )
-})
-
 test_that("each unavailable accelerator stops public operations", {
   X <- matrix(rnorm(40), 10, 4)
   y <- rnorm(10)

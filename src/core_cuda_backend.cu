@@ -42,10 +42,6 @@ bool has_cuda_backend() {
   return cudaGetDeviceCount(&devices) == cudaSuccess && devices > 0;
 }
 
-bool cuda_lda_native_available() {
-  return has_cuda_backend();
-}
-
 fastpls::core::Matrix<float> cuda_core_gemm_f32(
     fastpls::core::ConstMatrixView<float> left,
     fastpls::core::ConstMatrixView<float> right,

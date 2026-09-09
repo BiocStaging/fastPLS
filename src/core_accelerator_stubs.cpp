@@ -14,10 +14,6 @@ bool has_cuda_backend() {
   return false;
 }
 
-bool cuda_lda_native_available() {
-  return false;
-}
-
 fastpls::core::Matrix<float> cuda_core_gemm_f32(
     fastpls::core::ConstMatrixView<float>,
     fastpls::core::ConstMatrixView<float>, bool, bool) {

@@ -10,32 +10,22 @@ test_that("public PLS APIs reject removed solvers and controls", {
     }
 })
 
-test_that("removed float32 IRLBA entry points cannot be invoked", {
+test_that("removed float32 solver entry points are absent", {
     expect_false(exists("metal_float32_irlba_cpp",
         envir = asNamespace("fastPLS"), inherits = FALSE))
-    skip_on_os("windows")
-    X <- float::fl(as.matrix(iris[, 1:4]))
-    expect_error(fastPLS:::fastsvd_float32_cpp(
-        X, 2L, 0L, 1L, 32L, 5L, 1L, FALSE), "rSVD only")
-    if (has_metal()) {
-        expect_error(fastPLS:::fastsvd_float32_cpp(
-            X, 2L, 2L, 1L, 32L, 5L, 1L, FALSE), "rSVD only")
-    }
+    expect_false(exists("fastsvd_float32_cpp",
+        envir = asNamespace("fastPLS"), inherits = FALSE))
 })
 
-test_that("compiled float64 routes reject removed IRLBA requests", {
-    X <- as.matrix(iris[, 1:4])
-    Y <- X[, 1:2, drop = FALSE]
-    for (fun in list(fastPLS:::pls_model1, fastPLS:::pls_model2,
-        fastPLS:::pls_model2_fast)) {
-        expect_error(fun(X, Y, 1L, 1L, FALSE, 1L, 32L, 5L, 0, 1L),
-            "IRLBA is not part")
-    }
-    for (fun in list(fastPLS:::pls_model1_rsvd_xprod_precision,
-        fastPLS:::pls_model2_fast_rsvd_xprod_precision)) {
-        expect_error(fun(X, Y, 1L, 1L, FALSE, 32L, 5L, 0, 1L, 5L),
-            "IRLBA is not part")
-    }
+test_that("legacy compiled model entry points are absent", {
+    ns <- asNamespace("fastPLS")
+    removed <- c(
+        "pls_model1", "pls_model2", "pls_model2_fast",
+        "pls_model1_rsvd_xprod_precision",
+        "pls_model2_fast_rsvd_xprod_precision"
+    )
+    expect_false(any(vapply(removed, exists, logical(1), envir = ns,
+        inherits = FALSE)))
 })
 
 test_that("float32 capability records no available IRLBA route", {
@@ -50,15 +40,11 @@ test_that("float32 capability records no available IRLBA route", {
 test_that("IRLBA environment and public control registries are removed", {
     ns <- asNamespace("fastPLS")
     expect_false(exists(".with_irlba_options", envir = ns, inherits = FALSE))
-    for (registry in list(fastPLS:::.backend_control_env_defaults,
-        fastPLS:::.backend_control_env_groups,
-        fastPLS:::.svd_control_defaults())) {
-        expect_false(any(grepl("irlba", names(registry), ignore.case = TRUE)))
-    }
+    registry <- fastPLS:::.svd_control_defaults()
+    expect_false(any(grepl("irlba", names(registry), ignore.case = TRUE)))
     expect_setequal(names(fastPLS:::.svd_direct_aliases()),
         c("oversample", "power"))
     expect_identical(fastPLS:::.svd_methods_public, "rsvd")
-    expect_true(all(fastPLS:::.svd_methods()$method == "rsvd"))
     expect_error(fastPLS:::.svd_method_id("irlba"), "arg.*should be")
 })
 
@@ -73,8 +59,6 @@ test_that("private helpers no longer accept unused IRLBA controls", {
     expect_false(exists(".should_use_xprod_irlba_default", ns,
         inherits = FALSE))
     expect_error(fastPLS:::.float32_svd_id("irlba"), "rSVD only")
-    expect_error(fastPLS:::.compiled_cv_solver("cpp", "irlba"),
-        "arg.*should be")
     expect_false(grepl("IRLBA", fastPLS:::.solver_diagnostic_guidance(
         list(randomized = FALSE))))
 })

@@ -22,11 +22,11 @@ test_that("resident CUDA predicts a complete component path consistently", {
         )
 
         for (index in seq_along(path)) {
-            expected <- fastPLS:::cuda_resident_simpls_predict_cpp(
+            expected <- fastPLS:::cuda_resident_predict_path_cpp(
                 object$resident_state, bits, path[[index]], 0L
             )
             expected <- fastPLS:::.resident_cuda_summary(
-                expected, object$precision
+                expected[, , 1L, drop = TRUE], object$precision
             )
             observed <- fastPLS:::.resident_cuda_summary(
                 actual[, , index], object$precision

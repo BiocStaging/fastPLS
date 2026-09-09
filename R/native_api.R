@@ -1,8 +1,4 @@
-# Hand-written R C-API entry points used during the dependency-free migration.
-
-cpu_backend_description_cpp <- function() {
-    .Call("_fastPLS_cpu_backend_description", PACKAGE = "fastPLS")
-}
+# Hand-written R C-API entry points used by the dependency-free core.
 
 fastsvd_core_cpp <- function(
     matrix, components, oversample, power, seed, left_only = FALSE
@@ -57,27 +53,16 @@ pls_cv_classification_float32_core_cpp <- function(
     result
 }
 
-.pls_cv_opls_classification_core <- function(
-    symbol, predictors, labels, class_count, folds, components, scaling,
-    classifier, north, oversample, power, seed, store_predictions,
-    store_scores
-) {
-    .Call(
-        symbol, predictors, labels, class_count, folds, components, scaling,
-        classifier, north, oversample, power, seed, store_predictions,
-        store_scores, PACKAGE = "fastPLS"
-    )
-}
-
 pls_cv_opls_classification_core_cpp <- function(
     predictors, labels, class_count, folds, components, scaling, classifier,
     north, oversample, power, seed, store_predictions = TRUE,
     store_scores = TRUE
 ) {
-    .pls_cv_opls_classification_core(
-        "_fastPLS_pls_cv_opls_classification_core_cpp", predictors,
-        labels, class_count, folds, components, scaling, classifier, north,
-        oversample, power, seed, store_predictions, store_scores
+    .Call(
+        "_fastPLS_pls_cv_opls_classification_core_cpp", predictors, labels,
+        class_count, folds, components, scaling, classifier, north,
+        oversample, power, seed, store_predictions, store_scores,
+        PACKAGE = "fastPLS"
     )
 }
 
@@ -86,22 +71,11 @@ pls_cv_opls_classification_float32_core_cpp <- function(
     north, oversample, power, seed, store_predictions = TRUE,
     store_scores = TRUE
 ) {
-    .pls_cv_opls_classification_core(
+    .Call(
         "_fastPLS_pls_cv_opls_classification_float32_core_cpp", predictors,
         labels, class_count, folds, components, scaling, classifier, north,
-        oversample, power, seed, store_predictions, store_scores
-    )
-}
-
-.pls_cv_kernel_classification_core <- function(
-    symbol, predictors, labels, class_count, folds, components, scaling,
-    classifier, kernel, gamma, degree, coef0, oversample, power, seed,
-    store_predictions, store_scores
-) {
-    .Call(
-        symbol, predictors, labels, class_count, folds, components, scaling,
-        classifier, kernel, gamma, degree, coef0, oversample, power, seed,
-        store_predictions, store_scores, PACKAGE = "fastPLS"
+        oversample, power, seed, store_predictions, store_scores,
+        PACKAGE = "fastPLS"
     )
 }
 
@@ -110,11 +84,11 @@ pls_cv_kernel_classification_core_cpp <- function(
     kernel, gamma, degree, coef0, oversample, power, seed,
     store_predictions = TRUE, store_scores = TRUE
 ) {
-    .pls_cv_kernel_classification_core(
-        "_fastPLS_pls_cv_kernel_classification_core_cpp", predictors,
-        labels, class_count, folds, components, scaling, classifier, kernel,
-        gamma, degree, coef0, oversample, power, seed, store_predictions,
-        store_scores
+    .Call(
+        "_fastPLS_pls_cv_kernel_classification_core_cpp", predictors, labels,
+        class_count, folds, components, scaling, classifier, kernel, gamma,
+        degree, coef0, oversample, power, seed, store_predictions,
+        store_scores, PACKAGE = "fastPLS"
     )
 }
 
@@ -123,11 +97,11 @@ pls_cv_kernel_classification_float32_core_cpp <- function(
     kernel, gamma, degree, coef0, oversample, power, seed,
     store_predictions = TRUE, store_scores = TRUE
 ) {
-    .pls_cv_kernel_classification_core(
+    .Call(
         "_fastPLS_pls_cv_kernel_classification_float32_core_cpp", predictors,
         labels, class_count, folds, components, scaling, classifier, kernel,
         gamma, degree, coef0, oversample, power, seed, store_predictions,
-        store_scores
+        store_scores, PACKAGE = "fastPLS"
     )
 }
 
@@ -154,25 +128,14 @@ pls_cv_regression_float32_core_cpp <- function(
     result
 }
 
-.pls_cv_opls_regression_core <- function(
-    symbol, predictors, responses, folds, components, scaling, metric, north,
-    oversample, power, seed, store_predictions
-) {
-    .Call(
-        symbol, predictors, responses, folds, components, scaling, metric,
-        north, oversample, power, seed, store_predictions,
-        PACKAGE = "fastPLS"
-    )
-}
-
 pls_cv_opls_regression_core_cpp <- function(
     predictors, responses, folds, components, scaling, metric, north,
     oversample, power, seed, store_predictions = TRUE
 ) {
-    .pls_cv_opls_regression_core(
+    .Call(
         "_fastPLS_pls_cv_opls_regression_core_cpp", predictors, responses,
         folds, components, scaling, metric, north, oversample, power, seed,
-        store_predictions
+        store_predictions, PACKAGE = "fastPLS"
     )
 }
 
@@ -180,21 +143,10 @@ pls_cv_opls_regression_float32_core_cpp <- function(
     predictors, responses, folds, components, scaling, metric, north,
     oversample, power, seed, store_predictions = TRUE
 ) {
-    .pls_cv_opls_regression_core(
+    .Call(
         "_fastPLS_pls_cv_opls_regression_float32_core_cpp", predictors,
         responses, folds, components, scaling, metric, north, oversample,
-        power, seed, store_predictions
-    )
-}
-
-.pls_cv_kernel_regression_core <- function(
-    symbol, predictors, responses, folds, components, scaling, metric,
-    kernel, gamma, degree, coef0, oversample, power, seed, store_predictions
-) {
-    .Call(
-        symbol, predictors, responses, folds, components, scaling, metric,
-        kernel, gamma, degree, coef0, oversample, power, seed,
-        store_predictions, PACKAGE = "fastPLS"
+        power, seed, store_predictions, PACKAGE = "fastPLS"
     )
 }
 
@@ -202,10 +154,10 @@ pls_cv_kernel_regression_core_cpp <- function(
     predictors, responses, folds, components, scaling, metric, kernel,
     gamma, degree, coef0, oversample, power, seed, store_predictions = TRUE
 ) {
-    .pls_cv_kernel_regression_core(
+    .Call(
         "_fastPLS_pls_cv_kernel_regression_core_cpp", predictors, responses,
         folds, components, scaling, metric, kernel, gamma, degree, coef0,
-        oversample, power, seed, store_predictions
+        oversample, power, seed, store_predictions, PACKAGE = "fastPLS"
     )
 }
 
@@ -213,10 +165,10 @@ pls_cv_kernel_regression_float32_core_cpp <- function(
     predictors, responses, folds, components, scaling, metric, kernel,
     gamma, degree, coef0, oversample, power, seed, store_predictions = TRUE
 ) {
-    .pls_cv_kernel_regression_core(
+    .Call(
         "_fastPLS_pls_cv_kernel_regression_float32_core_cpp", predictors,
         responses, folds, components, scaling, metric, kernel, gamma, degree,
-        coef0, oversample, power, seed, store_predictions
+        coef0, oversample, power, seed, store_predictions, PACKAGE = "fastPLS"
     )
 }
 
@@ -283,18 +235,6 @@ pls_matrix_core_xprod_cpp <- function(
     )
 }
 
-pls_float32_matrix_core_cpp <- function(
-    predictors, responses, components, scaling, fit, method,
-    oversample, power, seed, store_scores = TRUE
-) {
-    .Call(
-        "_fastPLS_pls_float32_matrix_core_cpp", predictors, responses,
-        components, scaling, fit, store_scores, method, oversample, power,
-        seed,
-        PACKAGE = "fastPLS"
-    )
-}
-
 pls_float32_matrix_backend_core_cpp <- function(
     predictors, responses, components, scaling, fit, method,
     oversample, power, seed, backend, store_scores = TRUE
@@ -303,18 +243,6 @@ pls_float32_matrix_backend_core_cpp <- function(
         "_fastPLS_pls_float32_matrix_backend_core_cpp", predictors,
         responses, components, scaling, fit, store_scores, method,
         oversample, power, seed, backend, PACKAGE = "fastPLS"
-    )
-}
-
-pls_float32_labels_core_cpp <- function(
-    predictors, labels, class_count, components, scaling, fit, method,
-    oversample, power, seed, store_scores = TRUE
-) {
-    .Call(
-        "_fastPLS_pls_float32_labels_core_cpp", predictors, labels,
-        class_count, components, scaling, fit, store_scores, method,
-        oversample, power, seed,
-        PACKAGE = "fastPLS"
     )
 }
 
@@ -536,14 +464,6 @@ cuda_resident_compact_cpp <- function(object, prepare_lda = FALSE) {
     ))
 }
 
-cuda_resident_classify_cpp <- function(object, X, ncomp, classifier, top) {
-    .Call(
-        "_fastPLS_cuda_resident_classify_cpp",
-        object, X, ncomp, classifier, top,
-        PACKAGE = "fastPLS"
-    )
-}
-
 cuda_resident_classify_path_cpp <- function(
     object, X, ncomp, classifier, top
 ) {
@@ -564,16 +484,6 @@ cuda_resident_classify_response_path_cpp <- function(
     )
 }
 
-cuda_resident_simpls_predict_cpp <- function(
-    object, X, ncomp, classifier = 0L
-) {
-    .Call(
-        "_fastPLS_cuda_resident_simpls_predict_cpp",
-        object, X, ncomp, classifier,
-        PACKAGE = "fastPLS"
-    )
-}
-
 cuda_resident_predict_path_cpp <- function(
     object, X, ncomp, classifier = 0L
 ) {
@@ -590,10 +500,6 @@ has_cuda <- function() {
 
 has_metal <- function() {
     .Call("_fastPLS_has_metal", PACKAGE = "fastPLS")
-}
-
-lda_cuda_native_available <- function() {
-    .Call("_fastPLS_lda_cuda_native_available", PACKAGE = "fastPLS")
 }
 
 rsvd_audit_reset_debug <- function() {
@@ -695,22 +601,6 @@ center_kernel_test_cpp <- function(Ktest, train_col_means, train_grand_mean) {
     )
 }
 
-label_crossprod_scaled_cpp <- function(
-    XtrainSEXP,
-    y,
-    n_classes,
-    scaling
-) {
-    .Call(
-        "_fastPLS_label_crossprod_scaled_cpp",
-        XtrainSEXP,
-        y,
-        n_classes,
-        scaling,
-        PACKAGE = "fastPLS"
-    )
-}
-
 transformy <- function(y) {
     labels <- as.integer(y)
     if (!length(labels) || anyNA(labels) || any(labels < 1L)) {
@@ -719,14 +609,4 @@ transformy <- function(y) {
     response <- matrix(0, nrow = length(labels), ncol = max(labels))
     response[cbind(seq_along(labels), labels)] <- 1
     response
-}
-
-RQ <- function(yData, yPred) {
-    yData <- as.matrix(yData)
-    yPred <- as.matrix(yPred)
-    if (!identical(dim(yData), dim(yPred))) {
-        stop("R2 matrices must have matching dimensions")
-    }
-    centered <- sweep(yData, 2L, colMeans(yData), "-")
-    1 - sum((yData - yPred)^2) / sum(centered^2)
 }

@@ -170,8 +170,8 @@ discriminant principle (Fisher, 1936).
 ### Computational Backends
 
 The `backend` argument selects where the main numerical work is performed.
-`backend = "cpu"` is the portable compiled C++/RcppArmadillo backend and
-uses native rSVD. It is usually best for small and moderate
+`backend = "cpu"` uses the package's compiled, dependency-free C++ core with
+native rSVD. It is usually best for small and moderate
 datasets, low-dimensional problems, and machines without GPU support.
 The CPU kernels use the BLAS/LAPACK implementation selected when fastPLS is
 built. macOS builds use Apple Accelerate by default. On Linux and other
@@ -355,12 +355,12 @@ PLS-DA response encoding internally and returns predicted class labels.
 The `classifier` argument is used only for this type of task and selects the
 classification head: `argmax` or `lda`. These options are not
 regression models and are not used for numeric responses. The examples in this
-section use the `iris` data for compact classification examples and the bundled
-`colon` and `breast` omics datasets for score plots.
+section use `iris` for compact multiclass classification and
+`sample.ExpressionSet` from Biobase for a biomedical two-class score plot.
 
 ```{r chunk-002}
 set.seed(100)
-X <- as.matrix(iris[, c("Sepal.Width", "Petal.Length", "Petal.Width")])
+X <- as.matrix(iris[, 1:4])
 Y_cls <- iris$Species
 cls_test_id <- sample(seq_len(nrow(X)), 30)
 Xtrain <- X[-cls_test_id, , drop = FALSE]
@@ -586,45 +586,33 @@ plot(
 )
 ```
 
-The next example uses the bundled two-class colon gene-expression data. The same
-`plot()` call works for `method = "plssvd"`, `"simpls"`, `"opls"`, and
-`"kernelpls"`; here we keep the code short and show one fitted model.
+The next example uses the two-class gene-expression data from the Biobase
+`sample.ExpressionSet` object introduced above. The same `plot()` call works for
+`method = "plssvd"`, `"simpls"`, `"opls"`, and `"kernelpls"`.
 
-```{r colon-binary-pls-plots, fig.width = 5.5, fig.height = 4.5}
-data("colon", package = "fastPLS")
-set.seed(200)
-X_two <- as.matrix(colon$X)
-y_two <- colon$y
-train_two <- unlist(tapply(seq_along(y_two), y_two, function(i) {
-    sample(i, floor(0.7 * length(i)))
-}))
-
+```{r biobase-binary-pls-plots, fig.width = 5.5, fig.height = 4.5}
+X_two <- t(Biobase::exprs(sample.ExpressionSet))
+y_two <- factor(Biobase::pData(sample.ExpressionSet)$type)
+train_two <- setdiff(seq_along(y_two), test_bioc)
 fit_two <- pls(
     X_two[train_two, , drop = FALSE], y_two[train_two],
-    X_two[-train_two, , drop = FALSE], y_two[-train_two],
+    X_two[test_bioc, , drop = FALSE], y_two[test_bioc],
     ncomp = 1:2, fit = TRUE, proj = TRUE, seed = 200
 )
 
 plot(fit_two, score.set = "train", groups = y_two[train_two],
-        ellipse = TRUE, main = "Colon, two classes")
+        ellipse = TRUE, main = "Biobase expression data")
 ```
 
-The second score-plot example uses a bundled three-subtype breast-cancer
-expression example and fits OPLS with two orthogonal components (`north = 2`).
-The example uses predefined training and test sets.
+The second score-plot example fits OPLS to the three-class `iris` split defined
+at the beginning of this section, with two orthogonal components (`north = 2`).
 
-```{r breast-tcga-three-class-opls, fig.width = 7.5, fig.height = 4}
-data("breast", package = "fastPLS")
-X_three <- as.matrix(breast$X_train)
-y_three <- breast$y_train
-X_three_test <- as.matrix(breast$X_test)
-y_three_test <- breast$y_test
-
+```{r iris-three-class-opls, fig.width = 7.5, fig.height = 4}
 opls_three <- pls(
-    X_three,
-    y_three,
-    X_three_test,
-    y_three_test,
+    Xtrain,
+    Ytrain_cls,
+    Xtest,
+    Ytest_cls,
     ncomp = 1:2,
     method = "opls",
     fit = TRUE,
@@ -637,7 +625,7 @@ old_par <- par(mfrow = c(1, 2), mar = c(4.2, 4.2, 2.2, 0.8))
 plot(
     opls_three,
     score.set = "train",
-    groups = y_three,
+    groups = Ytrain_cls,
     ellipse = TRUE,
     ellipse.type = "hotelling",
     main = "OPLS training, north = 2"

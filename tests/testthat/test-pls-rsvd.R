@@ -1,6 +1,19 @@
 dense_simpls_reference <- function(X, Y, ncomp, ...) {
-  fastPLS:::pls.model2(X, Y, ncomp = ncomp, scaling = 1L,
-    fit = TRUE, svd.method = 3L, seed = 1L)
+  dots <- list(...)
+  dots[c("method", "backend", "svd.method", "oversample",
+    "rsvd_oversample", "power", "rsvd_power", "seed", "fit")] <- NULL
+  do.call(pls, c(list(
+    Xtrain = X,
+    Ytrain = Y,
+    ncomp = ncomp,
+    method = "simpls",
+    backend = "cpu",
+    svd.method = "rsvd",
+    oversample = min(ncol(X), ncol(Y)),
+    power = 0L,
+    seed = 1L,
+    fit = TRUE
+  ), dots))
 }
 
 test_that("pls defaults to randomized SVD", {
@@ -164,7 +177,7 @@ test_that("xprod default threshold matches the benchmark rule", {
   expect_true(should_use_rsvd(p = 5000, q = 1000, ncomp = 50))
 })
 
-test_that("compact streamed prediction is the default for compiled PLS", {
+test_that("core prediction is stable for compiled PLS", {
   set.seed(17)
   X <- matrix(rnorm(70 * 20), nrow = 70, ncol = 20)
   Y <- matrix(rnorm(70 * 5), nrow = 70, ncol = 5)
@@ -182,7 +195,7 @@ test_that("compact streamed prediction is the default for compiled PLS", {
       rsvd_power = 5L,
       seed = 17L
     )
-    flash <- pls(
+    compact <- pls(
       X[-idx, ],
       Y[-idx, ],
       ncomp = 1:4,
@@ -194,16 +207,11 @@ test_that("compact streamed prediction is the default for compiled PLS", {
       seed = 17L
     )
     pred_ref <- predict(ref, X[idx, , drop = FALSE], backend = "cpu")
-    pred_flash <- predict(flash, X[idx, , drop = FALSE])
-    flash_internal <- attr(flash, "fastPLS_internal")
-
-    expect_s3_class(flash, "fastPLS")
-    expect_true(isTRUE(flash_internal$flash_svd))
-    expect_identical(flash_internal$flash_svd_backend, "cpu")
-    expect_identical(flash_internal$predict_backend, "cpu_flash")
-    expect_identical(flash_internal$flash_svd_mode, "streamed_low_rank_prediction")
-    expect_equal(flash$B, ref$B)
-    expect_equal(pred_flash$Ypred, pred_ref$Ypred, tolerance = 1e-10)
+    pred_compact <- predict(compact, X[idx, , drop = FALSE])
+    expect_s3_class(compact, "fastPLS")
+    expect_match(compact$xprod_mode, "^float64_")
+    expect_equal(compact$B, ref$B)
+    expect_equal(pred_compact$Ypred, pred_ref$Ypred, tolerance = 1e-10)
   }
 })
 
@@ -308,7 +316,7 @@ test_that("accelerated SIMPLS preserves prediction despite coefficient changes",
 })
 
 
-test_that("Rcpp plssvd handles ncomp above rank by capping internally", {
+test_that("the PLS-SVD core caps ncomp at the response rank", {
   set.seed(78)
   X <- matrix(rnorm(180 * 45), nrow = 180, ncol = 45)
   y <- factor(sample(letters[1:10], 180, replace = TRUE))
@@ -339,22 +347,4 @@ test_that("centered factor-response PLSSVD respects the C minus 1 rank bound", {
     "rank is limited to 2"
   )
   expect_equal(as.integer(attr(fit, "fastPLS_internal")$ncomp), 2L)
-})
-
-test_that("CUDA SIMPLS memory guard refuses estimator substitution", {
-  old <- Sys.getenv("FASTPLS_LABEL_AWARE_Y_THRESHOLD_MB", unset = NA_character_)
-  on.exit({
-    if (is.na(old)) {
-      Sys.unsetenv("FASTPLS_LABEL_AWARE_Y_THRESHOLD_MB")
-    } else {
-      Sys.setenv(FASTPLS_LABEL_AWARE_Y_THRESHOLD_MB = old)
-    }
-  }, add = TRUE)
-  Sys.setenv(FASTPLS_LABEL_AWARE_Y_THRESHOLD_MB = "0")
-
-  expect_true(fastPLS:::.dense_indicator_exceeds_cuda_guard(20, 3))
-  expect_error(
-    fastPLS:::.stop_unsafe_cuda_simpls_response(20, 3),
-    "does not replace a requested SIMPLS estimator with PLS-SVD"
-  )
 })

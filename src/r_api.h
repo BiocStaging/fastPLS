@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MIT
+// Copyright (c) 2026 Stefano Cacciatore
+
 #ifndef FASTPLS_R_API_H
 #define FASTPLS_R_API_H
 
@@ -21,17 +24,11 @@ SEXP _fastPLS_cuda_resident_simpls_fit_cpp(
 SEXP _fastPLS_cuda_resident_export_cpp(SEXP object, SEXP loadings,
                                        SEXP variance, SEXP scores);
 SEXP _fastPLS_cuda_resident_compact_cpp(SEXP object, SEXP prepare_lda);
-SEXP _fastPLS_cuda_resident_classify_cpp(SEXP object, SEXP predictors,
-                                         SEXP components, SEXP classifier,
-                                         SEXP top);
 SEXP _fastPLS_cuda_resident_classify_path_cpp(
   SEXP object, SEXP predictors, SEXP components, SEXP classifier, SEXP top
 );
 SEXP _fastPLS_cuda_resident_classify_response_path_cpp(
   SEXP object, SEXP predictors, SEXP components, SEXP classifier, SEXP top
-);
-SEXP _fastPLS_cuda_resident_simpls_predict_cpp(
-  SEXP object, SEXP predictors, SEXP components, SEXP classifier
 );
 SEXP _fastPLS_cuda_resident_predict_path_cpp(
   SEXP object, SEXP predictors, SEXP components, SEXP classifier
@@ -39,8 +36,6 @@ SEXP _fastPLS_cuda_resident_predict_path_cpp(
 SEXP _fastPLS_cuda_matrix_multiply(SEXP left, SEXP right);
 SEXP _fastPLS_has_cuda();
 SEXP _fastPLS_has_metal();
-SEXP _fastPLS_cpu_backend_description();
-SEXP _fastPLS_lda_cuda_native_available();
 SEXP _fastPLS_rsvd_audit_reset_debug();
 SEXP _fastPLS_rsvd_audit_summary_debug();
 SEXP _fastPLS_fastsvd_core_cpp(SEXP matrix, SEXP components,
@@ -193,8 +188,6 @@ SEXP _fastPLS_kernel_matrix_cpp(SEXP left, SEXP right, SEXP kernel,
 SEXP _fastPLS_center_kernel_train_cpp(SEXP kernel);
 SEXP _fastPLS_center_kernel_test_cpp(SEXP kernel, SEXP training_means,
                                      SEXP training_grand_mean);
-SEXP _fastPLS_label_crossprod_scaled_cpp(SEXP predictors, SEXP labels,
-                                         SEXP class_count, SEXP scaling);
 SEXP _fastPLS_pls_labels_core_cpp(
   SEXP predictors, SEXP labels, SEXP class_count, SEXP components,
   SEXP scaling, SEXP fit, SEXP store_scores, SEXP oversample, SEXP power,
@@ -215,11 +208,6 @@ SEXP _fastPLS_pls_matrix_core_xprod_cpp(
   SEXP fit, SEXP store_scores, SEXP method, SEXP oversample, SEXP power,
   SEXP seed
 );
-SEXP _fastPLS_pls_float32_matrix_core_cpp(
-  SEXP predictors, SEXP responses, SEXP components, SEXP scaling,
-  SEXP fit, SEXP store_scores, SEXP method, SEXP oversample, SEXP power,
-  SEXP seed
-);
 SEXP _fastPLS_pls_float32_matrix_backend_core_cpp(
   SEXP predictors, SEXP responses, SEXP components, SEXP scaling,
   SEXP fit, SEXP store_scores, SEXP method, SEXP oversample, SEXP power,
@@ -230,11 +218,6 @@ SEXP _fastPLS_pls_labels_core_predict_cpp(
 );
 SEXP _fastPLS_pls_class_predict_topk_core_cpp(
   SEXP model, SEXP predictors, SEXP top, SEXP project, SEXP block_size
-);
-SEXP _fastPLS_pls_float32_labels_core_cpp(
-  SEXP predictors, SEXP labels, SEXP class_count, SEXP components,
-  SEXP scaling, SEXP fit, SEXP store_scores, SEXP method, SEXP oversample,
-  SEXP power, SEXP seed
 );
 SEXP _fastPLS_pls_float32_labels_backend_core_cpp(
   SEXP predictors, SEXP labels, SEXP class_count, SEXP components,

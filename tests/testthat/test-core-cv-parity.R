@@ -1,71 +1,37 @@
-legacy_cv_call <- function(X, Y, groups, components, method,
-                           classification, classes, classifier, seed,
-                           return_scores = FALSE, north = 0L) {
-    set.seed(seed)
-    fastPLS:::pls_cv_predict_compiled(
-        Xdata = X,
-        Ydata = Y,
-        constrain = groups,
-        ncomp = components,
-        scaling = 1L,
-        kfold = 4L,
-        method = method,
-        backend = 0L,
-        svd_method = fastPLS:::.svd_method_id("cpu_rsvd"),
-        rsvd_oversample = 16L,
-        rsvd_power = 3L,
-        svds_tol = 0,
-        seed = seed,
-        classification = classification,
-        n_response = classes,
-        xprod = FALSE,
-        opls_north = north,
-        return_scores = return_scores,
-        class_codes = matrix(numeric(), 0, 0),
-        classifier = classifier,
-        lda_ridge = 0,
-        store_predictions = TRUE,
-        metric_id = if (classification) 1L else 4L
-    )
-}
-
-test_that("standalone core CV preserves linear classification workflows", {
+test_that("standalone core CV is deterministic for grouped classification", {
     set.seed(2026)
     labels <- rep(1:3, each = 40)
     X <- matrix(rnorm(120 * 15), 120, 15)
     X[, 1:3] <- X[, 1:3] + 4 * model.matrix(~ factor(labels) - 1)
     groups <- rep(seq_len(60), each = 2)
     components <- 1:2
+    set.seed(41)
+    folds <- fastPLS:::cv_folds_core_cpp(groups, labels, 3L, 4L)
+    expect_true(all(vapply(split(folds, groups), function(x) {
+        length(unique(x)) == 1L
+    }, logical(1))))
 
     for (method in c(1L, 3L)) {
         for (classifier in c(0L, 1L)) {
-            legacy <- legacy_cv_call(
-                X, matrix(as.double(labels), ncol = 1), groups, components,
-                method, TRUE, 3L, classifier, 41L,
-                return_scores = classifier == 0L
-            )
             core <- fastPLS:::pls_cv_classification_core_cpp(
-                X, labels, 3L, legacy$fold, components, 1L, method,
+                X, labels, 3L, folds, components, 1L, method,
                 classifier, 16L, 3L, 41L, TRUE, classifier == 0L
             )
-            expect_identical(core$fold, as.integer(legacy$fold))
-            expect_identical(core$status, as.integer(legacy$status))
-            expect_identical(dim(core$class_pred), dim(legacy$class_pred))
-            expect_identical(
-                as.integer(core$class_pred), as.integer(legacy$class_pred)
+            repeated <- fastPLS:::pls_cv_classification_core_cpp(
+                X, labels, 3L, folds, components, 1L, method,
+                classifier, 16L, 3L, 41L, TRUE, classifier == 0L
             )
-            expect_equal(
-                core$metric_value, legacy$metrics$metric_value,
-                tolerance = 1e-12
-            )
-            if (classifier == 0L) {
-                expect_equal(core$Ypred, legacy$Ypred, tolerance = 1e-10)
-            }
+            expect_identical(core$fold, as.integer(folds))
+            expect_true(all(core$status == 1L))
+            expect_equal(dim(core$class_pred), c(nrow(X), length(components)))
+            expect_identical(core$class_pred, repeated$class_pred)
+            expect_equal(core$metric_value, repeated$metric_value)
+            expect_true(all(is.finite(core$metric_value)))
         }
     }
 })
 
-test_that("standalone core CV preserves linear regression workflows", {
+test_that("standalone core CV is deterministic for grouped regression", {
     set.seed(911)
     X <- matrix(rnorm(96 * 12), 96, 12)
     Y <- cbind(
@@ -75,27 +41,23 @@ test_that("standalone core CV preserves linear regression workflows", {
     )
     groups <- rep(seq_len(48), each = 2)
     components <- 1:3
+    set.seed(73)
+    folds <- fastPLS:::cv_folds_core_cpp(groups, NULL, 0L, 4L)
 
     for (method in c(1L, 3L)) {
-        legacy <- legacy_cv_call(
-            X, Y, groups, components, method, FALSE, ncol(Y), 0L, 73L
-        )
         core <- fastPLS:::pls_cv_regression_core_cpp(
-            X, Y, legacy$fold, components, 1L, method, 4L,
+            X, Y, folds, components, 1L, method, 4L,
             16L, 3L, 73L, TRUE
         )
-        expect_identical(core$fold, as.integer(legacy$fold))
-        expect_identical(core$status, as.integer(legacy$status))
-        expect_equal(
-            core$metric_value, legacy$metrics$metric_value,
-            tolerance = 1e-10
+        repeated <- fastPLS:::pls_cv_regression_core_cpp(
+            X, Y, folds, components, 1L, method, 4L,
+            16L, 3L, 73L, TRUE
         )
-        for (index in seq_along(components)) {
-            expect_equal(
-                core$Ypred[, , index], legacy$Ypred[, , index],
-                tolerance = 1e-9
-            )
-        }
+        expect_identical(core$fold, as.integer(folds))
+        expect_true(all(core$status == 1L))
+        expect_equal(core$metric_value, repeated$metric_value)
+        expect_equal(core$Ypred, repeated$Ypred)
+        expect_true(all(is.finite(core$metric_value)))
     }
 })
 
@@ -174,7 +136,7 @@ test_that("public CPU CV dispatches float32 linear inputs through the core", {
     )))
 })
 
-test_that("standalone OPLS CV preserves legacy and float32 workflows", {
+test_that("standalone OPLS CV preserves float32 workflows", {
     set.seed(88)
     labels <- rep(1:3, each = 30)
     X <- matrix(rnorm(90 * 12), 90, 12)
@@ -185,49 +147,31 @@ test_that("standalone OPLS CV preserves legacy and float32 workflows", {
     )
     groups <- rep(seq_len(45), each = 2)
     components <- 1:2
+    set.seed(41)
+    folds <- fastPLS:::cv_folds_core_cpp(groups, labels, 3L, 4L)
 
-    legacy <- legacy_cv_call(
-        X, matrix(as.double(labels), ncol = 1), groups, components,
-        4L, TRUE, 3L, 0L, 41L, return_scores = TRUE, north = 1L
-    )
     core <- fastPLS:::pls_cv_opls_classification_core_cpp(
-        X, labels, 3L, legacy$fold, components, 1L, 0L, 1L,
+        X, labels, 3L, folds, components, 1L, 0L, 1L,
         16L, 3L, 41L, TRUE, TRUE
     )
     core32 <- fastPLS:::pls_cv_opls_classification_float32_core_cpp(
-        float::fl(X), labels, 3L, legacy$fold, components, 1L, 0L, 1L,
+        float::fl(X), labels, 3L, folds, components, 1L, 0L, 1L,
         16L, 3L, 41L, TRUE, TRUE
     )
-    expect_equal(core$metric_value, legacy$metrics$metric_value)
-    expect_identical(
-        as.integer(core$class_pred), as.integer(legacy$class_pred)
-    )
-    expect_equal(core$Ypred, legacy$Ypred, tolerance = 1e-10)
     expect_identical(core32$class_pred, core$class_pred)
     expect_equal(core32$Ypred, core$Ypred, tolerance = 1e-4)
 
-    legacy_regression <- legacy_cv_call(
-        X, Y, groups, components, 4L, FALSE, ncol(Y), 0L, 19L,
-        north = 1L
-    )
+    set.seed(19)
+    regression_folds <- fastPLS:::cv_folds_core_cpp(groups, NULL, 0L, 4L)
     core_regression <- fastPLS:::pls_cv_opls_regression_core_cpp(
-        X, Y, legacy_regression$fold, components, 1L, 4L, 1L,
+        X, Y, regression_folds, components, 1L, 4L, 1L,
         16L, 3L, 19L, TRUE
     )
     core_regression32 <-
         fastPLS:::pls_cv_opls_regression_float32_core_cpp(
-            float::fl(X), float::fl(Y), legacy_regression$fold, components,
+            float::fl(X), float::fl(Y), regression_folds, components,
             1L, 4L, 1L, 16L, 3L, 19L, TRUE
         )
-    expect_equal(
-        core_regression$metric_value,
-        legacy_regression$metrics$metric_value,
-        tolerance = 1e-10
-    )
-    expect_equal(
-        core_regression$Ypred, legacy_regression$Ypred,
-        tolerance = 1e-9
-    )
     expect_equal(
         core_regression32$metric_value,
         core_regression$metric_value,

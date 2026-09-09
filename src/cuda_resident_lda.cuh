@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MIT
+// Copyright (c) 2026 Stefano Cacciatore
+
 #ifndef FASTPLS_CUDA_RESIDENT_LDA_CUH
 #define FASTPLS_CUDA_RESIDENT_LDA_CUH
 #include "cuda_resident_plssvd.cuh"

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MIT
+// Copyright (c) 2026 Stefano Cacciatore
+
 #include "r_api.h"
 #include "accelerator_core_backend.h"
 #include "core_cpu_backend.h"
@@ -35,7 +38,6 @@
 namespace fastpls_svd {
 bool has_cuda_backend();
 bool has_metal_backend();
-bool cuda_lda_native_available();
 }
 
 namespace {
@@ -1536,10 +1538,6 @@ extern "C" SEXP _fastPLS_has_metal() {
   return Rf_ScalarLogical(fastpls_svd::has_metal_backend());
 }
 
-extern "C" SEXP _fastPLS_lda_cuda_native_available() {
-  return Rf_ScalarLogical(fastpls_svd::cuda_lda_native_available());
-}
-
 extern "C" SEXP _fastPLS_rsvd_audit_reset_debug() {
   fastpls_svd::reset_rsvd_audit_summary();
   return R_NilValue;
@@ -2492,15 +2490,6 @@ extern "C" SEXP _fastPLS_center_kernel_train_cpp(SEXP kernel) {
   return R_NilValue;
 }
 
-extern "C" SEXP _fastPLS_cpu_backend_description() {
-  try {
-    return Rf_mkString(fastpls::runtime::cpu_backend_description().c_str());
-  } catch (const std::exception& exception) {
-    Rf_error("%s", exception.what());
-  }
-  return R_NilValue;
-}
-
 extern "C" SEXP _fastPLS_cpu_float32_matrix_multiply_cpp(
     SEXP left, SEXP right, SEXP transpose_left, SEXP transpose_right) {
   try {
@@ -2816,101 +2805,6 @@ extern "C" SEXP _fastPLS_center_kernel_test_cpp(
   return R_NilValue;
 }
 
-extern "C" SEXP _fastPLS_label_crossprod_scaled_cpp(SEXP predictors,
-                                                       SEXP labels,
-                                                       SEXP class_count,
-                                                       SEXP scaling) {
-  try {
-    if (!Rf_isReal(predictors) || !Rf_isMatrix(predictors)) {
-      throw std::invalid_argument("Xtrain must be a numeric matrix");
-    }
-    if (TYPEOF(labels) != INTSXP) {
-      throw std::invalid_argument("classification labels must be integers");
-    }
-    const SEXP dimensions = Rf_getAttrib(predictors, R_DimSymbol);
-    const int rows = INTEGER(dimensions)[0];
-    const int columns = INTEGER(dimensions)[1];
-    if (rows < 1 || columns < 1 || XLENGTH(labels) != rows) {
-      throw std::invalid_argument(
-        "label_crossprod_scaled_cpp requires one label per training row"
-      );
-    }
-    const int classes = Rf_asInteger(class_count);
-    if (classes < 2 || classes == NA_INTEGER) {
-      throw std::invalid_argument(
-        "label_crossprod_scaled_cpp requires at least two classes"
-      );
-    }
-    const int scaling_code = Rf_asInteger(scaling);
-    if (scaling_code < 1 || scaling_code > 3 || scaling_code == NA_INTEGER) {
-      throw std::invalid_argument("scaling must be 1, 2, or 3");
-    }
-    std::vector<std::size_t> zero_based_labels(static_cast<std::size_t>(rows));
-    for (int row = 0; row < rows; ++row) {
-      const int label = INTEGER(labels)[row];
-      if (label == NA_INTEGER || label < 1 || label > classes) {
-        throw std::invalid_argument(
-          "label_crossprod_scaled_cpp requires labels encoded as 1..n_classes"
-        );
-      }
-      zero_based_labels[static_cast<std::size_t>(row)] =
-        static_cast<std::size_t>(label - 1);
-    }
-    const auto result = fastpls::core::scaled_label_crossprod(
-      fastpls::core::make_const_view(
-        REAL(predictors), static_cast<std::size_t>(rows),
-        static_cast<std::size_t>(columns), static_cast<std::size_t>(rows)
-      ),
-      zero_based_labels.data(), zero_based_labels.size(),
-      static_cast<std::size_t>(classes),
-      static_cast<fastpls::core::PredictorScaling>(scaling_code)
-    );
-
-    SEXP crossprod = PROTECT(Rf_allocMatrix(REALSXP, columns, classes));
-    std::copy(
-      result.crossprod.data(),
-      result.crossprod.data() + result.crossprod.size(), REAL(crossprod)
-    );
-    SEXP center = PROTECT(Rf_allocMatrix(REALSXP, 1, columns));
-    std::copy(
-      result.predictor_center.begin(), result.predictor_center.end(),
-      REAL(center)
-    );
-    SEXP scale = PROTECT(Rf_allocMatrix(REALSXP, 1, columns));
-    std::copy(
-      result.predictor_scale.begin(), result.predictor_scale.end(), REAL(scale)
-    );
-    SEXP response_mean = PROTECT(Rf_allocMatrix(REALSXP, 1, classes));
-    std::copy(
-      result.response_mean.begin(), result.response_mean.end(),
-      REAL(response_mean)
-    );
-    SEXP counts = PROTECT(Rf_allocMatrix(REALSXP, classes, 1));
-    std::copy(
-      result.class_counts.begin(), result.class_counts.end(), REAL(counts)
-    );
-    SEXP output = PROTECT(Rf_allocVector(VECSXP, 5));
-    SET_VECTOR_ELT(output, 0, crossprod);
-    SET_VECTOR_ELT(output, 1, center);
-    SET_VECTOR_ELT(output, 2, scale);
-    SET_VECTOR_ELT(output, 3, response_mean);
-    SET_VECTOR_ELT(output, 4, counts);
-    SEXP names = PROTECT(Rf_allocVector(STRSXP, 5));
-    SET_STRING_ELT(names, 0, Rf_mkChar("S"));
-    SET_STRING_ELT(names, 1, Rf_mkChar("mX"));
-    SET_STRING_ELT(names, 2, Rf_mkChar("vX"));
-    SET_STRING_ELT(names, 3, Rf_mkChar("mY"));
-    SET_STRING_ELT(names, 4, Rf_mkChar("counts"));
-    Rf_setAttrib(output, R_NamesSymbol, names);
-    UNPROTECT(7);
-    return output;
-  } catch (const std::exception& exception) {
-    Rf_error("%s", exception.what());
-  } catch (...) {
-    Rf_error("Unknown error in label-aware cross-product");
-  }
-  return R_NilValue;
-}
 
 extern "C" SEXP _fastPLS_opls_filter_core_cpp(
     SEXP predictors, SEXP responses, SEXP north, SEXP scaling) {
@@ -3421,16 +3315,6 @@ SEXP fit_float32_matrix_core(
 
 }  // namespace
 
-extern "C" SEXP _fastPLS_pls_float32_matrix_core_cpp(
-    SEXP predictors, SEXP responses, SEXP components, SEXP scaling,
-    SEXP fit, SEXP store_scores, SEXP method, SEXP oversample, SEXP power,
-    SEXP seed) {
-  return fit_float32_matrix_core(
-    predictors, responses, components, scaling, fit, store_scores, method,
-    oversample, power, seed, 0, "float32_dense_crosscov"
-  );
-}
-
 extern "C" SEXP _fastPLS_pls_float32_matrix_backend_core_cpp(
     SEXP predictors, SEXP responses, SEXP components, SEXP scaling,
     SEXP fit, SEXP store_scores, SEXP method, SEXP oversample, SEXP power,
@@ -3845,17 +3729,6 @@ SEXP fit_float32_labels_core(
 }
 
 }  // namespace
-
-extern "C" SEXP _fastPLS_pls_float32_labels_core_cpp(
-    SEXP predictors, SEXP labels, SEXP class_count, SEXP components,
-    SEXP scaling, SEXP fit, SEXP store_scores, SEXP method, SEXP oversample,
-    SEXP power, SEXP seed) {
-  return fit_float32_labels_core(
-    predictors, labels, class_count, components, scaling, fit, store_scores,
-    method, oversample, power, seed, 0, "float32_label_class_sums",
-    "float32_label_class_sums_blocked"
-  );
-}
 
 extern "C" SEXP _fastPLS_pls_float32_labels_backend_core_cpp(
     SEXP predictors, SEXP labels, SEXP class_count, SEXP components,

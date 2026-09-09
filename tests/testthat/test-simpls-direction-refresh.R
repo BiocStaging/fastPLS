@@ -289,13 +289,6 @@ test_that("CUDA rSVD repeats exactly when the seed is fixed", {
   expect_equal(first$Yfit, second$Yfit, tolerance = 0)
 })
 
-test_that("SIMPLS norm guard rejects unusable directions", {
-  expect_true(fastPLS:::.is_usable_simpls_norm(1))
-  expect_false(fastPLS:::.is_usable_simpls_norm(0))
-  expect_false(fastPLS:::.is_usable_simpls_norm(NA_real_))
-  expect_false(fastPLS:::.is_usable_simpls_norm(Inf))
-})
-
 test_that("massive CUDA diagnostics report the executed candidate block", {
   direction <- fastPLS:::.simpls_direction_diagnostics(
     randomized = TRUE,

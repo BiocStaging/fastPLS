@@ -21,33 +21,6 @@ test_that("grouped-label BLAS products preserve SIMPLS predictions", {
     expect_identical(grouped_prediction, shuffled_prediction)
 })
 
-test_that("label-aware cross-products match dense dummy responses", {
-    set.seed(73)
-    X <- matrix(rnorm(37L * 9L), nrow = 37L)
-    labels <- sample.int(4L, nrow(X), replace = TRUE)
-    response <- diag(4L)[labels, , drop = FALSE]
-
-    for (scaling in 1:3) {
-        actual <- fastPLS:::label_crossprod_scaled_cpp(
-            X, labels, 4L, scaling
-        )
-        center <- if (scaling < 3L) colMeans(X) else rep(0, ncol(X))
-        scale <- if (scaling == 2L) apply(X, 2L, stats::sd) else rep(1, ncol(X))
-        standardized <- sweep(sweep(X, 2L, center, "-"), 2L, scale, "/")
-        response_mean <- colMeans(response)
-        expected <- crossprod(
-            standardized,
-            sweep(response, 2L, response_mean, "-")
-        )
-
-        expect_equal(actual$S, expected, tolerance = 1e-13)
-        expect_equal(drop(actual$mX), center, tolerance = 1e-13)
-        expect_equal(drop(actual$vX), scale, tolerance = 1e-13)
-        expect_equal(drop(actual$mY), response_mean, tolerance = 1e-13)
-        expect_equal(drop(actual$counts), as.numeric(tabulate(labels, 4L)))
-    }
-})
-
 test_that("grouped-label float32 products preserve class predictions", {
     skip_if_not_installed("float")
     set.seed(72)

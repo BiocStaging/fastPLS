@@ -48,7 +48,7 @@ test_that("optimized prediction core preserves regression outputs", {
 
   model <- unclass(fit)
   Xtest <- X[idx, , drop = FALSE]
-  optimized <- fastPLS:::pls_predict(
+  optimized <- fastPLS:::pls_labels_core_predict_cpp(
     get(".fastpls_restore_internal_output_fields", envir = asNamespace("fastPLS"))(model),
     Xtest,
     TRUE

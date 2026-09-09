@@ -40,7 +40,7 @@ biocViews: Software, DimensionReduction, Classification, Regression,
 SystemRequirements: Optional CUDA Toolkit and NVIDIA GPU driver for CUDA
     acceleration; optional Apple Metal framework on macOS for Metal
     acceleration. CPU-only builds do not require GPU software.
-Depends: R (>= 4.6.0), Matrix
+Depends: R (>= 4.6.0)
 Imports: Biobase, methods, float
 Suggests: BiocStyle, knitr, RhpcBLASctl, rmarkdown, testthat (>= 3.0.0)
 VignetteBuilder: knitr

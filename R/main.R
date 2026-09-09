@@ -51,17 +51,6 @@
     list(ncomp = ncomp, max_rank = max_plssvd_rank, capped = isTRUE(over))
 }
 
-.restore_env_scalar <- function(name, value) {
-    stopifnot(length(name) == 1L, nzchar(name))
-    if (length(value) != 1L || is.na(value)) {
-        Sys.unsetenv(name)
-    } else {
-        val <- list(as.character(value))
-        names(val) <- name
-        do.call(Sys.setenv, val)
-    }
-}
-
 .opls_require_predictive_rank <- function(ncomp, X, removed, centered) {
     available <- min(nrow(X) - as.integer(centered), ncol(X)) - removed
     requested <- max(as.integer(ncomp))
@@ -74,190 +63,6 @@
             call. = FALSE)
     }
     invisible(available)
-}
-
-.backend_control_env_defaults <- c(
-    FASTPLS_STORE_B = "auto",
-    FASTPLS_STORE_B_MAX_MB = "256",
-    FASTPLS_PREDICT_LATENT_MIN_B_MB = "256",
-    FASTPLS_COMPACT_CLASS_BLOCK_SIZE = "4096",
-    FASTPLS_LABEL_AWARE_Y_THRESHOLD_MB = "512",
-    FASTPLS_LABEL_AWARE_BLOCK_SIZE = "8192",
-    FASTPLS_PLSSVD_SMALL_EXACT_MAX_RANK = "32",
-    FASTPLS_PLSSVD_OPTIMIZED = "1",
-    FASTPLS_LEADING_LEFT_MAX_ITERS = NA_character_,
-    FASTPLS_FAST_CENTER_T = "0",
-    FASTPLS_FAST_REORTH_V = "0",
-    FASTPLS_FAST_DEFLCACHE = "1",
-    FASTPLS_FAST_OPTIMIZED = "1",
-    FASTPLS_INCREMENTAL_COEFFICIENTS = "1",
-    FASTPLS_FAST_CROSSPROD_MIN_NCOMP = "20",
-    FASTPLS_FAST_CROSSPROD_MAX_P = "512",
-    FASTPLS_FAST_CROSSPROD_MIN_N_TO_P_RATIO = "8",
-    FASTPLS_RETURN_TTRAIN = "0",
-    FASTPLS_GPU_DEVICE_STATE = "0",
-    FASTPLS_GPU_QR = "1",
-    FASTPLS_GPU_EIG = "1",
-    FASTPLS_GPU_FINALIZE_THRESHOLD = "32",
-    FASTPLS_GPU_SIMPLS_XPROD = "0",
-    FASTPLS_CUDA_WORKSPACE_STREAMS = "0",
-    FASTPLS_FAST_GPU_MIN_M = "512",
-    FASTPLS_FAST_GPU_MIN_N = "16",
-    FASTPLS_FAST_GPU_MIN_WORK = "200000",
-    FASTPLS_CUDA_RSVD_RESIDENT_PUBLIC = "0",
-    FASTPLS_CUDA_RSVD_RESIDENT_MIN_L = "48",
-    FASTPLS_CUDA_RSVD_RESIDENT_MIN_WORK = "1000000",
-    FASTPLS_METAL_MIN_FLOPS = "200000000",
-    FASTPLS_METAL_EXACT_MAX_RANK = "256",
-    FASTPLS_METAL_EXPERIMENTAL_ITERATIVE = "false",
-    FASTPLS_METAL_RESIDENT_SIMPLS = "true",
-    FASTPLS_RETURN_LDA_SCORES = "false",
-    FASTPLS_FUSED_CUDA_LDA = "0"
-)
-
-.backend_control_env_groups <- c(
-    FASTPLS_STORE_B = "storage",
-    FASTPLS_STORE_B_MAX_MB = "storage",
-    FASTPLS_PREDICT_LATENT_MIN_B_MB = "prediction",
-    FASTPLS_COMPACT_CLASS_BLOCK_SIZE = "prediction",
-    FASTPLS_LABEL_AWARE_Y_THRESHOLD_MB = "response",
-    FASTPLS_LABEL_AWARE_BLOCK_SIZE = "response",
-    FASTPLS_PLSSVD_SMALL_EXACT_MAX_RANK = "plssvd",
-    FASTPLS_PLSSVD_OPTIMIZED = "plssvd",
-    FASTPLS_LEADING_LEFT_MAX_ITERS = "plssvd",
-    FASTPLS_FAST_CENTER_T = "simpls",
-    FASTPLS_FAST_REORTH_V = "simpls",
-    FASTPLS_FAST_DEFLCACHE = "simpls",
-    FASTPLS_FAST_OPTIMIZED = "simpls",
-    FASTPLS_INCREMENTAL_COEFFICIENTS = "simpls",
-    FASTPLS_FAST_CROSSPROD_MIN_NCOMP = "simpls",
-    FASTPLS_FAST_CROSSPROD_MAX_P = "simpls",
-    FASTPLS_FAST_CROSSPROD_MIN_N_TO_P_RATIO = "simpls",
-    FASTPLS_RETURN_TTRAIN = "simpls",
-    FASTPLS_GPU_DEVICE_STATE = "gpu",
-    FASTPLS_GPU_QR = "gpu",
-    FASTPLS_GPU_EIG = "gpu",
-    FASTPLS_GPU_FINALIZE_THRESHOLD = "gpu",
-    FASTPLS_GPU_SIMPLS_XPROD = "gpu",
-    FASTPLS_CUDA_WORKSPACE_STREAMS = "cuda",
-    FASTPLS_FAST_GPU_MIN_M = "cuda",
-    FASTPLS_FAST_GPU_MIN_N = "cuda",
-    FASTPLS_FAST_GPU_MIN_WORK = "cuda",
-    FASTPLS_CUDA_RSVD_RESIDENT_PUBLIC = "cuda",
-    FASTPLS_CUDA_RSVD_RESIDENT_MIN_L = "cuda",
-    FASTPLS_CUDA_RSVD_RESIDENT_MIN_WORK = "cuda",
-    FASTPLS_METAL_MIN_FLOPS = "metal",
-    FASTPLS_METAL_EXACT_MAX_RANK = "metal",
-    FASTPLS_METAL_EXPERIMENTAL_ITERATIVE = "metal",
-    FASTPLS_METAL_RESIDENT_SIMPLS = "metal",
-    FASTPLS_RETURN_LDA_SCORES = "classifier",
-    FASTPLS_FUSED_CUDA_LDA = "classifier"
-)
-
-.backend_control_package_version <- function() {
-    desc <- tryCatch(
-        utils::packageDescription("fastPLS", fields = "Version"),
-        error = function(e) NA_character_
-    )
-    if (length(desc) == 1L && !is.na(desc)) {
-        as.character(desc)
-    } else {
-        NA_character_
-    }
-}
-
-.backend_control_snapshot <- function(context = NULL, overrides = NULL) {
-    names_env <- names(.backend_control_env_defaults)
-    raw <- Sys.getenv(names_env, unset = NA_character_)
-    defaults <- .backend_control_env_defaults
-    values <- raw
-    missing <- is.na(values)
-    values[missing] <- defaults[missing]
-    groups <- unname(.backend_control_env_groups[names_env])
-    groups[is.na(groups)] <- "other"
-    env <- data.frame(
-        name = names_env,
-        group = groups,
-        value = unname(values),
-        default = unname(defaults),
-        overridden = !is.na(raw),
-        stringsAsFactors = FALSE
-    )
-    out <- list(
-        context = context %||% NA_character_,
-        timestamp = format(Sys.time(), "%Y-%m-%d %H:%M:%S %Z"),
-        fastPLS_version = .backend_control_package_version(),
-        env = env,
-        overrides = overrides %||% list()
-    )
-    class(out) <- "fastPLSBackendControl"
-    out
-}
-
-.with_backend_env <- function(expr, values) {
-    if (is.null(values) || length(values) == 0L) {
-        return(force(expr))
-    }
-    if (is.null(names(values)) || any(!nzchar(names(values)))) {
-        stop("backend-control environment values must be named", call. = FALSE)
-    }
-    values <- as.list(values)
-    old <- Sys.getenv(names(values), unset = NA_character_)
-    on.exit(
-        {
-            for (nm in names(old)) {
-                .restore_env_scalar(nm, old[[nm]])
-            }
-        },
-        add = TRUE
-    )
-    for (nm in names(values)) {
-        .restore_env_scalar(nm, values[[nm]])
-    }
-    force(expr)
-}
-
-.attach_backend_control <- function(model, backend_control = NULL) {
-    model
-}
-
-.with_fastpls_fast_options <- function(expr, return_ttrain = FALSE) {
-    if (identical(Sys.getenv("FASTPLS_ABLATION_MODE", "0"), "1")) {
-        return(force(expr))
-    }
-    .with_backend_env(
-        expr,
-        c(
-            FASTPLS_FAST_CENTER_T = "0",
-            FASTPLS_FAST_REORTH_V = "0",
-            FASTPLS_FAST_DEFLCACHE = "1",
-            FASTPLS_RETURN_TTRAIN = if (isTRUE(return_ttrain)) "1" else "0"
-        )
-    )
-}
-
-.with_gpu_native_options <- function(
-    expr,
-    gpu_device_state = FALSE,
-    gpu_qr = TRUE,
-    gpu_eig = TRUE,
-    gpu_finalize_threshold = 32L
-) {
-    .with_backend_env(
-        expr,
-        c(
-        FASTPLS_GPU_DEVICE_STATE = if (isTRUE(gpu_device_state)) "1" else "0",
-            FASTPLS_GPU_QR = if (isTRUE(gpu_qr)) "1" else "0",
-            FASTPLS_GPU_EIG = if (isTRUE(gpu_eig)) "1" else "0",
-            FASTPLS_GPU_FINALIZE_THRESHOLD = as.character(as.integer(
-                gpu_finalize_threshold
-            ))
-        )
-    )
-}
-
-.with_simpls_gpu_xprod <- function(expr) {
-    .with_backend_env(expr, c(FASTPLS_GPU_SIMPLS_XPROD = "1"))
 }
 
 .enable_flash_prediction <- function(
@@ -655,13 +460,11 @@ out$Ypred_index <- matrix(top_index[, 1L, ], nrow = dims[1L], ncol = dims[3L])
     Xtest,
     top = 1L,
     proj = FALSE,
-    backend = c("cpp", "cuda")
+    backend = "cpp"
 ) {
-    backend <- match.arg(backend)
-    if (identical(backend, "cuda") && !isTRUE(has_cuda())) {
+    if (!identical(backend, "cpp")) {
         stop(
-            "CUDA class prediction requires an available CUDA backend. ",
-            "No CPU fallback is performed.",
+            "Nonresident top-k prediction supports backend = 'cpp' only.",
             call. = FALSE
         )
     }
@@ -669,22 +472,13 @@ out$Ypred_index <- matrix(top_index[, 1L, ], nrow = dims[1L], ncol = dims[3L])
     if (is.null(block_size) || !length(block_size) || is.na(block_size)) {
         block_size <- 4096L
     }
-    out <- if (identical(backend, "cuda")) {
-        pls_class_predict_topk_cuda(
-            model,
-            as.matrix(Xtest),
-            as.integer(top),
-            isTRUE(proj)
-        )
-    } else {
-        pls_class_predict_topk_core_cpp(
-            model,
-            as.matrix(Xtest),
-            as.integer(top),
-            isTRUE(proj),
-            as.integer(block_size)
-        )
-    }
+    out <- pls_class_predict_topk_core_cpp(
+        model,
+        as.matrix(Xtest),
+        as.integer(top),
+        isTRUE(proj),
+        as.integer(block_size)
+    )
     res <- .class_topk_to_labels(
         out$top_index,
         out$top_score,
@@ -712,34 +506,6 @@ out$Ypred_index <- matrix(top_index[, 1L, ], nrow = dims[1L], ncol = dims[3L])
     value
 }
 
-.dense_indicator_exceeds_cuda_guard <- function(n, q) {
-    dense_y_mb <- as.numeric(n) * as.numeric(q) * 8 / 1024^2
-    threshold <- .fastpls_quiet(
-        as.numeric(Sys.getenv("FASTPLS_LABEL_AWARE_Y_THRESHOLD_MB", "512"))[1L]
-    )
-    if (!is.finite(threshold) || threshold < 0) {
-        threshold <- 512
-    }
-    isTRUE(dense_y_mb >= threshold)
-}
-
-.stop_unsafe_cuda_simpls_response <- function(n, q) {
-    dense_y_mb <- as.numeric(n) * as.numeric(q) * 8 / 1024^2
-    stop(
-        sprintf(
-            "%s%s%s%s",
-            sprintf(
-        "CUDA SIMPLS would require an approximately %.1f MB dense indicator ",
-                dense_y_mb
-            ),
-        "response. fastPLS does not replace a requested SIMPLS estimator with ",
-            "PLS-SVD. Request method = 'plssvd' explicitly or use a smaller ",
-            "response representation."
-        ),
-        call. = FALSE
-    )
-}
-
 .rowsum_compact_codes <- function(x, codes, n_groups) {
     sums <- rowsum(x, group = as.integer(codes), reorder = FALSE)
     out <- matrix(0, nrow = n_groups, ncol = ncol(x))
@@ -747,208 +513,6 @@ out$Ypred_index <- matrix(top_index[, 1L, ], nrow = dims[1L], ncol = dims[3L])
     valid <- !is.na(positions) & positions >= 1L & positions <= n_groups
     out[positions[valid], ] <- sums[valid, , drop = FALSE]
     out
-}
-
-.stream_predictor_stats <- function(X, scaling, block_size) {
-    n <- nrow(X)
-    p <- ncol(X)
-    sums <- sums_sq <- numeric(p)
-    for (start in seq(1L, n, by = block_size)) {
-        rows <- start:min(n, start + block_size - 1L)
-        block <- X[rows, , drop = FALSE]
-        sums <- sums + colSums(block)
-        if (scaling == 2L) sums_sq <- sums_sq + colSums(block * block)
-    }
-    mean <- if (scaling < 3L) sums / n else rep(0, p)
-    scale <- rep(1, p)
-    if (scaling == 2L) {
-        scale <- sqrt(pmax(sums_sq - n * mean * mean, 0) / max(1L, n - 1L))
-        scale[!is.finite(scale) | scale == 0] <- 1
-    }
-    list(mean = mean, scale = scale)
-}
-
-.stream_scaled_block <- function(X, rows, scaling, stats) {
-    block <- X[rows, , drop = FALSE]
-    if (scaling < 3L) {
-        block <- sweep(block, 2L, stats$mean, "-")
-    }
-    if (scaling == 2L) {
-        block <- sweep(block, 2L, stats$scale, "/")
-    }
-    block
-}
-
-.stream_class_crossproduct <- function(
-    X,
-    labels,
-    classes,
-    scaling,
-    stats,
-    block_size
-) {
-    result <- matrix(0, nrow = ncol(X), ncol = classes)
-    for (start in seq(1L, nrow(X), by = block_size)) {
-        rows <- start:min(nrow(X), start + block_size - 1L)
-        block <- .stream_scaled_block(X, rows, scaling, stats)
-        result <- result +
-            t(.rowsum_compact_codes(
-                block,
-                labels[rows],
-                classes
-            ))
-    }
-    result
-}
-
-.stream_score_gram <- function(X, R, scaling, stats, block_size) {
-    gram <- matrix(0, nrow = ncol(R), ncol = ncol(R))
-    for (start in seq(1L, nrow(X), by = block_size)) {
-        rows <- start:min(nrow(X), start + block_size - 1L)
-        scores <- .stream_scaled_block(X, rows, scaling, stats) %*% R
-        gram <- gram + crossprod(scores)
-    }
-    gram
-}
-
-.plssvd_stream_latent_path <- function(gram, singular, Q, ncomp) {
-    rank <- nrow(gram)
-    classes <- nrow(Q)
-    slices <- length(ncomp)
-    coefficients <- array(0, c(rank, rank, slices))
-    weights <- array(0, c(rank, classes, slices))
-    for (index in seq_along(ncomp)) {
-        k <- ncomp[[index]]
-        gram_k <- gram[seq_len(k), seq_len(k), drop = FALSE]
-        diagonal <- diag(singular[seq_len(k)], nrow = k)
-        ridge <- 1e-10 * mean(diag(gram_k))
-        if (!is.finite(ridge) || ridge <= 0) {
-            ridge <- 1e-10
-        }
-        value <- tryCatch(
-            solve(gram_k + diag(ridge, k), diagonal),
-            error = function(e) qr.solve(gram_k + diag(ridge, k), diagonal)
-        )
-        coefficients[seq_len(k), seq_len(k), index] <- value
-        weights[seq_len(k), , index] <-
-            value %*% t(Q[, seq_len(k), drop = FALSE])
-    }
-    list(coefficients = coefficients, weights = weights)
-}
-
-.plssvd_stream_model <- function(
-    R,
-    Q,
-    path,
-    stats,
-    response_mean,
-    ncomp,
-    levels,
-    backend,
-    block_size
-) {
-    model <- list(
-        C_latent = path$coefficients,
-        W_latent = path$weights,
-        Q = Q,
-        Ttrain = matrix(numeric(0), 0L, ncol(R)),
-        R = R,
-        mX = matrix(stats$mean, nrow = 1L),
-        vX = matrix(stats$scale, nrow = 1L),
-        mY = matrix(response_mean, nrow = 1L),
-        p = nrow(R),
-        m = nrow(Q),
-        ncomp = ncomp,
-        Yfit = array(numeric(0), c(0L, 0L, 0L)),
-        R2Y = rep(NA_real_, length(ncomp)),
-        pls_method = "plssvd",
-        classification = TRUE,
-        lev = levels,
-        predict_latent_ok = TRUE,
-        xprod_default = TRUE,
-        xprod_mode = "label_aware_stream",
-        B_stored = FALSE,
-        compact_prediction = TRUE,
-        flash_svd = TRUE,
-        flash_svd_backend = backend,
-        predict_backend = if (backend == "cuda") "cuda_flash" else "cpu_flash",
-        flash_block_size = block_size
-    )
-    class(model) <- "fastPLS"
-    .attach_backend_control(model)
-}
-
-.plssvd_label_aware_stream_model <- function(Xtrain, y_train, ncomp,
-    scaling = 1L,
-    backend = c("cpp", "cuda"), block_size = NULL) {
-    backend <- match.arg(backend)
-    Xtrain <- as.matrix(Xtrain)
-    y_train <- factor(y_train)
-    n <- nrow(Xtrain)
-    p <- ncol(Xtrain)
-    classes <- nlevels(y_train)
-    if (n < 1L || p < 1L || classes < 2L) {
-        stop("label-aware PLS-SVD requires X and at least two classes",
-            call. = FALSE)
-    }
-    ncomp <- .cap_plssvd_ncomp(ncomp, n, p, classes, factor_response = TRUE,
-        warn = TRUE)$ncomp
-    if (is.null(block_size)) {
-        block_size <- .fastpls_block_size("fastPLS.label_aware_block_size",
-            "FASTPLS_LABEL_AWARE_BLOCK_SIZE",
-            8192L)
-    }
-    scaling <- as.integer(scaling)
-    labels <- as.integer(y_train)
-    stats <- .stream_predictor_stats(Xtrain, scaling, block_size)
-    response_mean <- tabulate(labels, nbins = classes) / n
-    class_product <- .stream_class_crossproduct(Xtrain, labels, classes,
-        scaling,
-        stats, block_size)
-    S <- class_product - tcrossprod(rowSums(class_product), response_mean)
-    decomposition <- svd(S, nu = max(ncomp), nv = max(ncomp))
-    R <- decomposition$u[, seq_len(max(ncomp)), drop = FALSE]
-    Q <- decomposition$v[, seq_len(max(ncomp)), drop = FALSE]
-    gram <- .stream_score_gram(Xtrain, R, scaling, stats, block_size)
-    path <- .plssvd_stream_latent_path(gram, decomposition$d, Q, ncomp)
-    .plssvd_stream_model(R, Q, path, stats, response_mean, ncomp,
-        levels(y_train),
-        backend, block_size)
-}
-
-.plssvd_label_aware_scores_fast_model <- function(Xtrain, y_train, ncomp,
-    scaling = 1L) {
-    Xtrain <- as.matrix(Xtrain)
-    y_train <- factor(y_train)
-    lev <- levels(y_train)
-    y_code <- as.integer(y_train)
-    n <- nrow(Xtrain)
-    p <- ncol(Xtrain)
-    m <- length(lev)
-    cap <- .cap_plssvd_ncomp(ncomp, n, p, m, factor_response = TRUE,
-        warn = TRUE)
-    ncomp <- as.integer(cap$ncomp)
-    max_rank <- max(ncomp)
-    stats <- label_crossprod_scaled_cpp(Xtrain, y_code, m, as.integer(scaling))
-    sv <- svd(as.matrix(stats$S), nu = max_rank, nv = 0)
-    R <- sv$u[, seq_len(max_rank), drop = FALSE]
-    model <- list(P = matrix(numeric(0), 0L, 0L), Q = matrix(numeric(0), m,
-        max_rank),
-    Ttrain = matrix(numeric(0), 0L, 0L), R = R,
-    mX = matrix(as.numeric(stats$mX),
-        nrow = 1L), vX = matrix(as.numeric(stats$vX), nrow = 1L),
-    mY = matrix(as.numeric(stats$mY),
-        nrow = 1L), p = p, m = m, ncomp = ncomp, Yfit = array(numeric(0),
-        dim = c(0L,
-            0L, 0L)), R2Y = rep(NA, length(ncomp)), pls_method = "plssvd",
-    classification = TRUE,
-    lev = lev, predict_latent_ok = TRUE, xprod_default = TRUE,
-    xprod_mode = "label_aware_class_sums",
-    B_stored = FALSE, compact_prediction = TRUE, flash_svd = TRUE,
-    flash_svd_backend = "cuda",
-    predict_backend = "cuda_flash")
-    class(model) <- "fastPLS"
-    .attach_backend_control(model)
 }
 
 .fastpls_scaled_by_model <- function(object, X) {
@@ -1208,83 +772,8 @@ out$Ypred_index <- matrix(top_index[, 1L, ], nrow = dims[1L], ncol = dims[3L])
     models
 }
 
-.fastpls_lda_predict_cuda <- function(Ttest, lda) {
-    if (
-        !.cuda_matmul_available() ||
-            !exists(
-                "lda_predict_cuda",
-                envir = asNamespace("fastPLS"),
-                inherits = FALSE
-            )
-    ) {
-        stop(
-            "CUDA LDA prediction is unavailable. ",
-            "No CPU fallback is performed.",
-            call. = FALSE
-        )
-    }
-    get("lda_predict_cuda", envir = asNamespace("fastPLS"), inherits = FALSE)(
-        as.matrix(Ttest),
-        lda
-    )
-}
-
-.fastpls_lda_project_predict_cuda <- function(
-    Xtest,
-    R,
-    offset,
-    lda,
-    return_scores = FALSE
-) {
-    if (
-        !.cuda_matmul_available() ||
-            !exists(
-                "lda_project_predict_cuda",
-                envir = asNamespace("fastPLS"),
-                inherits = FALSE
-            )
-    ) {
-        stop(
-            "CUDA projected LDA prediction is unavailable. ",
-            "No CPU fallback is performed.",
-            call. = FALSE
-        )
-    }
-    get(
-        "lda_project_predict_cuda",
-        envir = asNamespace("fastPLS"),
-        inherits = FALSE
-    )(
-        as.matrix(Xtest),
-        as.matrix(R),
-        as.numeric(offset),
-        lda,
-        isTRUE(return_scores)
-    )
-}
-
 .fastpls_lda_project_predict_cpp <- function(Xtest, R, offset, lda) {
-    if (
-        !exists(
-            "lda_project_predict_labels_cpp",
-            envir = asNamespace("fastPLS"),
-            inherits = FALSE
-        )
-    ) {
-        Ttest <- sweep(
-            as.matrix(Xtest) %*% as.matrix(R),
-            2L,
-            as.numeric(offset),
-            "-",
-            check.margin = FALSE
-        )
-        return(lda_predict_labels_cpp(Ttest, lda))
-    }
-    get(
-        "lda_project_predict_labels_cpp",
-        envir = asNamespace("fastPLS"),
-        inherits = FALSE
-    )(
+    lda_project_predict_labels_cpp(
         as.matrix(Xtest),
         as.matrix(R),
         as.numeric(offset),
@@ -1293,13 +782,6 @@ out$Ypred_index <- matrix(top_index[, 1L, ], nrow = dims[1L], ncol = dims[3L])
 }
 
 .resolve_lda_backend <- function(model, classifier) {
-    if (classifier == "lda_cuda" && !.cuda_matmul_available()) {
-        stop(
-            "CUDA LDA was requested, but its native backend is unavailable. ",
-            "No CPU fallback is performed.",
-            call. = FALSE
-        )
-    }
     if (classifier == "lda_metal" && !isTRUE(has_metal())) {
         .fastpls_require_backend_available("metal", "LDA fitting")
     }
@@ -1383,29 +865,7 @@ out$Ypred_index <- matrix(top_index[, 1L, ], nrow = dims[1L], ncol = dims[3L])
 }
 
 .lda_projection_trainer <- function(classifier) {
-    namespace <- asNamespace("fastPLS")
-    if (classifier == "lda_cuda") {
-        available <- .cuda_matmul_available() &&
-            exists("lda_project_train_prefix_cuda", namespace, inherits = FALSE)
-        if (!available) {
-            stop(
-                "CUDA projected LDA fitting is unavailable. ",
-                "No CPU fallback is performed.",
-                call. = FALSE
-            )
-        }
-        return(list(
-            fun = get("lda_project_train_prefix_cuda", namespace),
-            backend = "cuda_project"
-        ))
-    }
-    if (exists("lda_project_train_prefix_cpp", namespace, inherits = FALSE)) {
-        return(list(
-            fun = get("lda_project_train_prefix_cpp", namespace),
-            backend = "cpp_project"
-        ))
-    }
-    NULL
+    list(fun = lda_project_train_prefix_cpp, backend = "cpp_project")
 }
 
 .try_projected_lda <- function(model, Xtrain, labels, ridge, classifier) {
@@ -1448,26 +908,13 @@ if (is.null(trainer) || is.null(model$R_predict) || is.null(model$R_offset)) {
         )
         model$Ttrain <- scores
     }
-    namespace <- asNamespace("fastPLS")
-    if (classifier == "lda_cuda" &&
-        !exists("lda_train_prefix_cuda", namespace, inherits = FALSE)) {
-        stop(
-            "CUDA LDA fitting is unavailable. No CPU fallback is performed.",
-            call. = FALSE
-        )
-    }
-    train_fun <- if (classifier == "lda_cuda") {
-        get("lda_train_prefix_cuda", namespace)
-    } else {
-        lda_train_prefix_cpp
-    }
     .train_lda_from_scores(
         model,
         as.matrix(scores),
         labels,
         ridge,
         classifier,
-        train_fun = train_fun
+        train_fun = lda_train_prefix_cpp
     )
 }
 
@@ -2054,7 +1501,14 @@ print.fastPLS <- function(x, ...) {
     effective <- NA_integer_
     if (!is.null(latent$R) && length(dim(latent$R)) == 2L) {
         norms <- tryCatch(
-            sqrt(colSums(latent$R * latent$R)),
+            {
+                rotations <- if (.is_float32(latent$R)) {
+                    .float32_to_numeric_matrix(latent$R)
+                } else {
+                    latent$R
+                }
+                sqrt(colSums(rotations * rotations))
+            },
             error = function(e) numeric()
         )
         effective <- sum(is.finite(norms) & norms > sqrt(.Machine$double.eps))
@@ -2438,12 +1892,17 @@ print.fastPLS <- function(x, ...) {
     .float32_standardize(X, object$mX, object$vX)
 }
 
-.float32_multiply <- function(left, right, backend = "cpu") {
+.float32_multiply <- function(left, right, backend = "cpu",
+    transpose_left = FALSE, transpose_right = FALSE) {
     if (identical(backend, "metal")) {
-        value <- metal_float32_matrix_multiply_cpp(left, right)
+        value <- metal_float32_matrix_multiply_cpp(
+            left, right, transpose_left, transpose_right
+        )
         return(.float32_from_bits(value$C))
     }
-    value <- cpu_float32_matrix_multiply_cpp(left, right)
+    value <- cpu_float32_matrix_multiply_cpp(
+        left, right, transpose_left, transpose_right
+    )
     .float32_from_bits(value$C)
 }
 
@@ -2572,8 +2031,9 @@ print.fastPLS <- function(x, ...) {
                 columns <- seq.int(previous + 1L, k)
                 response <- response + .float32_multiply(
                     all_scores[, columns, drop = FALSE],
-                    t(object$Q[, columns, drop = FALSE]),
-                    backend
+                    object$Q[, columns, drop = FALSE],
+                    backend,
+                    transpose_right = TRUE
                 )
                 previous <- k
                 .float32_sweep_cols(response, object$mY, "+")
@@ -2615,22 +2075,6 @@ print.fastPLS <- function(x, ...) {
 }
 
 .float32_lda_predict_fun <- function(object) {
-    cuda_model <- identical(object$lda$train_backend, "float32_cuda_lda")
-    cuda <- cuda_model && isTRUE(has_cuda()) && exists(
-            "lda_predict_float32_cuda",
-            envir = asNamespace("fastPLS"),
-            inherits = FALSE
-        )
-    if (cuda_model && !cuda) {
-        stop(
-            "This model requires float32 CUDA LDA prediction, but CUDA is ",
-            "unavailable. No CPU fallback is performed.",
-            call. = FALSE
-        )
-    }
-    if (cuda) {
-        return(lda_predict_float32_cuda)
-    }
     if (object$lda$train_backend == "float32_portable_lda") {
         return(.float32_portable_lda_predict)
     }
@@ -2739,8 +2183,9 @@ print.fastPLS <- function(x, ...) {
     } else {
         .float32_multiply(
             scores,
-            t(object$Q[, seq_len(k), drop = FALSE]),
-            backend
+            object$Q[, seq_len(k), drop = FALSE],
+            backend,
+            transpose_right = TRUE
         )
     }
     list(
@@ -2986,160 +2431,6 @@ print.fastPLS <- function(x, ...) {
     (extreme + 1) / (completed + 1)
 }
 
-.cuda_fused_lda_enabled <- function(Xtest, fit, proj, Ytrain) {
-    enabled <- isTRUE(getOption("fastPLS.fused_cuda_lda", FALSE)) ||
-        tolower(Sys.getenv("FASTPLS_FUSED_CUDA_LDA", "0")) %in%
-            c("1", "true", "yes", "y")
-    !is.null(Xtest) &&
-        enabled &&
-        !fit &&
-        !proj &&
-        is.factor(Ytrain) &&
-        has_cuda() &&
-        exists(
-            "pls_lda_gpu_native",
-            asNamespace("fastPLS"),
-            inherits = FALSE
-        )
-}
-
-.cuda_fused_lda_finalize <- function(
-    model,
-    method_name,
-    levels,
-    use_xprod,
-    Ytest
-) {
-    model$classification <- TRUE
-    model$lev <- levels
-    model$pls_method <- method_name
-    model$predict_latent_ok <- TRUE
-    model$xprod_default <- isTRUE(use_xprod)
-    model <- .enable_flash_prediction(model, "cuda")
-    model$predict_backend <- "cuda_fused_lda"
-    model$flash_svd_mode <- "fused_pls_lda"
-    codes <- model$pred_codes
-    model$pred_codes <- NULL
-    if (!is.null(codes)) {
-        codes <- as.matrix(codes)
-        predicted <- .fastpls_prediction_frame(nrow(codes), model$ncomp)
-        for (index in seq_len(ncol(codes))) {
-            predicted[[index]] <- factor(
-                levels[as.integer(codes[, index])],
-                levels = levels
-            )
-        }
-        model$Ypred <- predicted
-        if (!is.null(Ytest)) {
-            model$accuracy <- .fastpls_accuracy_from_class_labels(
-                levels,
-                Ytest,
-                predicted
-            )
-            model$Q2Y <- rep(NA_real_, length(model$ncomp))
-        }
-    }
-    class(model) <- "fastPLS"
-    .attach_backend_control(model)
-}
-
-.cuda_fused_lda_call <- function(
-    Xtrain,
-    Ytrain,
-    labels,
-    Xtest,
-    ncomp,
-    levels,
-    method,
-    scaling,
-    xprod,
-    controls
-) {
-    pls_lda_gpu_native(
-        as.matrix(Xtrain),
-        as.matrix(Ytrain),
-        as.integer(labels),
-        as.matrix(Xtest),
-        as.integer(ncomp),
-        length(levels),
-        as.integer(method),
-        as.integer(scaling),
-        isTRUE(xprod),
-        isTRUE(controls$fit),
-        as.integer(controls$oversample),
-        as.integer(controls$power),
-        as.numeric(controls$tolerance)[1L],
-        as.integer(controls$seed)[1L],
-        as.numeric(controls$ridge)[1L]
-    )
-}
-
-.cuda_fused_lda_execute <- function(
-    fit_expr,
-    method_id,
-    use_xprod_default,
-    gpu_device_state,
-    gpu_qr,
-    gpu_eig,
-    gpu_finalize_threshold
-) {
-    tryCatch(
-        .with_gpu_native_options(
-            if (
-                identical(as.integer(method_id), 3L) &&
-                    isTRUE(use_xprod_default)
-            ) {
-                .with_simpls_gpu_xprod(fit_expr())
-            } else {
-                fit_expr()
-            },
-            gpu_device_state = gpu_device_state,
-            gpu_qr = gpu_qr,
-            gpu_eig = gpu_eig,
-            gpu_finalize_threshold = gpu_finalize_threshold
-        ),
-        error = function(error) {
-            warning(
-                "Native CUDA PLS+LDA failed; using the standard CUDA path: ",
-                conditionMessage(error),
-                call. = FALSE
-            )
-            NULL
-        }
-    )
-}
-
-.try_cuda_native_lda_fit_predict <- function(method_id, method_name, Xtrain,
-    Ytrain,
-    Ytrain_original, Xtest, Ytest, ncomp, scaling_id, use_xprod_default, fit,
-    proj,
-    rsvd_oversample, rsvd_power, svds_tol, seed, lda_ridge, lev,
-    gpu_device_state = FALSE,
-    gpu_qr = TRUE, gpu_eig = TRUE, gpu_finalize_threshold = 32L) {
-    if (!.cuda_fused_lda_enabled(Xtest, fit, proj, Ytrain_original)) {
-        return(NULL)
-    }
-    y_codes <- as.integer(factor(Ytrain_original, levels = lev))
-    if (anyNA(y_codes)) {
-        return(NULL)
-    }
-    controls <- list(fit = fit, oversample = rsvd_oversample,
-        power = rsvd_power,
-        tolerance = svds_tol, seed = seed, ridge = lda_ridge)
-    fit_expr <- function() {
-        .cuda_fused_lda_call(Xtrain, Ytrain, y_codes, Xtest, ncomp, lev,
-            method_id,
-            scaling_id, use_xprod_default, controls)
-    }
-    model <- .cuda_fused_lda_execute(fit_expr, method_id, use_xprod_default,
-        gpu_device_state,
-        gpu_qr, gpu_eig, gpu_finalize_threshold)
-    if (is.null(model)) {
-        return(NULL)
-    }
-    .cuda_fused_lda_finalize(model, method_name, lev, use_xprod_default, Ytest)
-}
-
 .fastpls_use_direct_lda <- function(Xtest, k, n_classes) {
     n <- nrow(Xtest)
     p <- ncol(Xtest)
@@ -3204,66 +2495,9 @@ print.fastPLS <- function(x, ...) {
     output
 }
 
-.lda_cuda_project_predict <- function(object, Xtest, ncomp_eff,
-    scores = FALSE) {
-    if (!identical(object$classification_rule, "lda_cuda") ||
-        !.cuda_matmul_available() ||
-        !exists("lda_project_predict_cuda", envir = asNamespace("fastPLS"),
-            inherits = FALSE) ||
-        is.null(object$R_predict) || is.null(object$R_offset) ||
-        is.null(object$lda) ||
-        is.null(object$lda$models)) {
-        return(NULL)
-    }
-    Xtest <- as.matrix(Xtest)
-    R_predict <- as.matrix(object$R_predict)
-    if (nrow(R_predict) != ncol(Xtest)) {
-        return(NULL)
-    }
-    ncomp_eff <- pmax(as.integer(ncomp_eff), 1L)
-    if (any(!is.finite(ncomp_eff)) || max(ncomp_eff) > ncol(R_predict)) {
-        return(NULL)
-    }
-    Ypredlab <- .fastpls_prediction_frame(nrow(Xtest), object$ncomp)
-    score_cube <- if (isTRUE(scores)) {
-        array(NA, dim = c(nrow(Xtest), length(object$lev),
-            length(object$ncomp)),
-        dimnames = list(NULL, object$lev, NULL))
-    }
-    else {
-        NULL
-    }
-    for (i in seq_along(object$ncomp)) {
-        k <- ncomp_eff[i]
-        lda <- object$lda$models[[as.character(k)]]
-        if (is.null(lda)) {
-            return(NULL)
-        }
-        pred <- .fastpls_lda_project_predict_cuda(Xtest, R_predict[,
-            seq_len(k),
-            drop = FALSE], as.numeric(object$R_offset)[seq_len(k)], lda,
-        return_scores = scores)
-        Ypredlab[, i] <- factor(object$lev[as.integer(pred$pred)],
-            levels = object$lev)
-        if (isTRUE(scores)) {
-            score_cube[, , i] <- as.matrix(pred$scores)
-        }
-    }
-    list(Ypred = Ypredlab, lda_scores = score_cube, Ttest = NULL,
-        direct = "cuda_project")
-}
-
 .lda_prediction_context <- function(object, return_scores) {
     if (is.null(object$lda) || is.null(object$lda$models)) {
         stop("The model does not contain fitted LDA parameters", call. = FALSE)
-    }
-    if (object$classification_rule == "lda_cuda" &&
-        !.cuda_matmul_available()) {
-        stop(
-            "This model requires CUDA LDA prediction, but CUDA is ",
-            "unavailable. No CPU fallback is performed.",
-            call. = FALSE
-        )
     }
     if (object$classification_rule == "lda_metal") {
         .fastpls_require_backend_available("metal", "This model")
@@ -3275,7 +2509,7 @@ print.fastPLS <- function(x, ...) {
     list(
         components = components,
         max = max(components),
-        cuda = object$classification_rule == "lda_cuda",
+        cuda = FALSE,
         metal = object$classification_rule == "lda_metal",
         return_scores = isTRUE(return_scores)
     )
@@ -3366,27 +2600,10 @@ print.fastPLS <- function(x, ...) {
 }
 
 .lda_component_prediction <- function(scores, lda, context) {
-    if (context$return_scores && context$cuda) {
-        return(.fastpls_lda_predict_cuda(scores, lda))
-    }
     if (context$return_scores) {
         return(lda_predict_cpp(scores, lda))
     }
-    namespace <- asNamespace("fastPLS")
-    if (context$cuda) {
-        if (!exists("lda_predict_labels_cuda", namespace, inherits = FALSE)) {
-            stop(
-                "CUDA LDA label prediction is unavailable. ",
-                "No CPU fallback is performed.",
-                call. = FALSE
-            )
-        }
-        return(get("lda_predict_labels_cuda", namespace)(scores, lda))
-    }
-    if (exists("lda_predict_labels_cpp", namespace, inherits = FALSE)) {
-        return(get("lda_predict_labels_cpp", namespace)(scores, lda))
-    }
-    lda_predict_cpp(scores, lda)$pred
+    lda_predict_labels_cpp(scores, lda)
 }
 
 .lda_score_predictions <- function(object, scores, context) {
@@ -3429,17 +2646,6 @@ print.fastPLS <- function(x, ...) {
     keep_ttest = FALSE
 ) {
     context <- .lda_prediction_context(object, return_scores)
-    if (context$cuda && is.null(Ttest) && !keep_ttest) {
-        value <- .lda_cuda_project_predict(
-            object,
-            Xtest,
-            context$components,
-            context$return_scores
-        )
-        if (!is.null(value)) {
-            return(value)
-        }
-    }
     if (is.null(Ttest) && !keep_ttest && !context$return_scores) {
         value <- .lda_cpp_project_prediction(
             object,
@@ -3470,43 +2676,6 @@ print.fastPLS <- function(x, ...) {
     }
     scores <- .lda_prediction_scores(object, Xtest, Ttest, context)
     .lda_score_predictions(object, scores, context)
-}
-
-.should_use_cpu_flash_prediction <- function(object, Xtest) {
-    if (
-    !isTRUE(object$flash_svd) || !identical(object$predict_backend, "cpu_flash")
-    ) {
-        return(FALSE)
-    }
-    if (is.null(object$B)) {
-        return(TRUE)
-    }
-    p <- .fastpls_quiet(as.numeric(ncol(Xtest)))
-    m <- .fastpls_quiet(as.numeric(object$m))
-    k <- .fastpls_quiet(max(as.integer(object$ncomp), na.rm = TRUE))
-    if (
-        !is.finite(p) ||
-            !is.finite(m) ||
-            !is.finite(k) ||
-            p <= 0 ||
-            m <= 0 ||
-            k <= 0
-    ) {
-        return(FALSE)
-    }
-    dense_b_mb <- p * m * 8 / 1024^2
-    min_b_mb <- .fastpls_quiet(
-        as.numeric(Sys.getenv("FASTPLS_PREDICT_LATENT_MIN_B_MB", "256"))
-    )
-    if (!is.finite(min_b_mb) || min_b_mb < 0) {
-        min_b_mb <- 256
-    }
-    if (dense_b_mb >= min_b_mb) {
-        return(TRUE)
-    }
-    # For small response dimension, dense X %*% B is often faster than X %*% R_k
-    # %*% W_k.
-    k <= m
 }
 
 .normalize_svd_method <- function(method) {
@@ -4420,6 +3589,13 @@ print.fastPLS <- function(x, ...) {
     methods::new("float32", Data = bits)
 }
 
+.float32_transpose <- function(x) {
+    if (.is_float32(x)) {
+        return(float::t(x))
+    }
+    t(x)
+}
+
 .float32_bits_list_to_float <- function(x) {
     if (is.null(x)) {
         return(NULL)
@@ -4461,25 +3637,6 @@ print.fastPLS <- function(x, ...) {
 }
 
 .float32_lda_train_route <- function(model) {
-    cuda_model <- identical(model$predict_backend, "float32_cuda")
-    use_cuda <- cuda_model && isTRUE(has_cuda()) && exists(
-            "lda_train_prefix_float32_cuda",
-            envir = asNamespace("fastPLS"),
-            inherits = FALSE
-        )
-    if (cuda_model && !use_cuda) {
-        stop(
-            "float32 CUDA LDA fitting is unavailable. ",
-            "No CPU fallback is performed.",
-            call. = FALSE
-        )
-    }
-    if (use_cuda) {
-        return(list(
-            fun = lda_train_prefix_float32_cuda,
-            backend = "float32_cuda_lda"
-        ))
-    }
     if (identical(.Platform$OS.type, "windows")) {
         return(list(
             fun = .float32_portable_lda_train_prefix,
@@ -4538,13 +3695,13 @@ print.fastPLS <- function(x, ...) {
     if (n < 2L) {
         return(float::fl(matrix(1, nrow = 1L, ncol = ncol(X))))
     }
-    mu <- colMeans(X)
+    mu <- float::colMeans(X)
     Xc <- .float32_sweep_cols(
         X,
         float::fl(matrix(as.numeric(mu), nrow = 1L)),
         "-"
     )
-    out <- sqrt(colSums(Xc * Xc) / (n - 1L))
+    out <- sqrt(float::colSums(Xc * Xc) / (n - 1L))
     out <- float::fl(matrix(as.numeric(out), nrow = 1L))
     out[out == 0] <- 1
     out
@@ -4553,7 +3710,7 @@ print.fastPLS <- function(x, ...) {
 .float32_center_scale <- function(X, scaling) {
     mX <- float::fl(matrix(0, nrow = 1L, ncol = ncol(X)))
     if (scaling < 3L) {
-        mX <- float::fl(matrix(as.numeric(colMeans(X)), nrow = 1L))
+        mX <- float::fl(matrix(as.numeric(float::colMeans(X)), nrow = 1L))
         X <- .float32_sweep_cols(X, mX, "-")
     }
     vX <- float::fl(matrix(1, nrow = 1L, ncol = ncol(X)))
@@ -4562,16 +3719,6 @@ print.fastPLS <- function(x, ...) {
         X <- .float32_sweep_cols(X, vX, "/")
     }
     list(X = X, mX = mX, vX = vX)
-}
-
-.float32_rq <- function(y, yhat) {
-    yd <- .float32_to_numeric_matrix(y)
-    pd <- .float32_to_numeric_matrix(yhat)
-    denom <- sum((sweep(yd, 2L, colMeans(yd), "-"))^2)
-    if (!is.finite(denom) || denom <= 0) {
-        return(NA_real_)
-    }
-    1 - sum((yd - pd)^2) / denom
 }
 
 .float32_q2_from_reference <- function(y, yhat, reference_mean) {
@@ -4865,13 +4012,15 @@ print.fastPLS <- function(x, ...) {
     Tk <- Ttrain[, seq_len(kmax), drop = FALSE]
     means <- .float32_zeros(n_classes, kmax)
     for (class_id in seq_len(n_classes)) {
-        means[class_id, ] <- t(colMeans(Tk[y == class_id, , drop = FALSE]))
+        means[class_id, ] <- float::t(float::colMeans(
+            Tk[y == class_id, , drop = FALSE]
+        ))
     }
     pooled_full <- crossprod(Tk)
     for (class_id in seq_len(n_classes)) {
         mu <- means[class_id, , drop = FALSE]
         pooled_full <- pooled_full -
-            (t(mu) %*% mu) * float::fl(counts[[class_id]])
+            (float::t(mu) %*% mu) * float::fl(counts[[class_id]])
     }
     pooled_full <- pooled_full /
         float::fl(max(1L, nrow(Ttrain) - n_classes))
@@ -4905,7 +4054,9 @@ print.fastPLS <- function(x, ...) {
         solved_try <- try(
             float::backsolve(
                 chol_factor,
-                float::forwardsolve(t(chol_factor), t(means))
+                float::forwardsolve(
+                    float::t(chol_factor), float::t(means)
+                )
             ),
             silent = TRUE
         )
@@ -4913,7 +4064,7 @@ print.fastPLS <- function(x, ...) {
             last_error <- as.character(solved_try)
             next
         }
-        solved <- t(solved_try)
+        solved <- float::t(solved_try)
         ridge <- ridge_try
         relative_ridge <- rho
         break
@@ -4936,7 +4087,7 @@ print.fastPLS <- function(x, ...) {
     constants <- .float32_zeros(1L, length(priors))
     for (class_id in seq_along(priors)) {
         quadratic <- means[class_id, , drop = FALSE] %*%
-            t(solved$linear[class_id, , drop = FALSE])
+            float::t(solved$linear[class_id, , drop = FALSE])
         constants[1L, class_id] <- float::fl(-0.5) *
             quadratic +
             log(float::fl(priors[[class_id]]))
@@ -4974,7 +4125,7 @@ print.fastPLS <- function(x, ...) {
 
 .float32_portable_lda_predict <- function(Ttest, lda, return_scores = TRUE) {
     Ttest <- .as_float32_matrix(Ttest, "Ttest")
-    scores <- Ttest %*% t(lda$linear)
+    scores <- Ttest %*% float::t(lda$linear)
     scores <- .float32_sweep_cols(scores, lda$constants, "+")
     pred <- float32_argmax_cpp(scores)
     list(pred = as.integer(pred), scores = if (return_scores) scores else NULL)
@@ -5110,13 +4261,10 @@ print.fastPLS <- function(x, ...) {
         fit = fit,
         proj = FALSE
     )
-    if (identical(backend, "cuda")) {
-        .pls_fit_resident_cuda(resident_context, resident_config)
-    } else if (identical(backend, "metal")) {
-        .pls_fit_resident_metal(resident_context, resident_config)
-    } else {
-        stop("A resident inner fit requires backend = 'cuda' or 'metal'.")
+    if (!identical(backend, "cuda")) {
+        stop("A resident inner fit requires backend = 'cuda'.", call. = FALSE)
     }
+    .pls_fit_resident_cuda(resident_context, resident_config)
 }
 
 .float32_resident_inner_enabled <- function(Xtrain, Ytrain, backend) {
@@ -5332,267 +4480,9 @@ print.fastPLS <- function(x, ...) {
     switch(method, plssvd = 1L, simpls = 3L, opls = 4L, kernelpls = 5L)
 }
 
-pls.model1 <- function(Xtrain, Ytrain, ncomp, fit = FALSE, scaling = 1,
-    svd.method = 1,
-    rsvd_oversample = 32L, rsvd_power = 5L, svds_tol = 0, seed = 1L) {
-    Xtrain <- as.matrix(Xtrain)
-    Ytrain <- as.matrix(Ytrain)
-    cap <- .cap_plssvd_ncomp(ncomp, nrow(Xtrain), ncol(Xtrain), ncol(Ytrain),
-        warn = TRUE)
-    model <- pls_model1(Xtrain, Ytrain, cap$ncomp, scaling,
-        fit, svd.method, rsvd_oversample, rsvd_power, svds_tol, seed)
-    model$pls_method <- "plssvd"
-    model$predict_latent_ok <- TRUE
-    class(model) <- "fastPLS"
-    model
-}
-
-pls.model1.gpu <-
-    function(
-        Xtrain,
-        Ytrain,
-        ncomp,
-        fit = FALSE,
-        scaling = 1,
-        svd.method = "cuda_rsvd",
-        rsvd_oversample = 32L,
-        rsvd_power = 5L,
-        svds_tol = 0,
-        seed = 1L
-    ) {
-        if (!has_cuda()) {
-            stop(
-                "pls.model1.gpu requires an available CUDA backend. ",
-                "No CPU fallback is performed.",
-                call. = FALSE
-            )
-        }
-        Xtrain <- as.matrix(Xtrain)
-        Ytrain <- as.matrix(Ytrain)
-    svd.method <- match.arg(.normalize_svd_method(svd.method), c("cuda_rsvd"))
-        cap <- .cap_plssvd_ncomp(
-            ncomp,
-            nrow(Xtrain),
-            ncol(Xtrain),
-            ncol(Ytrain),
-            warn = TRUE
-        )
-        model <- pls_model1_gpu(
-            Xtrain,
-            Ytrain,
-            cap$ncomp,
-            scaling,
-            fit,
-            .svd_method_id(svd.method),
-            rsvd_oversample,
-            rsvd_power,
-            svds_tol,
-            seed
-        )
-        model$pls_method <- "plssvd"
-        model$predict_latent_ok <- TRUE
-        class(model) <- "fastPLS"
-        model
-    }
-
-pls.model1.gpu.implicit.xprod <-
-    function(
-        Xtrain,
-        Ytrain,
-        ncomp,
-        fit = FALSE,
-        scaling = 1,
-        svd.method = "cuda_rsvd",
-        rsvd_oversample = 32L,
-        rsvd_power = 5L,
-        svds_tol = 0,
-        seed = 1L
-    ) {
-        if (!has_cuda()) {
-            stop(
-                "pls.model1.gpu.implicit.xprod requires an available CUDA ",
-                "backend. No CPU fallback is performed.",
-                call. = FALSE
-            )
-        }
-        Xtrain <- as.matrix(Xtrain)
-        Ytrain <- as.matrix(Ytrain)
-        cap <- .cap_plssvd_ncomp(
-            ncomp,
-            nrow(Xtrain),
-            ncol(Xtrain),
-            ncol(Ytrain),
-            warn = TRUE
-        )
-        model <- pls_model1_gpu_implicit_xprod(
-            Xtrain,
-            Ytrain,
-            cap$ncomp,
-            scaling,
-            fit,
-            rsvd_oversample,
-            rsvd_power,
-            svds_tol,
-            seed
-        )
-        model$pls_method <- "plssvd"
-        model$predict_latent_ok <- TRUE
-        class(model) <- "fastPLS"
-        model
-    }
-
-pls.model2 <-
-    function(
-        Xtrain,
-        Ytrain,
-        ncomp,
-        fit = FALSE,
-        scaling = 1,
-        svd.method = 1,
-        rsvd_oversample = 32L,
-        rsvd_power = 5L,
-        svds_tol = 0,
-        seed = 1L
-    ) {
-        model <- pls_model2(
-                Xtrain,
-                Ytrain,
-                ncomp,
-                scaling,
-                fit,
-                svd.method,
-                rsvd_oversample,
-                rsvd_power,
-                svds_tol,
-                seed
-            )
-        model$pls_method <- "simpls"
-        model$predict_latent_ok <- TRUE
-        class(model) <- "fastPLS"
-        model
-    }
-
-pls.model2.fast <-
-    function(
-        Xtrain,
-        Ytrain,
-        ncomp,
-        fit = FALSE,
-        scaling = 1,
-        svd.method = 1,
-        rsvd_oversample = 32L,
-        rsvd_power = 5L,
-        svds_tol = 0,
-        seed = 1L,
-        return_ttrain = FALSE
-    ) {
-        model <- .with_fastpls_fast_options(
-                pls_model2_fast(
-                    Xtrain,
-                    Ytrain,
-                    ncomp,
-                    scaling,
-                    fit,
-                    svd.method,
-                    rsvd_oversample,
-                    rsvd_power,
-                    svds_tol,
-                    seed
-                ),
-                return_ttrain = return_ttrain
-            )
-        model$pls_method <- "simpls"
-        model$predict_latent_ok <- TRUE
-        class(model) <- "fastPLS"
-        model
-    }
-
-pls.model1.rsvd.xprod.precision <- function(Xtrain, Ytrain, ncomp, fit = FALSE,
-    scaling = 1, rsvd_oversample = 32L, rsvd_power = 5L, svds_tol = 0,
-    seed = 1L, xprod_precision = c("implicit64", "double")) {
-    xprod_precision <- match.arg(xprod_precision)
-    precision_id <- switch(xprod_precision, double = 0L, implicit64 = 3L)
-    Xtrain <- as.matrix(Xtrain)
-    Ytrain <- as.matrix(Ytrain)
-    cap <- .cap_plssvd_ncomp(ncomp, nrow(Xtrain), ncol(Xtrain), ncol(Ytrain),
-        warn = TRUE)
-    model <- pls_model1_rsvd_xprod_precision(Xtrain,
-        Ytrain,
-        cap$ncomp, scaling, fit, as.integer(rsvd_oversample),
-        as.integer(rsvd_power),
-        svds_tol, as.integer(seed), as.integer(precision_id))
-    model$pls_method <- "plssvd"
-    model$predict_latent_ok <- TRUE
-    class(model) <- "fastPLS"
-    model
-}
-
-pls.model2.fast.rsvd.xprod.precision <- function(Xtrain, Ytrain, ncomp,
-    fit = FALSE,
-    scaling = 1, rsvd_oversample = 32L, rsvd_power = 5L, svds_tol = 0,
-    seed = 1L, xprod_precision = c("implicit64", "double"),
-    return_ttrain = FALSE) {
-    xprod_precision <- match.arg(xprod_precision)
-    precision_id <- switch(xprod_precision, double = 0L, implicit64 = 3L)
-    model <- .with_fastpls_fast_options(pls_model2_fast_rsvd_xprod_precision(
-            as.matrix(Xtrain), as.matrix(Ytrain), as.integer(ncomp),
-            scaling, fit,
-            as.integer(rsvd_oversample),
-            as.integer(rsvd_power), svds_tol, as.integer(seed),
-            as.integer(precision_id)
-        ),
-    return_ttrain = return_ttrain)
-    model$pls_method <- "simpls"
-    model$predict_latent_ok <- TRUE
-    class(model) <- "fastPLS"
-    model
-}
-
-pls.model2.fast.gpu <-
-    function(
-        Xtrain,
-        Ytrain,
-        ncomp,
-        fit = FALSE,
-        scaling = 1,
-        svd.method = "cuda_rsvd",
-        rsvd_oversample = 32L,
-        rsvd_power = 5L,
-        svds_tol = 0,
-        seed = 1L
-    ) {
-        if (!has_cuda()) {
-            stop(
-                "pls.model2.fast.gpu requires an available CUDA backend. ",
-                "No CPU fallback is performed.",
-                call. = FALSE
-            )
-        }
-        model <- .with_fastpls_fast_options({
-    svd.method <- match.arg(.normalize_svd_method(svd.method), c("cuda_rsvd"))
-            pls_model2_fast_gpu(
-                Xtrain,
-                Ytrain,
-                ncomp,
-                scaling,
-                fit,
-                .svd_method_id(svd.method),
-                rsvd_oversample,
-                rsvd_power,
-                svds_tol,
-                seed
-            )
-        })
-        model$pls_method <- "simpls"
-        model$predict_latent_ok <- TRUE
-        class(model) <- "fastPLS"
-        model
-    }
-
-
 .model_prediction_backend <- function(object) {
     stored <- object$predict_backend %||% "cpu"
-    if (stored %in% c("cuda_flash", "cuda_fused_lda", "float32_cuda")) {
+    if (stored %in% c("cuda_flash", "float32_cuda")) {
         return("cuda_flash")
     }
     if (stored %in% c("metal", "float32_metal")) {
@@ -5602,6 +4492,11 @@ pls.model2.fast.gpu <-
 }
 
 .model_public_backend <- function(object) {
+    execution_route <- object$execution_route %||%
+        object$diagnostics$residency$route %||% ""
+    if (grepl("Metal", execution_route, fixed = TRUE)) {
+        return("metal")
+    }
     switch(
         .model_prediction_backend(object),
         cuda_flash = "cuda",
@@ -5611,31 +4506,30 @@ pls.model2.fast.gpu <-
 }
 
 .prediction_route <- function(object, Xtest, backend, block_size) {
-    if (is.null(backend)) {
-        backend <- .fastpls_resolve_backend(NULL)
-        if (backend == "cuda") backend <- "cuda_flash"
+    stored <- .model_public_backend(object)
+    selected <- if (is.null(backend) || identical(backend, "auto")) {
+        stored
     } else {
-        backend <- match.arg(
-            backend,
-            c(
-                "auto", "cpu", "cuda", "metal",
-                "cpu_flash", "cuda_flash"
-            )
+        .normalize_public_backend(backend)
+    }
+    if (!identical(selected, stored)) {
+        stop(
+            "Prediction must use the backend that fitted the model ('",
+            stored, "'). No CPU fallback or backend substitution is ",
+            "performed.",
+            call. = FALSE
         )
     }
-    selected <- if (backend == "auto") {
-        stored <- .model_prediction_backend(object)
-        switch(stored, cuda_flash = "cuda", metal = "metal", "cpu")
-    } else if (backend %in% c("cuda", "cuda_flash")) {
-        "cuda"
-    } else if (backend == "metal") {
-        .fastpls_require_backend_available("metal", "Prediction")
+    .fastpls_require_backend_available(selected, "Prediction")
+    execution_route <- object$execution_route %||%
+        object$diagnostics$residency$route %||% ""
+    operation_backend <- if (identical(selected, "metal") &&
+        grepl("operation split", execution_route, ignore.case = TRUE)) {
         "cpu"
     } else {
-        "cpu"
+        selected
     }
-    .fastpls_require_backend_available(selected, "Prediction")
-    if (identical(selected, "cpu")) {
+    if (identical(operation_backend, "cpu")) {
         .fastpls_apply_cpu_cores()
     }
     if (is.null(block_size)) {
@@ -5645,13 +4539,10 @@ pls.model2.fast.gpu <-
         block_size <- 4096L
     }
     list(
-        backend = backend,
+        backend = operation_backend,
         selected = selected,
         block_size = as.integer(block_size),
         cuda = identical(selected, "cuda"),
-        cpu_flash = backend == "cpu_flash" ||
-            (backend == "auto" && identical(selected, "cpu") &&
-                .should_use_cpu_flash_prediction(object, Xtest)),
         metal = identical(selected, "metal")
     )
 }
@@ -5705,56 +4596,27 @@ pls.model2.fast.gpu <-
         is.null(Ytest) &&
         !raw_scores &&
         !is.list(object$W_latent) &&
+        !route$cuda &&
         !route$metal &&
         (is.null(object$classification_rule) ||
             object$classification_rule == "argmax")
     if (!eligible) {
         return(NULL)
     }
-    backend <- if (route$cuda) {
-        "cuda"
-    } else {
-        "cpp"
-    }
-    result <- .class_topk_predict(object, Xtest, top, proj, backend)
+    result <- .class_topk_predict(object, Xtest, top, proj)
     result$Q2Y <- NULL
     result
 }
 
 .predict_backend_result <- function(object, Xtest, proj, route) {
-    if (
-        !route$cuda && !route$metal &&
-            object$pls_method %in% c("plssvd", "simpls") &&
-            startsWith(
-                object$xprod_mode %||% "",
-                "float64_"
-            )
-    ) {
-        return(pls_labels_core_predict_cpp(object, Xtest, proj))
+    if (!identical(route$selected, "cpu")) {
+        stop(
+            "A nonresident accelerator model cannot be predicted. Refit ",
+            "with the requested backend; no CPU fallback is performed.",
+            call. = FALSE
+        )
     }
-    if (route$metal) {
-        return(.pls_predict_metal(object, Xtest, proj))
-    }
-    if (route$cuda) {
-        return(pls_predict_flash_cuda(object, Xtest, proj))
-    }
-    if (route$cpu_flash) {
-        return(tryCatch(
-            pls_predict_flash_cpu(
-                object,
-                Xtest,
-                proj,
-                route$block_size
-            ),
-            error = function(error) {
-                if (route$backend == "cpu_flash") {
-                    stop(conditionMessage(error), call. = FALSE)
-                }
-                pls_predict(object, Xtest, proj)
-            }
-        ))
-    }
-    pls_predict(object, Xtest, proj)
+    pls_labels_core_predict_cpp(object, Xtest, proj)
 }
 
 .predict_attach_q2 <- function(result, object, Ytest) {
@@ -5873,27 +4735,25 @@ predict.fastPLS <- function(object, newdata, Ytest = NULL, proj = FALSE,
     top <- .resolve_top_k(top, top5)
     if (!is.null(object$resident_state)) {
         resident_backend <- object$resident_backend %||% "cuda"
+        if (!identical(resident_backend, "cuda")) {
+            stop(
+                "Unsupported resident backend in this model. Refit with the ",
+                "current package version.",
+                call. = FALSE
+            )
+        }
         selected <- if (is.null(backend) || identical(backend, "auto")) {
             resident_backend
         } else {
             backend
         }
-        compatible <- if (identical(resident_backend, "cuda")) {
-            selected %in% c("cuda", "cuda_flash")
-        } else {
-            identical(selected, "metal")
-        }
+        compatible <- selected %in% c("cuda", "cuda_flash")
         if (!compatible) {
             stop(
                 "This model retains ", resident_backend,
                 " device state; prediction requires the same backend. No CPU fallback is performed.",
                 call. = FALSE
             )
-        }
-        if (identical(resident_backend, "metal")) {
-            return(.resident_metal_predict(
-                object, newdata, Ytest, proj, top, raw_scores
-            ))
         }
         return(.resident_cuda_predict(object, newdata, Ytest, proj, top, raw_scores))
     }
@@ -5910,7 +4770,7 @@ predict.fastPLS <- function(object, newdata, Ytest = NULL, proj = FALSE,
     newdata <- .fastpls_predictor_input(newdata, "newdata")
     if (object$precision %||% "double" == "float32") {
         result <- .predict_fastpls_float32(object, newdata, Ytest, proj, top,
-            raw_scores = raw_scores, backend = route$selected)
+            raw_scores = raw_scores, backend = route$backend)
         return(.fastpls_public_predict_output(result, object$ncomp))
     }
     Xtest <- as.matrix(newdata)
@@ -5999,16 +4859,6 @@ predict.fastPLS <- function(object, newdata, Ytest = NULL, proj = FALSE,
         stop(message, call. = FALSE)
     }
     invisible(estimated_bytes)
-}
-
-.center_kernel_train_base <- function(K) {
-    col_means <- colMeans(K)
-    row_means <- rowMeans(K)
-    grand_mean <- mean(col_means)
-    Kc <- sweep(K, 2, col_means, "-")
-    Kc <- sweep(Kc, 1, row_means, "-")
-    Kc <- Kc + grand_mean
-list(K = Kc, col_means = matrix(col_means, nrow = 1), grand_mean = grand_mean)
 }
 
 .center_kernel_test_base <- function(Ktest, train_col_means, train_grand_mean) {
@@ -6164,7 +5014,6 @@ list(K = Kc, col_means = matrix(col_means, nrow = 1), grand_mean = grand_mean)
         out <- c(out, res)
         class(out) <- c("fastPLSKernel", "fastPLS")
     }
-    out <- .attach_backend_control(out)
     out
 }
 
@@ -6204,31 +5053,6 @@ list(K = Kc, col_means = matrix(col_means, nrow = 1), grand_mean = grand_mean)
 }
 
 #' @noRd
-.kernel_pls_cuda <- function(Xtrain, Ytrain, Xtest = NULL, Ytest = NULL,
-    ncomp = 2,
-    scaling = c("centering", "autoscaling", "none"), kernel = c("linear",
-        "rbf",
-        "poly"), gamma = NULL, degree = 3L, coef0 = 1, rsvd_oversample = 32L,
-    rsvd_power = 5L,
-    svds_tol = 0, svd.method = "cuda_rsvd", seed = 1L, classifier = c("argmax",
-        "lda"), lda_ridge = 1e-08, fit = FALSE, return_variance = TRUE,
-    proj = FALSE,
-    ...) {
-    classifier <- .resolve_classifier_for_backend(classifier, "cuda")
-    fit_fun <- .simpls_gpu
-    .kernel_pls_fit(Xtrain, Ytrain, Xtest, Ytest, ncomp, match.arg(scaling),
-        match.arg(kernel),
-        gamma, degree, coef0, fit, proj, "cuda", fit_fun,
-        c(list(rsvd_oversample = rsvd_oversample,
-            rsvd_power = rsvd_power, svds_tol = svds_tol,
-            svd.method = svd.method,
-            seed = seed, classifier = classifier, lda_ridge = lda_ridge,
-            return_variance = return_variance),
-        list(...)))
-}
-
-#' @rdname predict.fastPLS
-#' @export
 predict.fastPLSKernel <- function(object, newdata, Ytest = NULL, proj = FALSE,
     ...) {
     if (!is(object, "fastPLSKernel")) {
@@ -6315,7 +5139,6 @@ predict.fastPLSKernel <- function(object, newdata, Ytest = NULL, proj = FALSE,
         out <- c(out, res)
         class(out) <- c("fastPLSOpls", "fastPLS")
     }
-    out <- .attach_backend_control(out)
     out
 }
 
@@ -6347,58 +5170,6 @@ predict.fastPLSKernel <- function(object, newdata, Ytest = NULL, proj = FALSE,
 }
 
 #' @noRd
-.opls_cuda <- function(
-    Xtrain,
-    Ytrain,
-    Xtest = NULL,
-    Ytest = NULL,
-    ncomp = 2,
-    north = 1L,
-    scaling = c("centering", "autoscaling", "none"),
-    rsvd_oversample = 32L,
-    rsvd_power = 5L,
-    svds_tol = 0,
-    svd.method = "cuda_rsvd",
-    seed = 1L,
-    classifier = c("argmax", "lda"),
-    lda_ridge = 1e-8,
-    fit = FALSE,
-    return_variance = TRUE,
-    proj = FALSE,
-    ...
-) {
-    classifier <- .resolve_classifier_for_backend(classifier, "cuda")
-    fit_fun <- .simpls_gpu
-    .opls_fit(
-        Xtrain,
-        Ytrain,
-        Xtest,
-        Ytest,
-        ncomp,
-        match.arg(scaling),
-        north,
-        fit,
-        proj,
-        "cpp",
-        fit_fun,
-        c(
-            list(
-                rsvd_oversample = rsvd_oversample,
-                rsvd_power = rsvd_power,
-                svds_tol = svds_tol,
-                svd.method = svd.method,
-                seed = seed,
-                classifier = classifier,
-                lda_ridge = lda_ridge,
-                return_variance = return_variance
-            ),
-            list(...)
-        )
-    )
-}
-
-#' @rdname predict.fastPLS
-#' @export
 predict.fastPLSOpls <- function(object, newdata, Ytest = NULL, proj = FALSE,
     ...) {
     if (!is(object, "fastPLSOpls")) {
@@ -6432,554 +5203,6 @@ predict.fastPLSOpls <- function(object, newdata, Ytest = NULL, proj = FALSE,
             object$P_orth)
     }
     predict.fastPLS(object$inner_model, Xnew, Ytest = Ytest, proj = proj, ...)
-}
-
-.gpu_pls_response <- function(Xtrain, Ytrain, classifier, method) {
-    X <- as.matrix(Xtrain)
-    prepared <- .prepare_response(Ytrain)
-    ncomp_cap <- function(ncomp) {
-        if (!prepared$classification || method != "plssvd") {
-            return(ncomp)
-        }
-        .cap_plssvd_ncomp(
-            ncomp,
-            nrow(X),
-            ncol(X),
-            ncol(prepared$Ytrain),
-            factor_response = TRUE,
-            warn = TRUE
-        )$ncomp
-    }
-    list(
-        X = X,
-        Y = prepared$Ytrain,
-        original = Ytrain,
-        classification = prepared$classification,
-        levels = prepared$lev,
-        classifier = .resolve_classifier_for_backend(classifier, "cuda"),
-        cap = ncomp_cap
-    )
-}
-
-.gpu_pls_finalize <- function(model, response, Xtest, Ytest, ncomp, fit, proj,
-    method, classifier, lda_ridge, variance) {
-    model$classification <- response$classification
-    model$lev <- response$levels
-    model$pls_method <- method
-    model$predict_latent_ok <- TRUE
-    if (fit) {
-        model <- .attach_train_scores(model, response$X)
-    }
-    model <- .enable_flash_prediction(model, "cuda")
-    model <- .attach_lda_classifier(model, response$X, response$original,
-        classifier,
-        lda_ridge)
-    model <- .maybe_attach_pls_variance_explained(model, response$X, variance)
-    if (!is.null(Xtest)) {
-        model <- c(model, predict.fastPLS(model, as.matrix(Xtest),
-            Ytest = Ytest,
-            proj = proj,
-            backend = "cuda_flash"))
-    }
-    if (response$classification && fit && !is.null(model$Yfit)) {
-        fitted <- lapply(seq_along(ncomp), function(i) {
-            index <- apply(model$Yfit[, , i], 1L, which.max)
-            factor(response$levels[index], levels = response$levels)
-        })
-        model$Yfit <- as.data.frame(fitted)
-        names(model$Yfit) <- paste0("ncomp=", ncomp)
-    }
-    class(model) <- "fastPLS"
-    .attach_backend_control(model)
-}
-
-.gpu_fused_lda <- function(
-    method_id,
-    method_name,
-    response,
-    Xtest,
-    Ytest,
-    ncomp,
-    scaling,
-    use_xprod,
-    controls
-) {
-    if (!response$classification || response$classifier != "lda_cuda") {
-        return(NULL)
-    }
-    do.call(
-        .try_cuda_native_lda_fit_predict,
-        c(
-            list(
-                method_id = method_id,
-                method_name = method_name,
-                Xtrain = response$X,
-                Ytrain = response$Y,
-                Ytrain_original = response$original,
-                Xtest = Xtest,
-                Ytest = Ytest,
-                ncomp = ncomp,
-                scaling_id = scaling,
-                use_xprod_default = use_xprod,
-                lev = response$levels
-            ),
-            controls
-        )
-    )
-}
-
-.gpu_simpls_core <- function(
-    response,
-    ncomp,
-    scaling,
-    solver,
-    controls,
-    use_xprod
-) {
-    fit_expr <- function() {
-        pls.model2.fast.gpu(
-            Xtrain = response$X,
-            Ytrain = response$Y,
-            ncomp = as.integer(ncomp),
-            fit = controls$fit,
-            scaling = scaling,
-            svd.method = solver,
-            rsvd_oversample = controls$rsvd_oversample,
-            rsvd_power = controls$rsvd_power,
-            svds_tol = controls$svds_tol,
-            seed = controls$seed
-        )
-    }
-    model <- .with_gpu_native_options(
-        if (use_xprod) .with_simpls_gpu_xprod(fit_expr()) else fit_expr(),
-        gpu_device_state = controls$gpu_device_state,
-        gpu_qr = controls$gpu_qr,
-        gpu_eig = controls$gpu_eig,
-        gpu_finalize_threshold = controls$gpu_finalize_threshold
-    )
-    model$xprod_default <- use_xprod
-    model
-}
-
-.gpu_plssvd_core <- function(
-    response,
-    ncomp,
-    scaling,
-    solver,
-    controls,
-    use_xprod
-) {
-    fit_fun <- if (use_xprod) pls.model1.gpu.implicit.xprod else pls.model1.gpu
-    model <- .with_gpu_native_options(
-        fit_fun(
-            Xtrain = response$X,
-            Ytrain = response$Y,
-            ncomp = as.integer(ncomp),
-            fit = controls$fit,
-            scaling = scaling,
-            svd.method = solver,
-            rsvd_oversample = controls$rsvd_oversample,
-            rsvd_power = controls$rsvd_power,
-            svds_tol = controls$svds_tol,
-            seed = controls$seed
-        ),
-        gpu_device_state = FALSE,
-        gpu_qr = controls$gpu_qr,
-        gpu_eig = controls$gpu_eig,
-        gpu_finalize_threshold = controls$gpu_finalize_threshold
-    )
-    model$xprod_default <- use_xprod
-    model
-}
-
-.gpu_fit_controls <- function(
-    fit,
-    proj,
-    oversample,
-    power,
-    tolerance,
-    seed,
-    ridge,
-    device_state,
-    qr,
-    eig,
-    threshold
-) {
-    list(
-        fit = fit,
-        proj = proj,
-        rsvd_oversample = oversample,
-        rsvd_power = power,
-        svds_tol = tolerance,
-        seed = seed,
-        lda_ridge = ridge,
-        gpu_device_state = device_state,
-        gpu_qr = qr,
-        gpu_eig = eig,
-        gpu_finalize_threshold = threshold
-    )
-}
-
-#' GPU-native SIMPLS fit
-#'
-#' Uses a CUDA-oriented `simpls` engine that keeps the training
-#' matrices and deflated cross-covariance resident on device throughout the fit.
-#'
-#' @param Xtrain Numeric training predictor matrix.
-#'   Alternatively, a result returned by [pls.single.cv()]. In that case
-#'   `pls()` refits the selected model on the full cross-validation training
-#'   set and predicts `Xtest` using `best_ncomp` and the selected tuning
-#'   settings.
-#' @param Ytrain Training response (numeric or factor).
-#'   When `Xtrain` is a [pls.single.cv()] result, the second positional argument
-#'   may be used as `Xtest`.
-#' @param Xtest Optional test predictor matrix.
-#' @param Ytest Optional observed response used to compute independent-test
-#'   `Q2Y` relative to the training-response mean.
-#' @param ncomp Number of components (scalar or vector).
-#' @param scaling One of \code{centering}, \code{autoscaling}, or \code{none}.
-#' @param rsvd_oversample RSVD oversampling.
-#' @param rsvd_power RSVD power iterations.
-#' @param svds_tol Tolerance placeholder passed through to the backend.
-#' @param seed Random seed.
-#' @param fit Return fitted values and `R2Y` when `TRUE`.
-#' @param return_variance Compute predictor-space latent-variable variance
-#'   explained. Set to `FALSE` for timing/memory benchmarks that do not need
-#'   plotting variance metadata.
-#' @param return_loadings Compute and store predictor loadings `P`. The default
-#'   is `FALSE` because `P` is mainly used for interpretation/loading plots and
-#'   is not needed for prediction, VIP, or the benchmark pipelines.
-#' @param proj Return projected `Ttest` when `TRUE`.
-#'  @param gpu_device_state Keep selected SIMPLS workspaces resident on the GPU
-#' when `TRUE`.
-#' @param gpu_qr Use GPU QR finalization when available.
-#' @param gpu_eig Use GPU eigensolver finalization when available.
-#'  @param gpu_finalize_threshold Component threshold controlling GPU-side
-#' finalization.
-#' @return A `fastPLS` object.
-#' @noRd
-.simpls_gpu <- function(Xtrain, Ytrain, Xtest = NULL, Ytest = NULL, ncomp = 2,
-    scaling = c("centering", "autoscaling", "none"), rsvd_oversample = 32L,
-    rsvd_power = 5L,
-    svds_tol = 0, svd.method = "cuda_rsvd", seed = 1L, fit = FALSE,
-    proj = FALSE,
-    gpu_device_state = TRUE, gpu_qr = TRUE, gpu_eig = TRUE,
-    gpu_finalize_threshold = 32L,
-    classifier = c("argmax", "lda"), lda_ridge = 1e-08,
-    return_variance = TRUE) {
-    if (!has_cuda()) {
-        stop(
-            "simpls_gpu requires an available CUDA backend. ",
-            "No CPU fallback is performed.",
-            call. = FALSE
-        )
-    }
-    svd.method <- match.arg(.normalize_svd_method(svd.method), c("cuda_rsvd"))
-    scal <- pmatch(scaling, c("centering", "autoscaling", "none"))[1]
-    if (is.factor(Ytrain) && .dense_indicator_exceeds_cuda_guard(nrow(Xtrain),
-        nlevels(Ytrain))) {
-        .stop_unsafe_cuda_simpls_response(nrow(Xtrain), nlevels(Ytrain))
-    }
-    response <- .gpu_pls_response(Xtrain, Ytrain, classifier, "simpls")
-    use_xprod_default <- .should_use_xprod_default(ncol(response$X),
-        ncol(response$Y),
-        ncomp)
-    fused_controls <- .gpu_fit_controls(fit, proj, rsvd_oversample, rsvd_power,
-        svds_tol, seed, lda_ridge, gpu_device_state, gpu_qr, gpu_eig,
-        gpu_finalize_threshold)
-    fused_model <- .gpu_fused_lda(3L, "simpls", response, Xtest, Ytest, ncomp,
-        scal, use_xprod_default, fused_controls)
-    if (!is.null(fused_model)) {
-        fused_model <- .maybe_attach_pls_variance_explained(fused_model,
-            response$X,
-            return_variance)
-        fused_model <- .attach_backend_control(fused_model)
-        return(fused_model)
-    }
-    model <- .gpu_simpls_core(response, ncomp, scal, svd.method,
-        fused_controls,
-        use_xprod_default)
-    .gpu_pls_finalize(model, response, Xtest, Ytest, ncomp, fit, proj,
-        "simpls",
-        response$classifier, lda_ridge, return_variance)
-}
-
-#' GPU-native PLSSVD fit
-#'
-#' Uses a dedicated CUDA PLSSVD engine that keeps the cross-covariance SVD and
-#' latent linear algebra on device, returning the standard `fastPLS` object
-#' structure for prediction and plotting.
-#'
-#' @param Xtrain Numeric training predictor matrix.
-#' @param Ytrain Training response (numeric or factor).
-#' @param Xtest Optional test predictor matrix.
-#' @param Ytest Optional observed response used to compute independent-test
-#'   `Q2Y` relative to the training-response mean.
-#' @param ncomp Number of components (scalar or vector).
-#' @param scaling One of \code{centering}, \code{autoscaling}, or \code{none}.
-#' @param rsvd_oversample RSVD oversampling.
-#' @param rsvd_power RSVD power iterations.
-#' @param svds_tol Tolerance placeholder passed through to the backend.
-#' @param seed Random seed.
-#' @param fit Return fitted values and `R2Y` when `TRUE`.
-#' @param proj Return projected `Ttest` when `TRUE`.
-#' @param gpu_qr Use GPU QR finalization when available.
-#' @param gpu_eig Use GPU eigensolver finalization when available.
-#'  @param gpu_finalize_threshold Component threshold controlling GPU-side
-#' finalization.
-#' @return A `fastPLS` object fitted with GPU PLSSVD.
-#' @noRd
-.plssvd_gpu <- function(Xtrain, Ytrain, Xtest = NULL, Ytest = NULL, ncomp = 2,
-    scaling = c("centering", "autoscaling", "none"), rsvd_oversample = 32L,
-    rsvd_power = 5L,
-    svds_tol = 0, svd.method = "cuda_rsvd", seed = 1L, fit = FALSE,
-    proj = FALSE,
-    gpu_qr = TRUE, gpu_eig = TRUE, gpu_finalize_threshold = 32L,
-    classifier = c("argmax",
-        "lda"), lda_ridge = 1e-08, return_variance = TRUE) {
-    if (!has_cuda()) {
-        stop(
-            "plssvd_gpu requires an available CUDA backend. ",
-            "No CPU fallback is performed.",
-            call. = FALSE
-        )
-    }
-    svd.method <- match.arg(.normalize_svd_method(svd.method), c("cuda_rsvd"))
-    scal <- pmatch(scaling, c("centering", "autoscaling", "none"))[1]
-    response <- .gpu_pls_response(Xtrain, Ytrain, classifier, "plssvd")
-    ncomp <- response$cap(ncomp)
-    use_xprod_default <- .should_use_xprod_default(ncol(response$X),
-        ncol(response$Y),
-        ncomp)
-    controls <- .gpu_fit_controls(fit, proj, rsvd_oversample, rsvd_power,
-        svds_tol,
-        seed, lda_ridge, FALSE, gpu_qr, gpu_eig, gpu_finalize_threshold)
-    fused_model <- .gpu_fused_lda(1L, "plssvd", response, Xtest, Ytest, ncomp,
-        scal, use_xprod_default, controls)
-    if (!is.null(fused_model)) {
-        fused_model <- .maybe_attach_pls_variance_explained(fused_model,
-            response$X,
-            return_variance)
-        fused_model <- .attach_backend_control(fused_model)
-        return(fused_model)
-    }
-    model <- .gpu_plssvd_core(response, ncomp, scal, svd.method, controls,
-        use_xprod_default)
-    .gpu_pls_finalize(model, response, Xtest, Ytest, ncomp, fit, proj,
-        "plssvd",
-        response$classifier, lda_ridge, return_variance)
-}
-
-.predict_flash_attach <- function(model, Xtest, Ytest, proj) {
-    model$predict_backend <- "cuda_flash"
-    model$flash_svd <- TRUE
-    if (!is.null(Xtest)) {
-        res <- predict.fastPLS(
-            model,
-            as.matrix(Xtest),
-            Ytest = Ytest,
-            proj = proj,
-            backend = "cuda"
-        )
-        model <- c(model, res)
-    }
-    model
-}
-
-#' GPU PLS-SVD with compact low-rank CUDA prediction
-#'
-#' Fits with the standard GPU PLSSVD backend and marks the model so prediction
-#' uses a CUDA low-rank path that applies `X %*% R %*% W` without materializing
-#' the full coefficient matrix `B`.
-#' @noRd
-.plssvd_flash_gpu <- function(
-    Xtrain,
-    Ytrain,
-    Xtest = NULL,
-    Ytest = NULL,
-    ncomp = 2,
-    scaling = c("centering", "autoscaling", "none"),
-    rsvd_oversample = 32L,
-    rsvd_power = 5L,
-    svds_tol = 0,
-    seed = 1L,
-    fit = FALSE,
-    proj = FALSE,
-    gpu_qr = TRUE,
-    gpu_eig = TRUE,
-    gpu_finalize_threshold = 32L
-) {
-    model <- .plssvd_gpu(
-        Xtrain = Xtrain,
-        Ytrain = Ytrain,
-        Xtest = NULL,
-        Ytest = NULL,
-        ncomp = ncomp,
-        scaling = scaling,
-        rsvd_oversample = rsvd_oversample,
-        rsvd_power = rsvd_power,
-        svds_tol = svds_tol,
-        seed = seed,
-        fit = fit,
-        proj = FALSE,
-        gpu_qr = gpu_qr,
-        gpu_eig = gpu_eig,
-        gpu_finalize_threshold = gpu_finalize_threshold
-    )
-    .predict_flash_attach(model, Xtest, Ytest, proj)
-}
-
-#' GPU SIMPLS with compact low-rank CUDA prediction
-#' @noRd
-.simpls_flash_gpu <- function(
-    Xtrain,
-    Ytrain,
-    Xtest = NULL,
-    Ytest = NULL,
-    ncomp = 2,
-    scaling = c("centering", "autoscaling", "none"),
-    rsvd_oversample = 32L,
-    rsvd_power = 5L,
-    svds_tol = 0,
-    seed = 1L,
-    fit = FALSE,
-    proj = FALSE,
-    gpu_device_state = TRUE,
-    gpu_qr = TRUE,
-    gpu_eig = TRUE,
-    gpu_finalize_threshold = 32L
-) {
-    model <- .simpls_gpu(
-        Xtrain = Xtrain,
-        Ytrain = Ytrain,
-        Xtest = NULL,
-        Ytest = NULL,
-        ncomp = ncomp,
-        scaling = scaling,
-        rsvd_oversample = rsvd_oversample,
-        rsvd_power = rsvd_power,
-        svds_tol = svds_tol,
-        seed = seed,
-        fit = fit,
-        proj = FALSE,
-        gpu_device_state = gpu_device_state,
-        gpu_qr = gpu_qr,
-        gpu_eig = gpu_eig,
-        gpu_finalize_threshold = gpu_finalize_threshold
-    )
-    .predict_flash_attach(model, Xtest, Ytest, proj)
-}
-
-#' GPU OPLS with compact low-rank CUDA prediction
-#' @noRd
-.opls_flash_gpu <- function(
-    Xtrain,
-    Ytrain,
-    Xtest = NULL,
-    Ytest = NULL,
-    ncomp = 2,
-    north = 1L,
-    scaling = c("centering", "autoscaling", "none"),
-    rsvd_oversample = 32L,
-    rsvd_power = 5L,
-    svds_tol = 0,
-    seed = 1L,
-    fit = FALSE,
-    proj = FALSE,
-    ...
-) {
-    model <- .opls_cuda(
-        Xtrain = Xtrain,
-        Ytrain = Ytrain,
-        Xtest = NULL,
-        Ytest = NULL,
-        ncomp = ncomp,
-        north = north,
-        scaling = scaling,
-        rsvd_oversample = rsvd_oversample,
-        rsvd_power = rsvd_power,
-        svds_tol = svds_tol,
-        seed = seed,
-        fit = fit,
-        proj = FALSE,
-        ...
-    )
-    model$inner_model$predict_backend <- "cuda_flash"
-    model$inner_model$flash_svd <- TRUE
-    model$flash_svd <- TRUE
-    if (!is.null(Xtest)) {
-        res <- predict(
-            model,
-            as.matrix(Xtest),
-            Ytest = Ytest,
-            proj = proj,
-            backend = "cuda"
-        )
-        model <- c(model, res)
-        class(model) <- c("fastPLSOpls", "fastPLS")
-    }
-    model
-}
-
-#' GPU kernel PLS with compact low-rank CUDA prediction
-#' @noRd
-.kernel_pls_flash_gpu <- function(
-    Xtrain,
-    Ytrain,
-    Xtest = NULL,
-    Ytest = NULL,
-    ncomp = 2,
-    scaling = c("centering", "autoscaling", "none"),
-    kernel = c("linear", "rbf", "poly"),
-    gamma = NULL,
-    degree = 3L,
-    coef0 = 1,
-    rsvd_oversample = 32L,
-    rsvd_power = 5L,
-    svds_tol = 0,
-    seed = 1L,
-    fit = FALSE,
-    proj = FALSE,
-    ...
-) {
-    model <- .kernel_pls_cuda(
-        Xtrain = Xtrain,
-        Ytrain = Ytrain,
-        Xtest = NULL,
-        Ytest = NULL,
-        ncomp = ncomp,
-        scaling = scaling,
-        kernel = kernel,
-        gamma = gamma,
-        degree = degree,
-        coef0 = coef0,
-        rsvd_oversample = rsvd_oversample,
-        rsvd_power = rsvd_power,
-        svds_tol = svds_tol,
-        seed = seed,
-        fit = fit,
-        proj = FALSE,
-        ...
-    )
-    .kernel_pls_flash_attach(model, Xtest, Ytest, proj)
-}
-
-.kernel_pls_flash_attach <- function(model, Xtest, Ytest, proj) {
-    model$inner_model$predict_backend <- "cuda_flash"
-    model$inner_model$flash_svd <- TRUE
-    model$flash_svd <- TRUE
-    if (!is.null(Xtest)) {
-        res <- predict(
-            model,
-            as.matrix(Xtest),
-            Ytest = Ytest,
-            proj = proj,
-            backend = "cuda"
-        )
-        model <- c(model, res)
-        class(model) <- c("fastPLSKernel", "fastPLS")
-    }
-    model
 }
 
 .cv_normalize_selection_metric <- function(selection_metric = NULL) {
@@ -7479,7 +5702,7 @@ if (is.null(fit_data) || is.null(fit_data$Xdata) || is.null(fit_data$Ydata)) {
     list(pred = out, metrics = metrics)
 }
 
-.compiled_cv_response <- function(Ydata, kodama_class_codes, float32 = FALSE) {
+.compiled_cv_response <- function(Ydata, float32 = FALSE) {
     classification <- is.factor(Ydata)
     if (classification) {
         Ydata <- droplevels(Ydata)
@@ -7497,29 +5720,13 @@ if (is.null(fit_data) || is.null(fit_data$Xdata) || is.null(fit_data$Ydata)) {
         original <- matrix
         responses <- ncol(matrix)
     }
-    codes <- matrix(numeric(0), 0L, 0L)
-    backend_responses <- responses
-    if (!is.null(kodama_class_codes)) {
-        if (!classification) {
-            stop(
-                "KODAMA Gaussian class-code CV requires factor responses.",
-                call. = FALSE
-            )
-        }
-        codes <- as.matrix(kodama_class_codes)
-        if (nrow(codes) != responses || ncol(codes) < 1L) {
-            stop("kodama_class_codes has invalid dimensions.", call. = FALSE)
-        }
-        backend_responses <- ncol(codes)
-    }
     list(
         classification = classification,
         levels = levels,
         original = original,
         matrix = matrix,
         responses = responses,
-        backend_responses = backend_responses,
-        codes = codes
+        backend_responses = responses
     )
 }
 
@@ -7558,7 +5765,7 @@ if (is.null(fit_data) || is.null(fit_data$Xdata) || is.null(fit_data$Ydata)) {
 
 .compiled_cv_context <- function(Xdata, Ydata, constrain, ncomp, scaling,
     method,
-    backend, svd.method, xprod, kodama_class_codes, classifier,
+    backend, svd.method, xprod, classifier,
     kernel = "linear") {
     method <- match.arg(method, c("plssvd", "simpls", "opls", "kernelpls"))
     backend <- match.arg(backend, c("cpp", "cuda", "metal"))
@@ -7574,7 +5781,7 @@ if (is.null(fit_data) || is.null(fit_data$Xdata) || is.null(fit_data$Ydata)) {
         constrain <- seq_len(nrow(Xdata))
     }
     constrain <- as.integer(as.factor(constrain))
-    response <- .compiled_cv_response(Ydata, kodama_class_codes, float32)
+    response <- .compiled_cv_response(Ydata, float32)
     ncomp <- as.integer(ncomp)
     if (identical(method, "plssvd")) {
         ncomp <- .cap_plssvd_ncomp(ncomp, nrow(Xdata), ncol(Xdata),
@@ -7609,8 +5816,7 @@ if (is.null(fit_data) || is.null(fit_data$Xdata) || is.null(fit_data$Ydata)) {
     }
     core_route <- identical(context$backend, "cpp") &&
         context$method %in% c("plssvd", "simpls", "opls", "kernelpls") &&
-        !isTRUE(context$xprod) &&
-        length(context$response$codes) == 0L
+        !isTRUE(context$xprod)
     if (core_route) {
         labels <- if (context$response$classification) {
             as.integer(context$response$matrix[, 1L])
@@ -7809,64 +6015,31 @@ if (is.null(fit_data) || is.null(fit_data$Xdata) || is.null(fit_data$Ydata)) {
         result$score_predictions_stored <- !is.null(result$Ypred)
         return(result)
     }
-    pls_cv_predict_compiled(
+    .pls_cv_via_pls(
         Xdata = context$X,
-        Ydata = context$response$matrix,
+        Ydata = context$response$original,
         constrain = context$constrain,
         ncomp = context$ncomp,
-        scaling = context$scaling,
-        kfold = .compiled_cv_kfold_arg(
-            controls$kfold,
-            context$constrain
-        ),
-        method = context$method_id,
-        backend = context$backend_id,
-        svd_method = context$solver$id,
-        rsvd_oversample = as.integer(controls$oversample),
-        rsvd_power = as.integer(controls$power),
-        svds_tol = controls$svds_tol,
-        seed = as.integer(controls$seed),
-        classification = context$response$classification,
-        n_response = as.integer(context$response$responses),
-        xprod = context$xprod,
-        opls_north = as.integer(controls$north),
-        return_scores = isTRUE(controls$return_scores),
-        class_codes = context$response$codes,
-        classifier = context$classifier_id,
-        lda_ridge = controls$lda_ridge,
-        store_predictions = isTRUE(controls$store_predictions),
-        metric_id = .cv_metric_id(
-            controls$selection_metric,
-            context$response$classification
-        )
+        kfold = controls$kfold,
+        scaling = c("centering", "autoscaling", "none")[[context$scaling]],
+        method = context$method,
+        backend = "cpu",
+        svd.method = context$solver$name,
+        seed = controls$seed,
+        xprod = NULL,
+        north = controls$north,
+        kernel = context$kernel,
+        gamma = controls$gamma,
+        degree = controls$degree,
+        coef0 = controls$coef0,
+        classifier = context$classifier,
+        store_predictions = controls$store_predictions,
+        selection_metric = controls$selection_metric
     )
 }
 
 .compiled_cv_run_backend <- function(context, controls) {
-    run <- function() .compiled_cv_call(context, controls)
-    profiled <- if (context$method %in% c("simpls", "opls", "kernelpls")) {
-        function() .with_fastpls_fast_options(run())
-    } else {
-        run
-    }
-    if (identical(context$backend, "cuda")) {
-        family <- context$method %in% c("simpls", "opls", "kernelpls")
-        value <- .with_gpu_native_options(
-            profiled(),
-            gpu_device_state = family,
-            gpu_qr = controls$gpu_qr,
-            gpu_eig = controls$gpu_eig,
-            gpu_finalize_threshold = controls$gpu_finalize_threshold
-        )
-        if (family && context$xprod) {
-            value <- .with_simpls_gpu_xprod(value)
-        }
-        return(value)
-    }
-    if (identical(context$backend, "cpp")) {
-        return(profiled())
-    }
-    profiled()
+    .compiled_cv_call(context, controls)
 }
 
 .compiled_cv_decode <- function(result, context, return_scores) {
@@ -7919,14 +6092,12 @@ if (is.null(fit_data) || is.null(fit_data$Xdata) || is.null(fit_data$Ydata)) {
     rsvd_power = 5L, svds_tol = 0,
     seed = 1L, xprod = NULL, north = 1L, kernel = "linear", gamma = NULL,
     degree = 3L, coef0 = 1, return_scores = FALSE,
-    kodama_class_codes = NULL,
-    classifier = c("argmax", "lda"), lda_ridge = 1e-08, gpu_qr = TRUE,
-    gpu_eig = TRUE,
-    gpu_finalize_threshold = 32L, store_predictions = TRUE,
+    classifier = c("argmax", "lda"), lda_ridge = 1e-08,
+    store_predictions = TRUE,
     selection_metric = "auto") {
     context <- .compiled_cv_context(Xdata, Ydata, constrain, ncomp, scaling,
         method,
-        backend, svd.method, xprod, kodama_class_codes, classifier, kernel)
+        backend, svd.method, xprod, classifier, kernel)
     gamma <- if (identical(context$method, "kernelpls") &&
         !identical(context$kernel, "linear")) {
         .kernel_pls_gamma(gamma, context$X)
@@ -7939,9 +6110,7 @@ if (is.null(fit_data) || is.null(fit_data$Xdata) || is.null(fit_data$Ydata)) {
         gamma = gamma, degree = degree, coef0 = coef0,
         return_scores = return_scores,
         lda_ridge = lda_ridge, store_predictions = store_predictions,
-        selection_metric = selection_metric,
-        gpu_qr = gpu_qr, gpu_eig = gpu_eig,
-        gpu_finalize_threshold = gpu_finalize_threshold)
+        selection_metric = selection_metric)
     result <- .compiled_cv_run_backend(context, controls)
     .compiled_cv_decode(result, context, return_scores)
 }
@@ -8329,7 +6498,7 @@ stop("Could not extract regression predictions from fold fit.", call. = FALSE)
     prediction_backend <- if (minimal_resident_fit) context$backend else switch(
         context$backend,
         cuda = "cuda_flash",
-        metal = "cpu",
+        metal = "metal",
         "cpu"
     )
     Xtest <- context$X[test, , drop = FALSE]
@@ -8337,9 +6506,6 @@ stop("Could not extract regression predictions from fold fit.", call. = FALSE)
     combined <- tryCatch({
         if (identical(context$backend, "cuda")) {
             .resident_cuda_cv_classification_path(internal_fit, Xtest)
-        } else if (identical(context$backend, "metal") &&
-            minimal_resident_fit) {
-            .resident_metal_cv_classification_path(internal_fit, Xtest)
         } else {
             # Q2 uses dummy-response PLS predictions, not LDA scores.
             score_fit <- internal_fit
@@ -8359,8 +6525,7 @@ stop("Could not extract regression predictions from fold fit.", call. = FALSE)
             call. = FALSE
         )
     }
-    if (identical(context$backend, "cuda") ||
-        (identical(context$backend, "metal") && minimal_resident_fit)) {
+    if (identical(context$backend, "cuda")) {
         classified <- combined
         raw <- combined
     } else {
@@ -8412,11 +6577,15 @@ stop("Could not extract regression predictions from fold fit.", call. = FALSE)
 .via_pls_regression_fold <- function(state, context, fit, test) {
     observed <- context$original[test, , drop = FALSE]
     if (!is.null(fit$resident_state)) {
-        predicted <- if (identical(context$backend, "cuda")) {
-            .resident_cuda_predict(fit, context$X[test, , drop = FALSE], observed)
-        } else {
-            .resident_metal_predict(fit, context$X[test, , drop = FALSE], observed)
+        if (!identical(context$backend, "cuda")) {
+            stop(
+                "Only CUDA fold models may retain resident device state.",
+                call. = FALSE
+            )
         }
+        predicted <- .resident_cuda_predict(
+            fit, context$X[test, , drop = FALSE], observed
+        )
         fit[names(predicted)] <- predicted
     }
     for (slice in seq_along(context$ncomp)) {
@@ -8605,390 +6774,6 @@ stop("Could not extract regression predictions from fold fit.", call. = FALSE)
 #' @param ... Additional backend tuning arguments.
 #' @return A list with `Ypred`, decoded `pred`, `metrics`, `fold`, and status.
 #' @noRd
-.plssvd_cv_cpp <- function(
-    Xdata,
-    Ydata,
-    constrain = NULL,
-    ncomp = 2L,
-    kfold = 10L,
-    scaling = c("centering", "autoscaling", "none"),
-    svd.method = c("cpu_rsvd"),
-    xprod = NULL,
-    ...
-) {
-    .pls_cv_compiled(
-        Xdata,
-        Ydata,
-        constrain,
-        ncomp,
-        kfold,
-        scaling,
-        "plssvd",
-        "cpp",
-        svd.method,
-        xprod = xprod,
-        ...
-    )
-}
-
-#' @noRd
-.simpls_cv_cpp <- function(
-    Xdata,
-    Ydata,
-    constrain = NULL,
-    ncomp = 2L,
-    kfold = 10L,
-    scaling = c("centering", "autoscaling", "none"),
-    svd.method = c("cpu_rsvd"),
-    xprod = NULL,
-    ...
-) {
-    .pls_cv_compiled(
-        Xdata,
-        Ydata,
-        constrain,
-        ncomp,
-        kfold,
-        scaling,
-        "simpls",
-        "cpp",
-        svd.method,
-        xprod = xprod,
-        ...
-    )
-}
-
-.simpls_fast_cv_cpp <- function(
-    Xdata,
-    Ydata,
-    constrain = NULL,
-    ncomp = 2L,
-    kfold = 10L,
-    scaling = c("centering", "autoscaling", "none"),
-    svd.method = c("cpu_rsvd"),
-    xprod = NULL,
-    ...
-) {
-    .simpls_cv_cpp(
-        Xdata,
-        Ydata,
-        constrain,
-        ncomp,
-        kfold,
-        scaling,
-        svd.method,
-        xprod = xprod,
-        ...
-    )
-}
-
-#' @noRd
-.opls_cv_cpp <- function(
-    Xdata,
-    Ydata,
-    constrain = NULL,
-    ncomp = 2L,
-    kfold = 10L,
-    north = 1L,
-    scaling = c("centering", "autoscaling", "none"),
-    svd.method = c("cpu_rsvd"),
-    xprod = NULL,
-    ...
-) {
-    pred_ncomp <- pmax(1L, as.integer(ncomp) - as.integer(north))
-    .pls_cv_compiled(
-        Xdata,
-        Ydata,
-        constrain,
-        pred_ncomp,
-        kfold,
-        scaling,
-        "opls",
-        "cpp",
-        svd.method,
-        xprod = xprod,
-        north = north,
-        ...
-    )
-}
-
-#' @noRd
-.kernelpls_cv_cpp <- function(
-    Xdata,
-    Ydata,
-    constrain = NULL,
-    ncomp = 2L,
-    kfold = 10L,
-    scaling = c("centering", "autoscaling", "none"),
-    svd.method = c("cpu_rsvd"),
-    xprod = NULL,
-    ...
-) {
-    .pls_cv_compiled(
-        Xdata,
-        Ydata,
-        constrain,
-        ncomp,
-        kfold,
-        scaling,
-        "kernelpls",
-        "cpp",
-        svd.method,
-        xprod = xprod,
-        ...
-    )
-}
-
-#' @noRd
-.plssvd_cv_cuda <- function(
-    Xdata,
-    Ydata,
-    constrain = NULL,
-    ncomp = 2L,
-    kfold = 10L,
-    scaling = c("centering", "autoscaling", "none"),
-    xprod = NULL,
-    ...
-) {
-    .pls_cv_compiled(
-        Xdata,
-        Ydata,
-        constrain,
-        ncomp,
-        kfold,
-        scaling,
-        "plssvd",
-        "cuda",
-        xprod = xprod,
-        ...
-    )
-}
-
-#' @noRd
-.simpls_cv_cuda <- function(
-    Xdata,
-    Ydata,
-    constrain = NULL,
-    ncomp = 2L,
-    kfold = 10L,
-    scaling = c("centering", "autoscaling", "none"),
-    xprod = NULL,
-    ...
-) {
-    .pls_cv_compiled(
-        Xdata,
-        Ydata,
-        constrain,
-        ncomp,
-        kfold,
-        scaling,
-        "simpls",
-        "cuda",
-        xprod = xprod,
-        ...
-    )
-}
-
-.simpls_fast_cv_cuda <- function(
-    Xdata,
-    Ydata,
-    constrain = NULL,
-    ncomp = 2L,
-    kfold = 10L,
-    scaling = c("centering", "autoscaling", "none"),
-    xprod = NULL,
-    ...
-) {
-    .simpls_cv_cuda(
-        Xdata,
-        Ydata,
-        constrain,
-        ncomp,
-        kfold,
-        scaling,
-        xprod = xprod,
-        ...
-    )
-}
-
-#' @noRd
-.opls_cv_cuda <- function(
-    Xdata,
-    Ydata,
-    constrain = NULL,
-    ncomp = 2L,
-    kfold = 10L,
-    north = 1L,
-    scaling = c("centering", "autoscaling", "none"),
-    xprod = NULL,
-    ...
-) {
-    pred_ncomp <- pmax(1L, as.integer(ncomp) - as.integer(north))
-    .pls_cv_compiled(
-        Xdata,
-        Ydata,
-        constrain,
-        pred_ncomp,
-        kfold,
-        scaling,
-        "opls",
-        "cuda",
-        xprod = xprod,
-        north = north,
-        ...
-    )
-}
-
-#' @noRd
-.kernelpls_cv_cuda <- function(
-    Xdata,
-    Ydata,
-    constrain = NULL,
-    ncomp = 2L,
-    kfold = 10L,
-    scaling = c("centering", "autoscaling", "none"),
-    xprod = NULL,
-    ...
-) {
-    .pls_cv_compiled(
-        Xdata,
-        Ydata,
-        constrain,
-        ncomp,
-        kfold,
-        scaling,
-        "kernelpls",
-        "cuda",
-        xprod = xprod,
-        ...
-    )
-}
-
-#' @noRd
-.plssvd_cv_metal <- function(
-    Xdata,
-    Ydata,
-    constrain = NULL,
-    ncomp = 2L,
-    kfold = 10L,
-    scaling = c("centering", "autoscaling", "none"),
-    xprod = NULL,
-    ...
-) {
-    .pls_cv_compiled(
-        Xdata,
-        Ydata,
-        constrain,
-        ncomp,
-        kfold,
-        scaling,
-        "plssvd",
-        "metal",
-        xprod = xprod,
-        ...
-    )
-}
-
-#' @noRd
-.simpls_cv_metal <- function(
-    Xdata,
-    Ydata,
-    constrain = NULL,
-    ncomp = 2L,
-    kfold = 10L,
-    scaling = c("centering", "autoscaling", "none"),
-    xprod = NULL,
-    ...
-) {
-    .pls_cv_compiled(
-        Xdata,
-        Ydata,
-        constrain,
-        ncomp,
-        kfold,
-        scaling,
-        "simpls",
-        "metal",
-        xprod = xprod,
-        ...
-    )
-}
-
-.simpls_fast_cv_metal <- function(
-    Xdata,
-    Ydata,
-    constrain = NULL,
-    ncomp = 2L,
-    kfold = 10L,
-    scaling = c("centering", "autoscaling", "none"),
-    xprod = NULL,
-    ...
-) {
-    .simpls_cv_metal(
-        Xdata,
-        Ydata,
-        constrain,
-        ncomp,
-        kfold,
-        scaling,
-        xprod = xprod,
-        ...
-    )
-}
-
-#' @noRd
-.opls_cv_metal <- function(
-    Xdata,
-    Ydata,
-    constrain = NULL,
-    ncomp = 2L,
-    kfold = 10L,
-    north = 1L,
-    scaling = c("centering", "autoscaling", "none"),
-    xprod = NULL,
-    ...
-) {
-    pred_ncomp <- pmax(1L, as.integer(ncomp) - as.integer(north))
-    .pls_cv_compiled(
-        Xdata,
-        Ydata,
-        constrain,
-        pred_ncomp,
-        kfold,
-        scaling,
-        "opls",
-        "metal",
-        xprod = xprod,
-        north = north,
-        ...
-    )
-}
-
-#' @noRd
-.kernelpls_cv_metal <- function(
-    Xdata,
-    Ydata,
-    constrain = NULL,
-    ncomp = 2L,
-    kfold = 10L,
-    scaling = c("centering", "autoscaling", "none"),
-    xprod = NULL,
-    ...
-) {
-    .pls_cv_compiled(
-        Xdata,
-        Ydata,
-        constrain,
-        ncomp,
-        kfold,
-        scaling,
-        "kernelpls",
-        "metal",
-        xprod = xprod,
-        ...
-    )
-}
-
 .svd_methods_internal <- c(
     "exact",
     "cpu_rsvd",
@@ -9010,150 +6795,6 @@ stop("Could not extract regression predictions from fold fit.", call. = FALSE)
     )
 }
 
-#' List available SVD backends
-#'
-#' Reports backend labels accepted by high-level APIs and whether each backend
-#' is currently available.
-#'
-#' @return Data frame with columns `backend`, `method`, `svd.method`, and
-#'   `enabled`.
-#' @noRd
-.svd_methods <- function() {
-    combos <- data.frame(
-        backend = c("cpu", "cuda", "metal"),
-        method = rep("rsvd", 3L),
-        svd.method = c("cpu_rsvd", "cuda_rsvd", "metal_rsvd"),
-        enabled = c(TRUE, isTRUE(has_cuda()), isTRUE(has_metal())),
-        stringsAsFactors = FALSE
-    )
-    combos
-}
-
-
-.truncated_rsvd_metal <- function(A, k, rsvd_oversample = 32L, rsvd_power = 5L,
-    seed = 1L, left_only = FALSE) {
-    if (!isTRUE(has_metal())) {
-        .fastpls_require_backend_available("metal", "Metal rSVD")
-    }
-    A <- as.matrix(A); max_rank <- min(nrow(A), ncol(A))
-    target <- min(max_rank, max(1L, as.integer(k)[1L]))
-    sketch_rank <- min(max_rank, target + max(0L,
-        as.integer(rsvd_oversample)[1L]))
-    if (max_rank <= .metal_exact_max_rank() || sketch_rank >= max_rank) {
-        exact <- svd(A, nu = target, nv = if (isTRUE(left_only))
-            0L
-        else target)
-        return(list(U = exact$u[, seq_len(target), drop = FALSE],
-            s = exact$d[seq_len(target)],
-            Vt = if (isTRUE(left_only)) {
-                NULL
-            } else {
-                t(exact$v[, seq_len(target), drop = FALSE])
-            }))
-    }
-    .fastpls_set_seed(seed)
-    omega <- matrix(rnorm(ncol(A) * sketch_rank), nrow = ncol(A),
-        ncol = sketch_rank)
-    Y <- metal_matrix_multiply_cpp(A, omega)
-    n_power <- max(0L, as.integer(rsvd_power)[1L])
-    if (n_power > 0L) {
-        for (i in seq_len(n_power)) {
-            Qy <- qr.Q(qr(Y))
-            Z <- metal_crossprod_cpp(A, Qy)
-            Qz <- qr.Q(qr(Z))
-            Y <- metal_matrix_multiply_cpp(A, Qz)
-        }
-    }
-    Q <- qr.Q(qr(Y)); B <- metal_crossprod_cpp(Q, A)
-    small <- svd(B, nu = target, nv = if (isTRUE(left_only))
-        0L
-    else target)
-    usable <- min(target, length(small$d), ncol(small$u))
-    U <- Q %*% small$u[, seq_len(usable), drop = FALSE]
-    Vt <- if (isTRUE(left_only)) {
-        NULL
-    }
-    else {
-        t(small$v[, seq_len(usable), drop = FALSE])
-    }
-    list(U = U, s = small$d[seq_len(usable)], Vt = Vt)
-}
-
-.metal_xprod_multiply <- function(X, Y, values) {
-    .metal_crossprod(X, .metal_mm(Y, values))
-}
-
-.metal_xprod_transpose_multiply <- function(X, Y, values) {
-    .metal_crossprod(Y, .metal_mm(X, values))
-}
-
-.truncated_rsvd_metal_xprod <- function(X, Y, k, rsvd_oversample = 32L,
-    rsvd_power = 5L,
-    seed = 1L, left_only = FALSE) {
-    if (!isTRUE(has_metal())) {
-        .fastpls_require_backend_available("metal", "Matrix-free Metal rSVD")
-    }
-    X <- as.matrix(X)
-    Y <- as.matrix(Y)
-    if (nrow(X) != nrow(Y)) {
-        stop(
-            "Metal matrix-free SVD requires X and Y with equal row counts.",
-            call. = FALSE
-        )
-    }
-    p <- ncol(X)
-    q <- ncol(Y)
-    max_rank <- min(p, q)
-    target <- min(max_rank, max(1L, as.integer(k)[1L]))
-    sketch_rank <- min(max_rank, target + max(0L,
-        as.integer(rsvd_oversample)[1L]))
-    .fastpls_set_seed(seed)
-    omega <- matrix(rnorm(q * sketch_rank), nrow = q, ncol = sketch_rank)
-    metal_xprod_rsvd_cpp(X, Y, omega, target,
-        max(0L, as.integer(rsvd_power)[1L]), isTRUE(left_only))
-}
-
-.svd_dispatch_metal <- function(A, k, oversample, power, seed, left_only) {
-    elapsed <- system.time({
-        output <- .truncated_rsvd_metal(
-            A = as.matrix(A),
-            k = as.integer(k),
-            rsvd_oversample = as.integer(oversample),
-            rsvd_power = as.integer(power),
-            seed = as.integer(seed),
-            left_only = isTRUE(left_only)
-        )
-    })["elapsed"]
-    list(
-        U = output$U,
-        s = as.vector(output$s),
-        Vt = output$Vt,
-        method = "metal_rsvd",
-        elapsed = as.numeric(elapsed)
-    )
-}
-
-.normalize_svd_debug_output <- function(output, method, elapsed) {
-    list(
-        U = output$u,
-        s = as.vector(output$d),
-        Vt = output$vt,
-        method = method,
-        elapsed = as.numeric(elapsed),
-        case_audited = isTRUE(output$case_audited),
-        case_certified = isTRUE(output$case_certified),
-        deterministic_fallback = isTRUE(output$deterministic_fallback),
-        audit_attempts = output$audit_attempts,
-        effective_oversample = output$effective_oversample,
-        effective_power = output$effective_power,
-        effective_seed = output$effective_seed,
-        audit_subspace_error = output$audit_subspace_error,
-        audit_singular_value_error = output$audit_singular_value_error,
-        audit_triplet_residual = output$audit_triplet_residual,
-        audit_omitted_direction_ratio = output$audit_omitted_direction_ratio
-    )
-}
-
 .svd_dispatch_compiled <- function(
     A,
     k,
@@ -9164,35 +6805,19 @@ stop("Could not extract regression predictions from fold fit.", call. = FALSE)
     seed,
     left_only
 ) {
-    if (identical(method, "cpu_rsvd")) {
-        elapsed <- system.time({
-            output <- fastsvd_core_cpp(
-                as.matrix(A), as.integer(k), as.integer(oversample),
-                as.integer(power), as.integer(seed), isTRUE(left_only)
-            )
-        })["elapsed"]
-        output$elapsed <- as.numeric(elapsed)
-        output$method <- method
-        output$precision <- "double"
-        return(output)
-    }
-    method_id <- .svd_method_id(method)
-    if (is.na(method_id)) {
-        stop("Unknown method", call. = FALSE)
+    if (!identical(method, "cpu_rsvd")) {
+        stop("Standalone fastsvd() supports backend = 'cpu' only.", call. = FALSE)
     }
     elapsed <- system.time({
-        output <- truncated_svd_debug(
-            A = as.matrix(A),
-            k = as.integer(k),
-            svd_method = as.integer(method_id),
-            rsvd_oversample = as.integer(oversample),
-            rsvd_power = as.integer(power),
-            svds_tol = as.numeric(tolerance),
-            seed = as.integer(seed),
-            left_only = isTRUE(left_only)
+        output <- fastsvd_core_cpp(
+            as.matrix(A), as.integer(k), as.integer(oversample),
+            as.integer(power), as.integer(seed), isTRUE(left_only)
         )
     })["elapsed"]
-    .normalize_svd_debug_output(output, method, elapsed)
+    output$elapsed <- as.numeric(elapsed)
+    output$method <- method
+    output$precision <- "double"
+    output
 }
 
 .svd_dispatch <- function(
@@ -9207,22 +6832,6 @@ stop("Could not extract regression predictions from fold fit.", call. = FALSE)
 ) {
     method <- .normalize_svd_method(method)
     method <- match.arg(method)
-    if (identical(method, "cuda_rsvd") && !has_cuda()) {
-        .fastpls_require_backend_available("cuda", "SVD dispatch")
-    }
-    if (identical(method, "metal_rsvd") && !has_metal()) {
-        .fastpls_require_backend_available("metal", "SVD dispatch")
-    }
-    if (identical(method, "metal_rsvd")) {
-        return(.svd_dispatch_metal(
-            A,
-            k,
-            rsvd_oversample,
-            rsvd_power,
-            seed,
-            left_only
-        ))
-    }
     .svd_dispatch_compiled(
         A,
         k,
@@ -9265,7 +6874,7 @@ stop("Could not extract regression predictions from fold fit.", call. = FALSE)
     list(
         U = raw$u,
         s = as.vector(raw$d),
-        Vt = if (isTRUE(left_only)) NULL else t(raw$v),
+        Vt = if (isTRUE(left_only)) NULL else .float32_transpose(raw$v),
         method = svd.method,
         elapsed = as.numeric(t_elapsed),
         precision = "float32",
@@ -9313,28 +6922,7 @@ stop("Could not extract regression predictions from fold fit.", call. = FALSE)
             audit_omitted_direction_ratio = raw$audit_omitted_direction_ratio
         ))
     }
-    backend_id <- switch(backend, cpu = 0L, cuda = 1L, metal = 2L)
-    svd_id <- .float32_svd_id(svd.method)
-    t_elapsed <- system.time({
-        raw <- fastsvd_float32_cpp(.as_float32_matrix(x, "x"), as.integer(k),
-            as.integer(backend_id),
-            as.integer(svd_id), as.integer(oversample), as.integer(power),
-            as.integer(seed),
-            isTRUE(left_only))
-    })["elapsed"]
-    list(U = .float32_from_bits(raw$u), s = as.vector(raw$d),
-        Vt = if (is.null(raw$v)) NULL else t(.float32_from_bits(raw$v)),
-        method = svd.method, elapsed = as.numeric(t_elapsed),
-        precision = "float32",
-        case_audited = isTRUE(raw$case_audited),
-        case_certified = isTRUE(raw$case_certified),
-        deterministic_fallback = isTRUE(raw$deterministic_fallback),
-        audit_attempts = raw$audit_attempts,
-        effective_oversample = raw$effective_oversample,
-        effective_power = raw$effective_power,
-        effective_seed = raw$effective_seed,
-        audit_triplet_residual = raw$audit_triplet_residual,
-        audit_omitted_direction_ratio = raw$audit_omitted_direction_ratio)
+    stop("Standalone fastsvd() supports backend = 'cpu' only.", call. = FALSE)
 }
 
 .fastsvd_basic_diagnostics <- function(decomposition) {
@@ -9361,8 +6949,9 @@ stop("Could not extract regression predictions from fold fit.", call. = FALSE)
 }
 
 .fastsvd_triplet_diagnostics <- function(x, decomposition, indices) {
-    u <- decomposition$U
-    v <- t(decomposition$Vt)
+    u <- .float32_to_numeric_matrix(decomposition$U)
+    v <- t(.float32_to_numeric_matrix(decomposition$Vt))
+    x <- .float32_to_numeric_matrix(x)
     values <- as.numeric(decomposition$s)
     ud <- u[, indices, drop = FALSE]
     vd <- v[, indices, drop = FALSE]
@@ -9706,7 +7295,7 @@ fastsvd <- function(x, nu = NULL, nv = NULL, ncomp = NULL, backend = NULL,
     u <- out$U
     v <- if (is.null(out$Vt) || length(out$Vt) == 0L)
         NULL
-    else t(out$Vt)
+    else .float32_transpose(out$Vt)
     if (!is.null(u) && ncol(u) > config$nu) {
         u <- u[, seq_len(config$nu), drop = FALSE]
     }
@@ -10147,535 +7736,17 @@ plot.permutation <- function(
             "Metal matrix multiplication"
         )
     }
-    A <- as.matrix(A)
-    B <- as.matrix(B)
-    metal_matrix_multiply_cpp(A, B)
-}
-
-.metal_crossprod <- function(A, B) {
-    if (!isTRUE(has_metal())) {
-        .fastpls_require_backend_available("metal", "Metal cross-product")
-    }
-    A <- as.matrix(A)
-    B <- as.matrix(B)
-    metal_crossprod_cpp(A, B)
+    value <- metal_float32_matrix_multiply_cpp(
+        .as_float32_matrix(A, "A"),
+        .as_float32_matrix(B, "B"),
+        FALSE,
+        FALSE
+    )
+    .float32_to_numeric_matrix(.float32_from_bits(value$C))
 }
 
 .metal_outer <- function(a, b) {
     tcrossprod(as.numeric(a), as.numeric(b))
-}
-
-.metal_min_flops <- function() {
-    val <- .fastpls_quiet(
-        as.numeric(Sys.getenv("FASTPLS_METAL_MIN_FLOPS", "200000000"))
-    )
-    if (!is.finite(val) || val < 0) 2e8 else val
-}
-
-.metal_exact_max_rank <- function() {
-    val <- .fastpls_quiet(
-        as.integer(Sys.getenv("FASTPLS_METAL_EXACT_MAX_RANK", "256"))
-    )
-    if (!is.finite(val) || is.na(val) || val < 0L) 256L else val
-}
-
-.metal_should_use_mm <- function(m, k, n) {
-    m <- as.numeric(m)
-    k <- as.numeric(k)
-    n <- as.numeric(n)
-    if (!is.finite(m) || !is.finite(k) || !is.finite(n)) {
-        return(FALSE)
-    }
-    if (m <= 0 || k <= 0 || n <= 0) {
-        return(FALSE)
-    }
-    # Matrix-vector and very thin products spend more time copying/dispatching
-    # than computing unless the matrix is very large. BLAS is safer there.
-    if (min(m, n) <= 1 && (m * k * n) < (.metal_min_flops() * 4)) {
-        return(FALSE)
-    }
-    (2 * m * k * n) >= .metal_min_flops()
-}
-
-.metal_experimental_iterative_enabled <- function() {
-    tolower(Sys.getenv("FASTPLS_METAL_EXPERIMENTAL_ITERATIVE", "false")) %in%
-        c("1", "true", "yes", "y")
-}
-
-.metal_resident_simpls_enabled <- function() {
-    !tolower(Sys.getenv("FASTPLS_METAL_RESIDENT_SIMPLS", "true")) %in%
-        c("0", "false", "no", "n")
-}
-
-.metal_pls_preprocess <- function(Xtrain, Ytrain, scaling) {
-    n <- nrow(Xtrain)
-    p <- ncol(Xtrain)
-    m <- ncol(Ytrain)
-    mean_x <- matrix(0, 1L, p)
-    if (scaling < 3L) {
-        mean_x <- matrix(colMeans(Xtrain), nrow = 1L)
-        Xtrain <- sweep(Xtrain, 2L, mean_x[1L, ], "-")
-    }
-    scale_x <- matrix(1, 1L, p)
-    if (scaling == 2L) {
-        scale_x <- matrix(apply(Xtrain, 2L, sd), nrow = 1L)
-        scale_x[!is.finite(scale_x) | scale_x == 0] <- 1
-        Xtrain <- sweep(Xtrain, 2L, scale_x[1L, ], "/")
-    }
-    mean_y <- matrix(colMeans(Ytrain), nrow = 1L)
-    list(
-        X = Xtrain,
-        Y = sweep(Ytrain, 2L, mean_y[1L, ], "-"),
-        mX = mean_x,
-        vX = scale_x,
-        mY = mean_y,
-        n = n,
-        p = p,
-        m = m
-    )
-}
-
-.metal_plssvd_decomposition <- function(prep, ncomp, oversample, power, seed) {
-    rank <- min(max(ncomp), prep$n, prep$p, prep$m)
-    if (rank < 1L) {
-        stop("PLS-SVD effective rank is below one")
-    }
-    implicit <- .should_use_xprod_default(prep$p, prep$m, ncomp)
-    value <- if (implicit) {
-        .truncated_rsvd_metal_xprod(
-            prep$X,
-            prep$Y,
-            rank,
-            oversample,
-            power,
-            seed
-        )
-    } else {
-        .truncated_rsvd_metal(
-            .metal_crossprod(prep$X, prep$Y),
-            rank,
-            oversample,
-            power,
-            seed
-        )
-    }
-    rank <- min(rank, ncol(value$U), nrow(value$Vt))
-    list(
-        R = value$U[, seq_len(rank), drop = FALSE],
-        Q = t(value$Vt[seq_len(rank), , drop = FALSE]),
-        singular = value$s,
-        rank = rank,
-        implicit = implicit
-    )
-}
-
-.metal_plssvd_path <- function(prep, decomposition, ncomp, fit) {
-    scores <- .metal_mm(prep$X, decomposition$R)
-    gram <- .metal_crossprod(scores, scores)
-    slices <- length(ncomp)
-    rank <- decomposition$rank
-    store <- .should_store_coefficients(prep$p, prep$m, slices, TRUE)
-    B <- if (store) array(0, c(prep$p, prep$m, slices)) else NULL
-    C <- array(0, c(rank, rank, slices))
-    store_weights <- slices == 1L ||
-        as.double(rank) * prep$m * slices * 8 <= 32 * 1024^2
-    W <- if (store_weights) array(0, c(rank, prep$m, slices)) else NULL
-    fitted <- if (fit) array(0, c(prep$n, prep$m, slices)) else NULL
-    r2 <- rep(NA_real_, slices)
-    for (index in seq_along(ncomp)) {
-        k <- min(ncomp[[index]], rank)
-        coefficient <- solve(
-            gram[seq_len(k), seq_len(k), drop = FALSE],
-            diag(decomposition$singular[seq_len(k)], nrow = k)
-        )
-        C[seq_len(k), seq_len(k), index] <- coefficient
-        if (store_weights || store || fit) {
-            weight <- coefficient %*%
-                t(decomposition$Q[, seq_len(k), drop = FALSE])
-        }
-        if (store_weights) W[seq_len(k), , index] <- weight
-        if (store) {
-            B[, , index] <- .metal_mm(
-                decomposition$R[, seq_len(k), drop = FALSE],
-                weight
-            )
-        }
-        if (fit) {
-            value <- .metal_mm(scores[, seq_len(k), drop = FALSE], weight)
-            r2[[index]] <- RQ(prep$Y, value)
-            fitted[, , index] <- sweep(value, 2L, prep$mY[1L, ], "+")
-        }
-    }
-    list(
-        B = B,
-        C = C,
-        W = W,
-        scores = scores,
-        fitted = fitted,
-        r2 = r2,
-        store = store
-    )
-}
-
-.metal_plssvd_model <- function(prep, decomposition, path, ncomp) {
-    model <- list(
-        C_latent = path$C,
-        Q = decomposition$Q,
-        Ttrain = path$scores,
-        R = decomposition$R,
-        mX = prep$mX,
-        vX = prep$vX,
-        mY = prep$mY,
-        p = prep$p,
-        m = prep$m,
-        ncomp = ncomp,
-        Yfit = path$fitted,
-        R2Y = path$r2,
-        backend = "metal",
-        svd.method = "metal_rsvd",
-        xprod_default = decomposition$implicit,
-        xprod_mode = if (decomposition$implicit) {
-            "metal_implicit"
-        } else {
-            "materialized"
-        }
-    )
-    if (!is.null(path$W)) model$W_latent <- path$W
-    if (path$store) {
-        model$B <- path$B
-    }
-    model <- .annotate_coefficient_storage(model, path$store)
-    class(model) <- "fastPLS"
-    .attach_backend_control(model)
-}
-
-.pls_model1_metal <- function(
-    Xtrain,
-    Ytrain,
-    ncomp,
-    scaling,
-    fit,
-    rsvd_oversample,
-    rsvd_power,
-    seed
-) {
-    ncomp <- as.integer(ncomp)
-    prep <- .metal_pls_preprocess(Xtrain, Ytrain, scaling)
-    decomposition <- .metal_plssvd_decomposition(
-        prep,
-        ncomp,
-        rsvd_oversample,
-        rsvd_power,
-        seed
-    )
-    path <- .metal_plssvd_path(prep, decomposition, ncomp, fit)
-    .metal_plssvd_model(prep, decomposition, path, ncomp)
-}
-
-.metal_project_left <- function(values, basis, used) {
-    if (used < 1L) return(values)
-    previous <- basis[, seq_len(used), drop = FALSE]
-    values - previous %*% crossprod(previous, values)
-}
-
-.metal_simpls_direction <- function(prep, S, V, used, oversample, power, seed) {
-    if (!is.null(S)) {
-        return(.truncated_rsvd_metal(
-            S,
-            k = 1L,
-            rsvd_oversample = oversample,
-            rsvd_power = power,
-            seed = seed,
-            left_only = TRUE
-        )$U[, 1L])
-    }
-    sketch_rank <- min(prep$p, prep$m, 1L + max(0L, as.integer(oversample)))
-    .fastpls_set_seed(seed)
-    omega <- matrix(rnorm(prep$m * sketch_rank), prep$m, sketch_rank)
-    sketch <- .metal_xprod_multiply(prep$X, prep$Y, omega)
-    sketch <- .metal_project_left(sketch, V, used)
-    for (iteration in seq_len(max(0L, as.integer(power)))) {
-        q_left <- qr.Q(qr(sketch))
-        right <- .metal_xprod_transpose_multiply(prep$X, prep$Y, q_left)
-        q_right <- qr.Q(qr(right))
-        sketch <- .metal_xprod_multiply(prep$X, prep$Y, q_right)
-        sketch <- .metal_project_left(sketch, V, used)
-    }
-    q_left <- qr.Q(qr(sketch))
-    reduced <- t(.metal_xprod_transpose_multiply(prep$X, prep$Y, q_left))
-    small <- svd(reduced, nu = 1L, nv = 0L)
-    drop(q_left %*% small$u[, 1L, drop = FALSE])
-}
-
-.is_usable_simpls_norm <- function(value) {
-    is.finite(value) && value > .Machine$double.eps
-}
-
-.metal_simpls_resident_factors <- function(
-    prep, ncomp, requested, power, seed
-) {
-    native <- metal_simpls_resident_cpp(
-        prep$X, prep$Y, requested, max(1L, as.integer(power)), as.integer(seed)
-    )
-    rank <- min(
-        as.integer(native$ncomp), ncol(native$R), ncol(native$Q), ncol(native$V)
-    )
-    if (!is.finite(rank) || rank < 1L) {
-        stop("Resident Metal SIMPLS did not return a usable component.")
-    }
-    list(
-        R = native$R[, seq_len(rank), drop = FALSE],
-        Q = native$Q[, seq_len(rank), drop = FALSE],
-        V = native$V[, seq_len(rank), drop = FALSE],
-        rank = rank, ncomp = pmin(ncomp, rank), xprod = TRUE, resident = TRUE
-    )
-}
-
-.metal_simpls_component <- function(
-    prep, S, V, rank, oversample, power, component, seed
-) {
-    direction <- .metal_simpls_direction(
-        prep, S, V, rank, oversample, power, seed + component - 1L
-    )
-    direction <- .metal_project_left(direction, V, rank)
-    direction_norm <- sqrt(sum(direction * direction))
-    if (!.is_usable_simpls_norm(direction_norm)) return(NULL)
-    direction <- direction / direction_norm
-    score <- drop(.metal_mm(prep$X, matrix(direction, ncol = 1L)))
-    score_norm <- sqrt(sum(score * score))
-    if (!.is_usable_simpls_norm(score_norm)) return(NULL)
-    score <- score / score_norm
-    direction <- direction / score_norm
-    loading <- drop(.metal_crossprod(prep$X, matrix(score, ncol = 1L)))
-    response_loading <- drop(.metal_crossprod(prep$Y, matrix(score, ncol = 1L)))
-    orthogonal_loading <- .metal_project_left(loading, V, rank)
-    orthogonal_norm <- sqrt(sum(orthogonal_loading * orthogonal_loading))
-    if (!.is_usable_simpls_norm(orthogonal_norm)) return(NULL)
-    list(
-        direction = direction,
-        response_loading = response_loading,
-        orthogonal_loading = orthogonal_loading / orthogonal_norm
-    )
-}
-
-.metal_simpls_oversampled_factors <- function(
-    prep, ncomp, requested, oversample, power, seed, S
-) {
-    R <- matrix(0, prep$p, requested)
-    Q <- matrix(0, prep$m, requested)
-    V <- matrix(0, prep$p, requested)
-    rank <- 0L
-    for (component in seq_len(requested)) {
-        next_component <- .metal_simpls_component(
-            prep, S, V, rank, oversample, power, component, seed
-        )
-        if (is.null(next_component)) break
-        R[, component] <- next_component$direction
-        Q[, component] <- next_component$response_loading
-        V[, component] <- next_component$orthogonal_loading
-        rank <- component
-        if (!is.null(S)) {
-            orthogonal_loading <- next_component$orthogonal_loading
-            deflation_row <- drop(crossprod(orthogonal_loading, S))
-            S <- S - tcrossprod(orthogonal_loading, deflation_row)
-        }
-    }
-    if (rank < 1L) stop("Metal SIMPLS did not return a usable component.")
-    list(
-        R = R[, seq_len(rank), drop = FALSE],
-        Q = Q[, seq_len(rank), drop = FALSE],
-        V = V[, seq_len(rank), drop = FALSE],
-        rank = rank, ncomp = pmin(ncomp, rank), xprod = is.null(S),
-        resident = FALSE
-    )
-}
-
-.metal_simpls_factors <- function(prep, ncomp, oversample, power, seed) {
-    requested <- min(max(ncomp), prep$n - 1L, prep$p)
-    if (requested < 1L) stop("SIMPLS Metal effective rank is below one.")
-    S_mb <- as.double(prep$p) * as.double(prep$m) * 8 / 1024^2
-    if (S_mb > 512 && isTRUE(.metal_resident_simpls_enabled())) {
-        return(.metal_simpls_resident_factors(
-            prep, ncomp, requested, power, seed
-        ))
-    }
-    S <- if (S_mb <= 512) .metal_crossprod(prep$X, prep$Y) else NULL
-    .metal_simpls_oversampled_factors(
-        prep, ncomp, requested, oversample, power, seed, S
-    )
-}
-
-.metal_simpls_path <- function(prep, factors, ncomp, fit) {
-    scores <- .metal_mm(prep$X, factors$R)
-    slices <- length(ncomp); rank <- factors$rank
-    store <- .should_store_coefficients(prep$p, prep$m, slices, TRUE)
-    B <- if (store) array(0, c(prep$p, prep$m, slices)) else NULL
-    fitted <- if (fit) array(0, c(prep$n, prep$m, slices)) else NULL
-    r2 <- rep(NA_real_, slices)
-    for (index in seq_along(ncomp)) {
-        k <- min(ncomp[[index]], rank)
-        if (store || fit) {
-            weight <- t(factors$Q[, seq_len(k), drop = FALSE])
-        }
-        if (store) {
-            B[, , index] <- .metal_mm(
-                factors$R[, seq_len(k), drop = FALSE], weight
-            )
-        }
-        if (fit) {
-            value <- .metal_mm(scores[, seq_len(k), drop = FALSE], weight)
-            r2[[index]] <- RQ(prep$Y, value)
-            fitted[, , index] <- sweep(value, 2L, prep$mY[1L, ], "+")
-        }
-    }
-    list(B = B, scores = scores, fitted = fitted, r2 = r2,
-        store = store, ncomp = pmin(ncomp, rank))
-}
-
-.metal_simpls_model <- function(prep, factors, path) {
-    model <- list(
-        Q = factors$Q, Ttrain = path$scores,
-        R = factors$R, V = factors$V, mX = prep$mX, vX = prep$vX,
-        mY = prep$mY, p = prep$p, m = prep$m, ncomp = path$ncomp,
-        Yfit = path$fitted, R2Y = path$r2, backend = "metal",
-        svd.method = "metal_rsvd", xprod_default = isTRUE(factors$xprod),
-        xprod_mode = if (isTRUE(factors$resident)) {
-            "metal_resident_rank_one_simpls"
-        } else {
-            "metal_oversampled_simpls"
-        }
-    )
-    if (path$store) model$B <- path$B
-    model <- .annotate_coefficient_storage(model, path$store)
-    class(model) <- "fastPLS"
-    .attach_backend_control(model)
-}
-
-.pls_model2_fast_metal <- function(
-    Xtrain,
-    Ytrain,
-    ncomp,
-    scaling,
-    fit,
-    rsvd_oversample,
-    rsvd_power,
-    seed
-) {
-    ncomp <- sort(unique(as.integer(ncomp)))
-    prep <- .metal_pls_preprocess(Xtrain, Ytrain, scaling)
-    factors <- .metal_simpls_factors(
-        prep, ncomp, rsvd_oversample, rsvd_power, seed
-    )
-    path <- .metal_simpls_path(prep, factors, ncomp, fit)
-    .metal_simpls_model(prep, factors, path)
-}
-
-.metal_prediction_weights <- function(object, component, slice) {
-    index <- seq_len(component)
-    if (!is.null(object$W_latent)) {
-        return(matrix(object$W_latent[index, , slice],
-            nrow = component, ncol = object$m))
-    }
-    if (is.null(object$Q)) return(NULL)
-    weights <- t(object$Q[, index, drop = FALSE])
-    if (!is.null(object$C_latent)) {
-        coefficient <- matrix(object$C_latent[index, index, slice],
-            nrow = component, ncol = component)
-        # Retain the stored weights' host arithmetic before Metal prediction.
-        weights <- coefficient %*% weights
-    }
-    weights
-}
-
-.pls_predict_metal <- function(object, Xtest, proj = FALSE) {
-    Xscaled <- .fastpls_preprocess_test(Xtest, object$mX, object$vX)
-    ncomp <- as.integer(object$ncomp)
-    ns <- length(ncomp)
-    n <- nrow(Xscaled)
-    m <- as.integer(object$m)
-    Ypred <- array(0, dim = c(n, m, ns))
-    B_obj <- object[["B", exact = TRUE]]
-
-    Tfull <- NULL
-    if (!is.null(object$R) && length(object$R) > 0L) {
-        maxc <- min(max(ncomp), ncol(object$R))
-        Tfull <- .metal_mm(Xscaled, object$R[, seq_len(maxc), drop = FALSE])
-    }
-
-    for (i in seq_len(ns)) {
-        mc <- min(ncomp[i], if (!is.null(Tfull)) ncol(Tfull) else ncomp[i])
-        W <- if (!is.null(Tfull)) {
-            .metal_prediction_weights(object, mc, i)
-        } else NULL
-        if (!is.null(W)) {
-            y <- .metal_mm(Tfull[, seq_len(mc), drop = FALSE], W)
-        } else if (!is.null(B_obj)) {
-            B_i <- matrix(B_obj[, , i], nrow = object$p, ncol = object$m)
-            y <- .metal_mm(Xscaled, B_i)
-        } else {
-            stop(
-                "Metal prediction requires compact factors or coefficients.",
-                call. = FALSE
-            )
-        }
-        Ypred[, , i] <- sweep(y, 2, as.numeric(object$mY[1, ]), "+")
-    }
-    out <- list(Ypred = Ypred)
-    if (isTRUE(proj) && !is.null(Tfull)) {
-        out$Ttest <- Tfull
-    }
-    out
-}
-
-.opls_filter_metal <- function(X, Y, north, scaling) {
-    prep <- .fastpls_preprocess_train(X, scaling); Xf <- prep$X
-    Yc <- sweep(as.matrix(Y), 2, colMeans(as.matrix(Y)), "-")
-    north <- as.integer(north); used <- 0L
-    W_orth <- matrix(0, nrow = ncol(Xf), ncol = max(0L, north))
-    P_orth <- matrix(0, nrow = ncol(Xf), ncol = max(0L, north))
-    if (north > 0L) {
-        for (a in seq_len(north)) {
-            s <- fastsvd(.metal_crossprod(Xf, Yc), ncomp = 1L,
-                backend = "metal",
-                method = "rsvd", oversample = 32L, power = 5L)
-            w <- s$u[, 1L, drop = FALSE]
-            w_norm <- sqrt(sum(w * w))
-            if (!is.finite(w_norm) || w_norm <= 0) {
-                break
-            }
-            w <- w / w_norm; tt <- .metal_mm(Xf, w)
-            tt_ss <- drop(crossprod(tt))
-            if (!is.finite(tt_ss) || tt_ss <= 0) {
-                break
-            }
-            pp <- .metal_crossprod(Xf, tt) / tt_ss
-            w_orth <- pp - w %*% crossprod(w, pp) / drop(crossprod(w))
-            wo_norm <- sqrt(sum(w_orth * w_orth))
-            if (!is.finite(wo_norm) || wo_norm <= 0) {
-                break
-            }
-            w_orth <- w_orth / wo_norm; t_orth <- .metal_mm(Xf, w_orth)
-            to_ss <- drop(crossprod(t_orth))
-            if (!is.finite(to_ss) || to_ss <= 0) {
-                break
-            }
-            p_orth <- .metal_crossprod(Xf, t_orth) / to_ss
-            Xf <- Xf - .metal_outer(t_orth, p_orth)
-            used <- used + 1L
-            W_orth[, used] <- w_orth[, 1L]
-            P_orth[, used] <- p_orth[, 1L]
-        }
-    }
-    if (used == 0L) {
-        W_orth <- matrix(0, nrow = ncol(Xf), ncol = 0L)
-        P_orth <- matrix(0, nrow = ncol(Xf), ncol = 0L)
-    }
-    else {
-        W_orth <- W_orth[, seq_len(used), drop = FALSE]
-        P_orth <- P_orth[, seq_len(used), drop = FALSE]
-    }
-    list(X = Xf, mX = prep$mX, vX = prep$vX, W_orth = W_orth, P_orth = P_orth,
-        north = used)
 }
 
 .opls_apply_filter_metal <- function(X, mX, vX, W_orth, P_orth) {
@@ -10703,300 +7774,6 @@ plot.permutation <- function(
     dist2[dist2 < 0 & dist2 > -1e-10] <- 0
     exp(-gamma * dist2)
 }
-
-.pls_metal_fit_core <- function(
-    Xtrain, Ytrain, ncomp, scaling, method, fit,
-    rsvd_oversample, rsvd_power, seed
-) {
-    if (identical(method, "plssvd")) {
-        cap <- .cap_plssvd_ncomp(
-            ncomp,
-            nrow(Xtrain),
-            ncol(Xtrain),
-            ncol(Ytrain),
-            warn = TRUE
-        )
-        return(.pls_model1_metal(
-            Xtrain,
-            Ytrain,
-            cap$ncomp,
-            scaling,
-            fit,
-            rsvd_oversample = rsvd_oversample,
-            rsvd_power = rsvd_power,
-            seed = seed
-        ))
-    }
-    if (
-        !isTRUE(.metal_resident_simpls_enabled()) &&
-            !isTRUE(.metal_experimental_iterative_enabled())
-    ) {
-        stop(
-            "backend='metal' requires the Metal SIMPLS-family path; enable ",
-            "FASTPLS_METAL_RESIDENT_SIMPLS or use backend='cpu'.",
-            call. = FALSE
-        )
-    }
-    .pls_model2_fast_metal(
-        Xtrain,
-        Ytrain,
-        ncomp,
-        scaling,
-        fit,
-        rsvd_oversample = rsvd_oversample,
-        rsvd_power = rsvd_power,
-        seed = seed
-    )
-}
-
-.pls_metal_finish <- function(
-    model,
-    Xtrain,
-    Ytrain_original,
-    yprep,
-    classifier,
-    lda_ridge,
-    return_variance,
-    Xtest,
-    Ytest,
-    proj
-) {
-    model$predict_backend <- "metal"
-    model$backend <- "metal"
-    model$svd.method <- "metal_rsvd"
-    model$predict_latent_ok <- TRUE
-    model <- .enable_flash_prediction(model, "cpu")
-    model$predict_backend <- "metal"
-    model$classification <- yprep$classification
-    model$lev <- yprep$lev
-    model <- .attach_lda_classifier(
-        model,
-        Xtrain,
-        Ytrain_original,
-        classifier,
-        lda_ridge
-    )
-model <- .maybe_attach_pls_variance_explained(model, Xtrain, return_variance)
-    class(model) <- "fastPLS"
-    if (!is.null(Xtest)) {
-        res <- predict(
-            model,
-            Xtest,
-            Ytest = Ytest,
-            proj = proj,
-            backend = "metal"
-        )
-        model <- c(model, res)
-        class(model) <- "fastPLS"
-    }
-    model <- .attach_backend_control(model)
-    model
-}
-
-.pls_metal_context <- function(
-    Xtrain,
-    Ytrain,
-    ncomp,
-    scaling,
-    method,
-    kernel,
-    classifier
-) {
-    if (!isTRUE(has_metal())) {
-        .fastpls_require_backend_available("metal", "PLS fitting")
-    }
-    method <- match.arg(
-        method,
-        c("simpls", "plssvd", "opls", "kernelpls")
-    )
-    scaling <- match.arg(
-        scaling,
-        c("centering", "autoscaling", "none")
-    )
-    kernel <- match.arg(kernel, c("linear", "rbf", "poly"))
-    classifier <- .resolve_classifier_for_backend(classifier, "metal")
-    Xtrain <- as.matrix(Xtrain)
-    yprep <- .prepare_response(Ytrain)
-    if (identical(method, "plssvd") && isTRUE(yprep$classification)) {
-        ncomp <- .cap_plssvd_ncomp(
-            ncomp,
-            nrow(Xtrain),
-            ncol(Xtrain),
-            ncol(yprep$Ytrain),
-            factor_response = TRUE,
-            warn = TRUE
-        )$ncomp
-    }
-    list(
-        X = Xtrain,
-        Y = Ytrain,
-        yprep = yprep,
-        ncomp = ncomp,
-        scaling = scaling,
-        scal = pmatch(
-            scaling,
-            c("centering", "autoscaling", "none")
-        )[1L],
-        method = method,
-        kernel = kernel,
-        classifier = classifier
-    )
-}
-
-.pls_metal_opls <- function(context, config) {
-    filt <- .opls_filter_metal(context$X,
-        .supervised_response_matrix(context$Y),
-        config$north, context$scaling)
-    .opls_require_predictive_rank(context$ncomp, filt$X, filt$north,
-        !identical(context$scaling, "none"))
-    inner <- .pls_metal_fit_core(filt$X, context$yprep$Ytrain, context$ncomp,
-        3L,
-        "simpls", config$fit, config$oversample, config$power, config$seed)
-    inner <- .pls_metal_finish(inner, filt$X, context$Y, context$yprep,
-        context$classifier,
-        config$lda_ridge, config$return_variance, NULL, NULL, FALSE)
-    model <- list(inner_model = inner, mX = filt$mX, vX = filt$vX,
-        W_orth = filt$W_orth,
-        P_orth = filt$P_orth, north = filt$north, opls_engine = "metal",
-        ncomp = inner$ncomp,
-        backend = "metal", predict_backend = "metal",
-        svd.method = inner$svd.method)
-    model <- .inherit_inner_variance_explained(model, inner)
-    model <- .inherit_inner_fit_outputs(model, inner)
-    class(model) <- c("fastPLSOpls", "fastPLS")
-    if (!is.null(config$Xtest)) {
-        result <- predict(model, config$Xtest, Ytest = config$Ytest,
-            proj = config$proj, backend = "metal")
-        model <- c(model, result)
-        class(model) <- c("fastPLSOpls", "fastPLS")
-    }
-    .attach_backend_control(model)
-}
-
-.pls_metal_linear_kernel <- function(context, config) {
-    model <- .pls_metal_fit_core(
-        context$X,
-        context$yprep$Ytrain,
-        context$ncomp,
-        context$scal,
-        "simpls",
-        config$fit,
-        config$oversample,
-        config$power,
-        config$seed
-    )
-    model$kernel <- "linear"
-    model$kernel_engine <- "metal_direct"
-    model$kernel_linear_direct <- TRUE
-    .pls_metal_finish(
-        model,
-        context$X,
-        context$Y,
-        context$yprep,
-        context$classifier,
-        config$lda_ridge,
-        config$return_variance,
-        config$Xtest,
-        config$Ytest,
-        config$proj
-    )
-}
-
-.pls_metal_nonlinear_kernel <- function(context, config) {
-    prep <- .fastpls_preprocess_train(context$X, context$scaling)
-    gamma <- .kernel_pls_gamma(config$gamma, prep$X)
-    K <- .kernel_matrix_metal(prep$X, prep$X, context$kernel, gamma,
-        config$degree,
-        config$coef0)
-    centered <- .center_kernel_train_base(K)
-    inner <- .pls_metal_fit_core(centered$K, context$yprep$Ytrain,
-        context$ncomp,
-        3L, "simpls", config$fit, config$oversample, config$power, config$seed)
-    inner <- .pls_metal_finish(inner, centered$K, context$Y, context$yprep,
-        context$classifier,
-        config$lda_ridge, config$return_variance, NULL, NULL, FALSE)
-    model <- list(inner_model = inner, Xref = prep$X, mX = prep$mX,
-        vX = prep$vX,
-        kernel = context$kernel,
-        kernel_id = .kernel_pls_kernel_id(context$kernel),
-        gamma = gamma, degree = as.integer(config$degree),
-        coef0 = config$coef0,
-        kernel_center = centered, kernel_engine = "metal", ncomp = inner$ncomp,
-        backend = "metal", predict_backend = "metal",
-        svd.method = inner$svd.method)
-    model <- .inherit_inner_variance_explained(model, inner)
-    model <- .inherit_inner_fit_outputs(model, inner)
-    class(model) <- c("fastPLSKernel", "fastPLS")
-    if (!is.null(config$Xtest)) {
-        result <- predict(model, config$Xtest, Ytest = config$Ytest,
-            proj = config$proj, backend = "metal")
-        model <- c(model, result)
-        class(model) <- c("fastPLSKernel", "fastPLS")
-    }
-    .attach_backend_control(model)
-}
-
-.pls_metal_kernel <- function(context, config) {
-    if (identical(context$kernel, "linear")) {
-        return(.pls_metal_linear_kernel(context, config))
-    }
-    .pls_metal_nonlinear_kernel(context, config)
-}
-
-.pls_metal_standard <- function(context, config) {
-    model <- .pls_metal_fit_core(
-        context$X,
-        context$yprep$Ytrain,
-        context$ncomp,
-        context$scal,
-        context$method,
-        config$fit,
-        config$oversample,
-        config$power,
-        config$seed
-    )
-    model$pls_method <- context$method
-    .pls_metal_finish(
-        model,
-        context$X,
-        context$Y,
-        context$yprep,
-        context$classifier,
-        config$lda_ridge,
-        config$return_variance,
-        config$Xtest,
-        config$Ytest,
-        config$proj
-    )
-}
-
-.pls_metal <- function(Xtrain, Ytrain, Xtest = NULL, Ytest = NULL, ncomp = 2,
-    scaling = c("centering",
-        "autoscaling", "none"), method = c("simpls", "plssvd", "opls",
-        "kernelpls"),
-    north = 1L, kernel = c("linear", "rbf", "poly"), gamma = NULL, degree = 3L,
-    coef0 = 1, rsvd_oversample = 32L, rsvd_power = 5L, seed = 1L,
-    classifier = c("argmax",
-        "lda"), lda_ridge = 1e-08, fit = FALSE, return_variance = TRUE,
-    proj = FALSE) {
-    context <- .pls_metal_context(Xtrain, Ytrain, ncomp, scaling, method,
-        kernel,
-        classifier)
-    config <- list(Xtest = Xtest, Ytest = Ytest, north = north, gamma = gamma,
-        degree = degree, coef0 = coef0, oversample = rsvd_oversample,
-        power = rsvd_power,
-        seed = seed, lda_ridge = lda_ridge, fit = fit,
-        return_variance = return_variance,
-        proj = proj)
-    if (identical(context$method, "opls")) {
-        return(.pls_metal_opls(context, config))
-    }
-    if (identical(context$method, "kernelpls")) {
-        return(.pls_metal_kernel(context, config))
-    }
-    .pls_metal_standard(context, config)
-}
-
 .pls_svd_context <- function(
     svd.method,
     dots,
@@ -11163,7 +7940,6 @@ model <- .maybe_attach_pls_variance_explained(model, Xtrain, return_variance)
     model <- .maybe_attach_x_loadings(
         model, context$Xtrain, config$return_loadings
     )
-    model <- .attach_backend_control(model)
     control <- context$control
     model <- .fastpls_attach_solver_diagnostics(
         model, control$svd.method, control$rsvd_oversample,
@@ -11423,11 +8199,6 @@ model <- .maybe_attach_pls_variance_explained(model, Xtrain, return_variance)
 }
 
 .pls_finish_float32 <- function(model, context, config) {
-    prediction_backend <- if (identical(context$backend, "metal")) {
-        "cpu"
-    } else {
-        context$backend
-    }
     if (!config$fit && !is.null(model$R2Y)) {
         model$R2Y <- rep(NA, length(model$ncomp))
     }
@@ -11435,7 +8206,7 @@ model <- .maybe_attach_pls_variance_explained(model, Xtrain, return_variance)
         model$Yfit <- predict(
             model,
             context$Xtrain,
-            backend = prediction_backend
+            backend = context$backend
         )$Ypred
     }
     if (!is.null(context$Xtest)) {
@@ -11445,7 +8216,7 @@ model <- .maybe_attach_pls_variance_explained(model, Xtrain, return_variance)
             context$Xtest,
             Ytest = context$Ytest,
             proj = config$proj,
-            backend = prediction_backend
+            backend = context$backend
         )
         model <- c(model, predicted)
         class(model) <- original_class
@@ -11492,21 +8263,13 @@ model <- .maybe_attach_pls_variance_explained(model, Xtrain, return_variance)
     arguments <- .pls_family_arguments(context, config)
     if (identical(context$method, "opls")) {
         arguments$north <- config$north
-        function_ <- switch(
-            context$backend_compiled,
-            cpp = .opls_cpp,
-            cuda = .opls_cuda
-        )
+        function_ <- .opls_cpp
     } else {
         arguments$kernel <- config$kernel
         arguments$gamma <- config$gamma
         arguments$degree <- config$degree
         arguments$coef0 <- config$coef0
-        function_ <- switch(
-            context$backend_compiled,
-            cpp = .kernel_pls_cpp,
-            cuda = .kernel_pls_cuda
-        )
+        function_ <- .kernel_pls_cpp
     }
     do.call(function_, arguments)
 }
@@ -11583,7 +8346,7 @@ model <- .maybe_attach_pls_variance_explained(model, Xtrain, return_variance)
 .pls_cpu_fit <- function(context, config, cpu) {
     if (!cpu$method_id %in% c(1L, 3L) || cpu$solver_id != 4L) {
         stop(
-            "Internal error: the CPU package route supports native rSVD ",
+            "The CPU package route supports native rSVD ",
             "PLS-SVD and SIMPLS only.",
             call. = FALSE
         )
@@ -12228,12 +8991,6 @@ pls <- function(Xtrain, Ytrain, Xtest = NULL, Ytest = NULL, ncomp = 2,
     as.integer(idx[1L])
 }
 
-.cv_numeric_metric_values <- function(metrics) {
-    values <- as.numeric(metrics$metric_value)
-    names(values) <- as.character(metrics$metric_name)
-    values
-}
-
 .cv_extract_prediction_at <- function(cv_res, idx) {
     class_pred <- cv_res[["class_pred", exact = TRUE]]
     score_pred <- cv_res[["Ypred", exact = TRUE]]
@@ -12556,7 +9313,8 @@ keep <- c("scaling", "method", "backend", "svd.method", "classifier", "xprod")
     ok <- vapply(results, function(x) is.list(x) && identical(x$status, "ok"),
         logical(1L))
     if (!any(ok)) {
-        first_errors <- paste(head(summaries$error[!is.na(summaries$error)],
+        first_errors <- paste(utils::head(
+            summaries$error[!is.na(summaries$error)],
             5L),
         collapse = " | ")
         stop(
@@ -13411,11 +10169,11 @@ pls.single.cv <- function(Xdata, Ydata, ncomp = 2, constrain = NULL,
 
 .double_cv_update_fold <- function(state, context, fit, test, index) {
     if (!is.null(fit$R2Y) && length(fit$R2Y)) {
-        state$train_r2[[index]] <- as.numeric(tail(fit$R2Y, 1L))
+        state$train_r2[[index]] <- as.numeric(utils::tail(fit$R2Y, 1L))
     }
     if (context$response$classification) {
         if (!is.null(fit$Q2Y) && length(fit$Q2Y)) {
-            state$q2[[index]] <- as.numeric(tail(fit$Q2Y, 1L))
+            state$q2[[index]] <- as.numeric(utils::tail(fit$Q2Y, 1L))
         }
         prediction <- if (is.data.frame(fit$Ypred)) {
             fit$Ypred[[1L]]
@@ -14458,9 +11216,15 @@ evaluate <- function(
 
 
 Vip <- function(object) {
-    SS <- c(object$Q)^2 * colSums(object$Ttrain^2)
-    Wnorm2 <- colSums(object$R^2)
-    SSW <- sweep(object$R^2, 2, SS / Wnorm2, "*")
+    if (is.null(object$Ttrain) || !length(object$Ttrain)) {
+        stop("VIP requires a model fitted with fit = TRUE.", call. = FALSE)
+    }
+    Q <- .float32_to_numeric_matrix(object$Q)
+    Ttrain <- .float32_to_numeric_matrix(object$Ttrain)
+    R <- .float32_to_numeric_matrix(object$R)
+    SS <- c(Q)^2 * colSums(Ttrain^2)
+    Wnorm2 <- colSums(R^2)
+    SSW <- sweep(R^2, 2, SS / Wnorm2, "*")
     sqrt(nrow(SSW) * apply(SSW, 1, cumsum) / cumsum(SS))
 }
 
@@ -14477,7 +11241,7 @@ Vip <- function(object) {
 #' y <- mtcars$mpg
 #' fit <- pls(X, y,
 #'     ncomp = 1, method = "plssvd", backend = "cpu",
-#'     svd.method = "rsvd", return_variance = FALSE
+#'     svd.method = "rsvd", fit = TRUE, return_variance = FALSE
 #' )
 #' ViP(fit)
 #' @export

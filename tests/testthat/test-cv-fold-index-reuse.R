@@ -56,19 +56,17 @@ test_that("compiled CV preserves ordered fold draws and input ownership", {
                     )
                     expect_identical(as.integer(core_fold), expected)
                     set.seed(seed)
-                    result <- fastPLS:::pls_cv_predict_compiled(
-                        Xdata = X, Ydata = Y, constrain = groups, ncomp = 1:2,
-                        scaling = 1L, kfold = fold_count, method = 3L,
-                        backend = 0L,
-                        svd_method = fastPLS:::.svd_method_id("cpu_rsvd"),
-                        rsvd_oversample = 32L, rsvd_power = 5L,
-                        svds_tol = 0, seed = seed,
-                        classification = classification,
-                        n_response = if (classification) 3L else 2L,
-                        xprod = FALSE, opls_north = 0L, return_scores = TRUE,
-                        class_codes = matrix(numeric(), 0, 0), classifier = 0L,
-                        lda_ridge = 0, store_predictions = TRUE, metric_id = 4L
-                    )
+                    result <- if (classification) {
+                        fastPLS:::pls_cv_classification_core_cpp(
+                            X, labels, 3L, core_fold, 1:2, 1L, 3L, 0L,
+                            32L, 5L, seed, TRUE, TRUE
+                        )
+                    } else {
+                        fastPLS:::pls_cv_regression_core_cpp(
+                            X, Y, core_fold, 1:2, 1L, 3L, 4L,
+                            32L, 5L, seed, TRUE
+                        )
+                    }
                     expect_identical(as.integer(result$fold), expected)
                     expect_identical(serialize(list(X, Y), NULL), original)
                     expect_true(all(is.finite(result$Ypred)))

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MIT
+// Copyright (c) 2026 Stefano Cacciatore
+
 #ifndef FASTPLS_CUDA_RESIDENT_API_CUH
 #define FASTPLS_CUDA_RESIDENT_API_CUH
 #include "cuda_resident_api.h"
@@ -615,16 +618,6 @@ extern "C" void* fastpls_resident_kernelpls_create(const void* x,const void* y,
         return nullptr;
     }
 }
-extern "C" int fastpls_resident_simpls_predict(void* model,const void* x,int rows,int prefix,
-    void* out,char* error,size_t size) {
-    using namespace fastpls_device;
-    resident_error(error,size,"");
-    try {
-        if(!model)throw std::invalid_argument("null resident model");
-        static_cast<ResidentHandle*>(model)->predict(x,rows,prefix,out,false);return 0;
-    } catch(const std::exception& e){resident_error(error,size,e.what());return 1;}
-      catch(...){resident_error(error,size,"unknown resident CUDA prediction error");return 1;}
-}
 extern "C" void fastpls_resident_simpls_destroy(void* model) {
     delete static_cast<fastpls_device::ResidentHandle*>(model);
 }
@@ -635,15 +628,6 @@ extern "C" int fastpls_resident_export(void* model,int field,void* out,size_t si
         static_cast<ResidentHandle*>(model)->export_field(field,out,size);return 0;
     }catch(const std::exception& e){resident_error(error,capacity,e.what());return 1;}
      catch(...){resident_error(error,capacity,"unknown resident export error");return 1;}
-}
-extern "C" int fastpls_resident_lda_predict(void* model,const void* x,int rows,int prefix,
-    void* out,char* error,size_t size){
-    using namespace fastpls_device;resident_error(error,size,"");
-    try{
-        if(!model)throw std::invalid_argument("null resident model");
-        static_cast<ResidentHandle*>(model)->predict(x,rows,prefix,out,true);return 0;
-    }catch(const std::exception& e){resident_error(error,size,e.what());return 1;}
-     catch(...){resident_error(error,size,"unknown resident LDA error");return 1;}
 }
 extern "C" int fastpls_resident_predict_path(
     void* model,const void* x,int rows,const int* prefixes,int prefix_count,
@@ -657,14 +641,6 @@ extern "C" int fastpls_resident_predict_path(
         return 0;
     }catch(const std::exception& e){resident_error(error,size,e.what());return 1;}
      catch(...){resident_error(error,size,"unknown resident prediction-path error");return 1;}
-}
-extern "C" int fastpls_resident_classify(void* model,const void* x,int rows,int prefix,int lda,int top,int* out,char* error,size_t capacity){
-    using namespace fastpls_device;resident_error(error,capacity,"");
-    try{
-        if(!model||(lda!=0&&lda!=1))throw std::invalid_argument("invalid resident classification model");
-        static_cast<ResidentHandle*>(model)->classify(x,rows,prefix,lda==1,top,out);return 0;
-    }catch(const std::exception& e){resident_error(error,capacity,e.what());return 1;}
-     catch(...){resident_error(error,capacity,"unknown resident classification error");return 1;}
 }
 extern "C" int fastpls_resident_classify_path(
     void* model,const void* x,int rows,const int* prefixes,int prefix_count,

@@ -37,14 +37,11 @@ BiocManager::install("fastPLS")
 The GitHub repository contains the development source and the optional
 CUDA/Metal build instructions below.
 
-## Bundled data
+## Example and benchmark data
 
-The package includes two small, fixed example datasets that can be loaded with
-`data()`: `colon` and `breast`. Larger real benchmark matrices such as CCLE,
-GTEx, and TCGA subsets are intentionally kept outside the source package to keep
-installation lightweight; the benchmark scripts load those matrices from the
-local benchmark data directories instead. Source attribution and data-use notes
-for bundled examples are provided in the dataset help pages and in
+The vignette uses datasets supplied by Biobase and base R. Prepared real
+benchmark matrices such as CCLE, GTEx, and TCGA subsets are intentionally not
+redistributed with fastPLS. Acquisition and data-use notes are provided in
 `inst/DATA_SOURCES.md`.
 
 ## Algorithms
@@ -94,12 +91,9 @@ to the host. On systems without CUDA, users can explicitly select
 execution.
 
 For large classification problems, such as ImageNet-scale DINOv2 feature
-matrices, `method = "plssvd", backend = "cuda"` automatically switches to a
-  label-aware PLS-SVD route when the dense one-hot response would exceed the memory
-threshold. This route streams class-wise cross-products from the label vector,
-never materializes the dense `n x classes` response matrix, stores only compact
-low-rank prediction factors. The default threshold is controlled by
-`FASTPLS_LABEL_AWARE_Y_THRESHOLD_MB`.
+matrices, `method = "plssvd", backend = "cuda"` uses compact integer labels to
+form class-wise cross-products without materializing a dense `n x classes`
+one-hot response. The fitted model stores compact low-rank prediction factors.
 
 ## Backends
 

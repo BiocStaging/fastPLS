@@ -8,8 +8,6 @@ importFrom("stats", "rnorm")
 importFrom("stats", "sd")
 importFrom("stats", "var")
 importFrom("methods", "is")
-import(Matrix)
-
 export(evaluate)
 export(fastcor)
 export(fastPLS_backend)

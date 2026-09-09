@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MIT
+// Copyright (c) 2026 Stefano Cacciatore
+
 #ifndef FASTPLS_CUDA_RESIDENT_API_H
 #define FASTPLS_CUDA_RESIDENT_API_H
 #include <stddef.h>
@@ -25,18 +28,12 @@ void* fastpls_resident_kernelpls_create(const void* x,const void* y,
     int scaling,int oversample,int power,int retain_scores,
     unsigned long long seed,int kernel,double gamma,int degree,double coef0,
     char* error,size_t error_capacity);
-int fastpls_resident_simpls_predict(void* model,const void* x,int rows,int prefix,
-    void* predictions,char* error,size_t error_capacity);
-int fastpls_resident_lda_predict(void* model,const void* x,int rows,int prefix,
-    void* predictions,char* error,size_t error_capacity);
 int fastpls_resident_predict_path(void* model,const void* x,int rows,
     const int* prefixes,int prefix_count,int lda,void* predictions,
     char* error,size_t error_capacity);
 void fastpls_resident_simpls_destroy(void* model);
 int fastpls_resident_export(void* model,int field,void* out,size_t elements,
     char* error,size_t error_capacity);
-int fastpls_resident_classify(void* model,const void* x,int rows,int prefix,int lda,int top,
-    int* labels,char* error,size_t error_capacity);
 int fastpls_resident_classify_path(void* model,const void* x,int rows,
     const int* prefixes,int prefix_count,int lda,int top,int* labels,
     char* error,size_t error_capacity);
