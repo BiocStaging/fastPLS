@@ -4,6 +4,24 @@ cpu_backend_description_cpp <- function() {
     .Call("_fastPLS_cpu_backend_description", PACKAGE = "fastPLS")
 }
 
+pls_labels_core_cpp <- function(
+    predictors, labels, class_count, components, scaling, fit,
+    oversample, power, seed
+) {
+    .Call(
+        "_fastPLS_pls_labels_core_cpp", predictors, labels, class_count,
+        components, scaling, fit, oversample, power, seed,
+        PACKAGE = "fastPLS"
+    )
+}
+
+pls_labels_core_predict_cpp <- function(model, predictors, project = FALSE) {
+    .Call(
+        "_fastPLS_pls_labels_core_predict_cpp", model, predictors, project,
+        PACKAGE = "fastPLS"
+    )
+}
+
 pls_float32_labels_core_cpp <- function(
     predictors, labels, class_count, components, scaling, fit, method,
     oversample, power, seed

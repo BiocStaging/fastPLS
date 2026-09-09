@@ -73,3 +73,49 @@ test_that("factor and character labels use the same compact public route", {
     expect_identical(character_prediction, factor_prediction)
     expect_equal(character_fit$R2Y, factor_fit$R2Y, tolerance = 1e-13)
 })
+
+test_that("dependency-free double PLS-SVD preserves compact predictions", {
+    task <- compact_label_fixture()
+    components <- c(1L, 2L)
+    labels <- as.integer(task$labels)
+    core <- fastPLS:::pls_labels_core_cpp(
+        task$X, labels, nlevels(task$labels), components, 1L, TRUE,
+        32L, 5L, 9501L
+    )
+    legacy <- fastPLS:::pls_labels_cpp(
+        task$X, labels, nlevels(task$labels), components, 1L, TRUE,
+        1L, fastPLS:::.svd_method_id("rsvd"), 32L, 5L, 0, 9501L
+    )
+
+    core_prediction <- fastPLS:::pls_labels_core_predict_cpp(
+        core, task$Xtest, FALSE
+    )$Ypred
+    legacy_prediction <- fastPLS:::pls_predict(
+        legacy, task$Xtest, FALSE
+    )$Ypred
+    expect_equal(core$mY, legacy$mY, tolerance = 1e-13)
+    expect_equal(
+        as.numeric(core$R2Y), as.numeric(legacy$R2Y), tolerance = 1e-10
+    )
+    for (index in seq_along(components)) {
+        expect_equal(
+            core$Yfit[[index]], legacy$Yfit[, , index], tolerance = 1e-9
+        )
+    }
+    expect_equal(core_prediction, legacy_prediction, tolerance = 1e-9)
+
+    public <- pls(
+        task$X, task$labels, task$Xtest,
+        ncomp = components,
+        method = "plssvd",
+        backend = "cpu",
+        svd.method = "rsvd",
+        fit = FALSE,
+        return_variance = FALSE,
+        oversample = 32L,
+        power = 5L,
+        seed = 9501L
+    )
+    expect_identical(public$xprod_mode, "float64_label_class_sums")
+    expect_named(public$W_latent, paste0("ncomp=", components))
+})

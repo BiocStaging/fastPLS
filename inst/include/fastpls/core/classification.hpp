@@ -206,10 +206,10 @@ LabelCrossprodResult<T> prepare_scaled_label_crossprod(
 }
 
 template<class T, class Label, class Backend>
-LabelCrossprodResult<T> prepare_scaled_label_crossprod(
-    MatrixView<T> predictors, const Label* labels,
+bool label_crossprod_from_runs(
+    ConstMatrixView<T> predictors, const Label* labels,
     std::size_t label_count, std::size_t class_count,
-    PredictorScaling scaling, Backend& backend) {
+    LabelCrossprodResult<T>& result, Backend& backend) {
   struct LabelRun {
     std::size_t begin;
     std::size_t length;
@@ -229,16 +229,8 @@ LabelCrossprodResult<T> prepare_scaled_label_crossprod(
   }
   if (runs.empty() ||
       runs.size() > std::max<std::size_t>(1024, 4 * class_count)) {
-    return prepare_scaled_label_crossprod(
-      predictors, labels, label_count, class_count, scaling
-    );
+    return false;
   }
-
-  auto result = scaled_label_crossprod_impl(
-    ConstMatrixView<T>(predictors), predictors.data(),
-    predictors.leading_dimension(), labels, label_count, class_count, scaling,
-    false
-  );
   std::fill(
     result.crossprod.data(), result.crossprod.data() + result.crossprod.size(),
     T(0)
@@ -283,6 +275,49 @@ LabelCrossprodResult<T> prepare_scaled_label_crossprod(
       result.crossprod(predictor, response) -=
         total * result.response_mean[response];
     }
+  }
+  return true;
+}
+
+template<class T, class Label, class Backend>
+LabelCrossprodResult<T> scaled_label_crossprod(
+    ConstMatrixView<T> predictors, const Label* labels,
+    std::size_t label_count, std::size_t class_count,
+    PredictorScaling scaling, Backend& backend) {
+  if (scaling != PredictorScaling::none) {
+    return scaled_label_crossprod(
+      predictors, labels, label_count, class_count, scaling
+    );
+  }
+  auto result = scaled_label_crossprod_impl(
+    predictors, static_cast<T*>(nullptr), 0, labels, label_count,
+    class_count, scaling, false
+  );
+  if (!label_crossprod_from_runs(
+      predictors, labels, label_count, class_count, result, backend)) {
+    return scaled_label_crossprod(
+      predictors, labels, label_count, class_count, scaling
+    );
+  }
+  return result;
+}
+
+template<class T, class Label, class Backend>
+LabelCrossprodResult<T> prepare_scaled_label_crossprod(
+    MatrixView<T> predictors, const Label* labels,
+    std::size_t label_count, std::size_t class_count,
+    PredictorScaling scaling, Backend& backend) {
+  auto result = scaled_label_crossprod_impl(
+    ConstMatrixView<T>(predictors), predictors.data(),
+    predictors.leading_dimension(), labels, label_count, class_count, scaling,
+    false
+  );
+  if (!label_crossprod_from_runs(
+      ConstMatrixView<T>(predictors), labels, label_count, class_count,
+      result, backend)) {
+    return prepare_scaled_label_crossprod(
+      predictors, labels, label_count, class_count, scaling
+    );
   }
   return result;
 }

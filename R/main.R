@@ -6054,6 +6054,7 @@ pls.model2.fast.gpu <-
     eligible <- object$classification &&
         is.null(Ytest) &&
         !raw_scores &&
+        !is.list(object$W_latent) &&
         !route$metal &&
         (is.null(object$classification_rule) ||
             object$classification_rule == "argmax")
@@ -6071,6 +6072,13 @@ pls.model2.fast.gpu <-
 }
 
 .predict_backend_result <- function(object, Xtest, proj, route) {
+    if (
+        !route$cuda && !route$metal &&
+            identical(object$pls_method, "plssvd") &&
+            is.list(object$W_latent)
+    ) {
+        return(pls_labels_core_predict_cpp(object, Xtest, proj))
+    }
     if (route$metal) {
         return(.pls_predict_metal(object, Xtest, proj))
     }
@@ -11974,20 +11982,52 @@ model <- .maybe_attach_pls_variance_explained(model, Xtrain, return_variance)
                 warn = TRUE
             )$ncomp
         }
-        model <- pls_labels_cpp(
-            XtrainSEXP = cpu$X,
-            labels = cpu$response$labels,
-            n_classes = cpu$response$n_classes,
-            ncomp = ncomp,
-            scaling = context$scal,
-            fit = config$fit,
-            method = cpu$method_id,
-            svd_method = cpu$solver_id,
-            rsvd_oversample = ctl$rsvd_oversample,
-            rsvd_power = ctl$rsvd_power,
-            svds_tol = ctl$svds_tol,
-            seed = ctl$seed
-        )
+        core_plssvd <- cpu$method_id == 1L && cpu$solver_id == 4L
+        model <- if (core_plssvd) {
+            result <- pls_labels_core_cpp(
+                predictors = cpu$X,
+                labels = cpu$response$labels,
+                class_count = cpu$response$n_classes,
+                components = ncomp,
+                scaling = context$scal,
+                fit = config$fit,
+                oversample = ctl$rsvd_oversample,
+                power = ctl$rsvd_power,
+                seed = ctl$seed
+            )
+            store <- .should_store_coefficients(
+                result$p, result$m, length(result$ncomp), TRUE
+            )
+            if (store) {
+                coefficients <- array(
+                    0,
+                    dim = c(result$p, result$m, length(result$ncomp))
+                )
+                for (index in seq_along(result$ncomp)) {
+                    count <- result$ncomp[[index]]
+                    coefficients[, , index] <-
+                        result$R[, seq_len(count), drop = FALSE] %*%
+                        result$W_latent[[index]]
+                }
+                result$B <- coefficients
+            }
+            .annotate_coefficient_storage(result, store)
+        } else {
+            pls_labels_cpp(
+                XtrainSEXP = cpu$X,
+                labels = cpu$response$labels,
+                n_classes = cpu$response$n_classes,
+                ncomp = ncomp,
+                scaling = context$scal,
+                fit = config$fit,
+                method = cpu$method_id,
+                svd_method = cpu$solver_id,
+                rsvd_oversample = ctl$rsvd_oversample,
+                rsvd_power = ctl$rsvd_power,
+                svds_tol = ctl$svds_tol,
+                seed = ctl$seed
+            )
+        }
         class(model) <- "fastPLS"
         return(model)
     }
