@@ -44,6 +44,17 @@ pls_matrix_core_cpp <- function(
     )
 }
 
+pls_matrix_core_xprod_cpp <- function(
+    predictors, responses, components, scaling, fit, method,
+    oversample, power, seed
+) {
+    .Call(
+        "_fastPLS_pls_matrix_core_xprod_cpp", predictors, responses,
+        components, scaling, fit, method, oversample, power, seed,
+        PACKAGE = "fastPLS"
+    )
+}
+
 pls_float32_matrix_core_cpp <- function(
     predictors, responses, components, scaling, fit, method,
     oversample, power, seed

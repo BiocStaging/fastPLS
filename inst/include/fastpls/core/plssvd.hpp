@@ -5,6 +5,7 @@
 
 #include <fastpls/core/linalg.hpp>
 #include <fastpls/core/matrix.hpp>
+#include <fastpls/core/operator_rsvd.hpp>
 #include <fastpls/core/rsvd.hpp>
 
 #include <algorithm>
@@ -19,6 +20,28 @@ struct PlssvdControls {
   RsvdControls rsvd;
 };
 
+inline std::size_t plssvd_retained_components(
+    const int* components, std::size_t count, std::size_t rank_bound) {
+  if (components == nullptr || count == 0 || rank_bound == 0) {
+    throw std::invalid_argument(
+      "fastPLS PLS-SVD dimensions or component counts are invalid"
+    );
+  }
+  std::size_t retained = 0;
+  for (std::size_t index = 0; index < count; ++index) {
+    if (components[index] < 1 ||
+        static_cast<std::size_t>(components[index]) > rank_bound) {
+      throw std::invalid_argument(
+        "fastPLS PLS-SVD component count exceeds cross-covariance rank"
+      );
+    }
+    retained = std::max(
+      retained, static_cast<std::size_t>(components[index])
+    );
+  }
+  return retained;
+}
+
 template<class T>
 struct PlssvdModel {
   Matrix<T> weights;
@@ -32,36 +55,25 @@ struct PlssvdModel {
 };
 
 template<class T, class Backend>
-PlssvdModel<T> fit_plssvd_preprocessed(
-    ConstMatrixView<T> predictors, ConstMatrixView<T> crosscov,
+PlssvdModel<T> assemble_plssvd_model(
+    ConstMatrixView<T> predictors, std::size_t response_count,
     const int* components, std::size_t component_count,
-    const PlssvdControls& controls, Backend& backend) {
-  if (predictors.empty() || crosscov.empty() || components == nullptr ||
-      component_count == 0 || crosscov.rows() != predictors.columns()) {
+    SingularTriplets<T>& decomposition, Backend& backend) {
+  if (predictors.empty() || response_count == 0 || components == nullptr ||
+      component_count == 0) {
     throw std::invalid_argument(
       "fastPLS PLS-SVD dimensions or component counts are invalid"
     );
   }
   const std::size_t rank_bound = std::min(
-    crosscov.rows(), crosscov.columns()
+    predictors.columns(), response_count
   );
-  std::size_t retained = 0;
+  const std::size_t retained = plssvd_retained_components(
+    components, component_count, rank_bound
+  );
   PlssvdModel<T> model;
   model.components.assign(components, components + component_count);
-  for (const int count : model.components) {
-    if (count < 1 || static_cast<std::size_t>(count) > rank_bound) {
-      throw std::invalid_argument(
-        "fastPLS PLS-SVD component count exceeds cross-covariance rank"
-      );
-    }
-    retained = std::max(retained, static_cast<std::size_t>(count));
-  }
 
-  RsvdControls rsvd = controls.rsvd;
-  rsvd.left_only = false;
-  auto decomposition = randomized_svd(
-    crosscov, static_cast<int>(retained), rsvd, backend
-  );
   model.completed_components = std::min({
     decomposition.U.columns(), decomposition.Vt.rows(),
     decomposition.singular_values.size()
@@ -72,20 +84,20 @@ PlssvdModel<T> fit_plssvd_preprocessed(
     );
   }
 
-  model.weights.resize(crosscov.rows(), retained);
-  model.response_loadings.resize(crosscov.columns(), retained);
+  model.weights.resize(predictors.columns(), retained);
+  model.response_loadings.resize(response_count, retained);
   model.singular_values.assign(
     decomposition.singular_values.begin(),
     decomposition.singular_values.begin() + retained
   );
   for (std::size_t component = 0; component < retained; ++component) {
     for (std::size_t predictor = 0;
-         predictor < crosscov.rows(); ++predictor) {
+         predictor < predictors.columns(); ++predictor) {
       model.weights(predictor, component) =
         decomposition.U(predictor, component);
     }
     for (std::size_t response = 0;
-         response < crosscov.columns(); ++response) {
+         response < response_count; ++response) {
       model.response_loadings(response, component) =
         decomposition.Vt(component, response);
     }
@@ -116,7 +128,7 @@ PlssvdModel<T> fit_plssvd_preprocessed(
     if (!solve_symmetric_system(gram.view(), diagonal.view(), latent)) {
       throw std::runtime_error("fastPLS PLS-SVD latent solve failed");
     }
-    Matrix<T> weights(count, crosscov.columns());
+    Matrix<T> weights(count, response_count);
     ConstMatrixView<T> loadings(
       model.response_loadings.data(), model.response_loadings.rows(), count,
       model.response_loadings.rows()
@@ -128,6 +140,60 @@ PlssvdModel<T> fit_plssvd_preprocessed(
     model.prediction_weights.push_back(std::move(weights));
   }
   return model;
+}
+
+template<class T, class Backend>
+PlssvdModel<T> fit_plssvd_preprocessed(
+    ConstMatrixView<T> predictors, ConstMatrixView<T> crosscov,
+    const int* components, std::size_t component_count,
+    const PlssvdControls& controls, Backend& backend) {
+  if (predictors.empty() || crosscov.empty() || components == nullptr ||
+      component_count == 0 || crosscov.rows() != predictors.columns()) {
+    throw std::invalid_argument(
+      "fastPLS PLS-SVD dimensions or component counts are invalid"
+    );
+  }
+  const std::size_t retained = plssvd_retained_components(
+    components, component_count,
+    std::min(crosscov.rows(), crosscov.columns())
+  );
+  RsvdControls rsvd = controls.rsvd;
+  rsvd.left_only = false;
+  auto decomposition = randomized_svd(
+    crosscov, static_cast<int>(retained), rsvd, backend
+  );
+  return assemble_plssvd_model(
+    predictors, crosscov.columns(), components, component_count,
+    decomposition, backend
+  );
+}
+
+template<class T, class Operator, class Backend>
+PlssvdModel<T> fit_plssvd_operator(
+    ConstMatrixView<T> predictors, Operator& crosscov,
+    const int* components, std::size_t component_count,
+    const PlssvdControls& controls, Backend& backend,
+    OperatorRsvdWorkspace<T>& workspace) {
+  if (predictors.empty() || crosscov.rows() != predictors.columns() ||
+      crosscov.columns() == 0 || components == nullptr ||
+      component_count == 0) {
+    throw std::invalid_argument(
+      "fastPLS implicit PLS-SVD dimensions or component counts are invalid"
+    );
+  }
+  const std::size_t retained = plssvd_retained_components(
+    components, component_count,
+    std::min(crosscov.rows(), crosscov.columns())
+  );
+  RsvdControls rsvd = controls.rsvd;
+  rsvd.left_only = false;
+  auto decomposition = randomized_operator_svd<T>(
+    crosscov, static_cast<int>(retained), rsvd, backend, workspace
+  );
+  return assemble_plssvd_model(
+    predictors, crosscov.columns(), components, component_count,
+    decomposition, backend
+  );
 }
 
 template<class T, class Backend>

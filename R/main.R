@@ -11947,11 +11947,21 @@ model <- .maybe_attach_pls_variance_explained(model, Xtrain, return_variance)
     )$ncomp
     arguments <- .pls_cpu_arguments(context, config, cpu)
     if (cpu$xprod) {
-        arguments$xprod_precision <- cpu$precision
-        return(do.call(
-            pls.model1.rsvd.xprod.precision,
-            arguments
-        ))
+        ctl <- context$control
+        result <- pls_matrix_core_xprod_cpp(
+            predictors = cpu$X,
+            responses = cpu$Y,
+            components = as.integer(config$ncomp),
+            scaling = context$scal,
+            fit = config$fit,
+            method = 1L,
+            oversample = ctl$rsvd_oversample,
+            power = ctl$rsvd_power,
+            seed = ctl$seed
+        )
+        result <- .pls_core_store_coefficients(result, 1L)
+        class(result) <- "fastPLS"
+        return(result)
     }
     arguments$svd.method <- cpu$solver_id
     do.call(pls.model1, arguments)

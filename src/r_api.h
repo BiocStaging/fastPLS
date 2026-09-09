@@ -110,6 +110,10 @@ SEXP _fastPLS_pls_matrix_core_cpp(
   SEXP predictors, SEXP responses, SEXP components, SEXP scaling,
   SEXP fit, SEXP method, SEXP oversample, SEXP power, SEXP seed
 );
+SEXP _fastPLS_pls_matrix_core_xprod_cpp(
+  SEXP predictors, SEXP responses, SEXP components, SEXP scaling,
+  SEXP fit, SEXP method, SEXP oversample, SEXP power, SEXP seed
+);
 SEXP _fastPLS_pls_float32_matrix_core_cpp(
   SEXP predictors, SEXP responses, SEXP components, SEXP scaling,
   SEXP fit, SEXP method, SEXP oversample, SEXP power, SEXP seed

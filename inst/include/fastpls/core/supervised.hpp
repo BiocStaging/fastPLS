@@ -17,7 +17,7 @@ namespace fastpls {
 namespace core {
 
 template<class T>
-struct DenseCrossprodResult {
+struct DensePreprocessingResult {
   Matrix<T> crossprod;
   std::vector<T> predictor_center;
   std::vector<T> predictor_scale;
@@ -25,11 +25,11 @@ struct DenseCrossprodResult {
 };
 
 template<class T, class Backend>
-DenseCrossprodResult<T> scaled_dense_crossprod_impl(
+DensePreprocessingResult<T> scaled_dense_crossprod_impl(
     ConstMatrixView<T> predictors, T* scaled_predictors,
     std::size_t scaled_leading_dimension,
     ConstMatrixView<T> responses, PredictorScaling scaling,
-    Backend& backend) {
+    Backend& backend, bool form_crossprod) {
   if (predictors.empty() || responses.empty() ||
       predictors.rows() != responses.rows()) {
     throw std::invalid_argument(
@@ -42,8 +42,10 @@ DenseCrossprodResult<T> scaled_dense_crossprod_impl(
     );
   }
 
-  DenseCrossprodResult<T> result;
-  result.crossprod.resize(predictors.columns(), responses.columns());
+  DensePreprocessingResult<T> result;
+  if (form_crossprod) {
+    result.crossprod.resize(predictors.columns(), responses.columns());
+  }
   result.predictor_center.assign(predictors.columns(), T(0));
   result.predictor_scale.assign(predictors.columns(), T(1));
   result.response_mean.assign(responses.columns(), T(0));
@@ -105,31 +107,34 @@ DenseCrossprodResult<T> scaled_dense_crossprod_impl(
       scaled_predictors, predictors.rows(), predictors.columns(),
       scaled_leading_dimension
     );
-  backend.gemm(
-    scaled, responses, true, false, result.crossprod.view()
-  );
-  for (std::size_t response = 0; response < responses.columns(); ++response) {
-    for (std::size_t predictor = 0;
-         predictor < predictors.columns(); ++predictor) {
-      result.crossprod(predictor, response) -=
-        predictor_sums[predictor] * result.response_mean[response];
+  if (form_crossprod) {
+    backend.gemm(
+      scaled, responses, true, false, result.crossprod.view()
+    );
+    for (std::size_t response = 0;
+         response < responses.columns(); ++response) {
+      for (std::size_t predictor = 0;
+           predictor < predictors.columns(); ++predictor) {
+        result.crossprod(predictor, response) -=
+          predictor_sums[predictor] * result.response_mean[response];
+      }
     }
   }
   return result;
 }
 
 template<class T, class Backend>
-DenseCrossprodResult<T> prepare_scaled_dense_crossprod(
+DensePreprocessingResult<T> prepare_scaled_dense_crossprod(
     MatrixView<T> predictors, ConstMatrixView<T> responses,
     PredictorScaling scaling, Backend& backend) {
   return scaled_dense_crossprod_impl(
     ConstMatrixView<T>(predictors), predictors.data(),
-    predictors.leading_dimension(), responses, scaling, backend
+    predictors.leading_dimension(), responses, scaling, backend, true
   );
 }
 
 template<class T, class Backend>
-DenseCrossprodResult<T> prepare_scaled_dense_crossprod(
+DensePreprocessingResult<T> prepare_scaled_dense_crossprod(
     MatrixView<T> predictors, MatrixView<T> responses,
     PredictorScaling scaling, Backend& backend) {
   return prepare_scaled_dense_crossprod(
@@ -138,17 +143,27 @@ DenseCrossprodResult<T> prepare_scaled_dense_crossprod(
 }
 
 template<class T, class Backend>
-DenseCrossprodResult<T> unscaled_dense_crossprod(
-    ConstMatrixView<T> predictors, ConstMatrixView<T> responses,
-    Backend& backend) {
+DensePreprocessingResult<T> prepare_scaled_dense_operator(
+    MatrixView<T> predictors, ConstMatrixView<T> responses,
+    PredictorScaling scaling, Backend& backend) {
   return scaled_dense_crossprod_impl(
-    predictors, static_cast<T*>(nullptr), 0, responses,
-    PredictorScaling::none, backend
+    ConstMatrixView<T>(predictors), predictors.data(),
+    predictors.leading_dimension(), responses, scaling, backend, false
   );
 }
 
 template<class T, class Backend>
-DenseCrossprodResult<T> unscaled_dense_crossprod(
+DensePreprocessingResult<T> unscaled_dense_crossprod(
+    ConstMatrixView<T> predictors, ConstMatrixView<T> responses,
+    Backend& backend) {
+  return scaled_dense_crossprod_impl(
+    predictors, static_cast<T*>(nullptr), 0, responses,
+    PredictorScaling::none, backend, true
+  );
+}
+
+template<class T, class Backend>
+DensePreprocessingResult<T> unscaled_dense_crossprod(
     MatrixView<T> predictors, MatrixView<T> responses, Backend& backend) {
   return unscaled_dense_crossprod(
     ConstMatrixView<T>(predictors), ConstMatrixView<T>(responses), backend

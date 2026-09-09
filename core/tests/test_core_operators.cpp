@@ -5,6 +5,7 @@
 #include <cmath>
 #include <cstddef>
 #include <stdexcept>
+#include <vector>
 
 namespace {
 
@@ -48,6 +49,7 @@ T relative_error(fastpls::core::MatrixView<T> observed,
 template<class T>
 void check() {
   using fastpls::core::CrosscovOperator;
+  using fastpls::core::CenteredCrosscovOperator;
   using fastpls::core::ExplicitOperator;
   using fastpls::core::Matrix;
   ReferenceBackend<T> backend;
@@ -79,6 +81,48 @@ void check() {
   }
 
   const T tolerance = sizeof(T) == sizeof(float) ? T(2e-5) : T(1e-12);
+  std::vector<T> response_mean(y.columns(), T(0));
+  Matrix<T> centered_y(y.rows(), y.columns());
+  for (std::size_t column = 0; column < y.columns(); ++column) {
+    for (std::size_t row = 0; row < y.rows(); ++row) {
+      response_mean[column] += y(row, column);
+    }
+    response_mean[column] /= static_cast<T>(y.rows());
+    for (std::size_t row = 0; row < y.rows(); ++row) {
+      centered_y(row, column) = y(row, column) - response_mean[column];
+    }
+  }
+  Matrix<T> centered_crosscov(x.columns(), y.columns());
+  backend.gemm(
+    x.view(), centered_y.view(), true, false, centered_crosscov.view()
+  );
+  CenteredCrosscovOperator<T, ReferenceBackend<T>> centered_operator(
+    x.view(), y.view(), response_mean.data(), response_mean.size(), backend
+  );
+  Matrix<T> actual_centered;
+  Matrix<T> expected_centered(x.columns(), right.columns());
+  centered_operator.multiply(right.view(), false, actual_centered);
+  backend.gemm(
+    centered_crosscov.view(), right.view(), false, false,
+    expected_centered.view()
+  );
+  assert(relative_error(
+    actual_centered.view(), expected_centered.view()) < tolerance
+  );
+  expected_centered.resize(y.columns(), left.columns());
+  centered_operator.multiply(left.view(), true, actual_centered);
+  backend.gemm(
+    centered_crosscov.view(), left.view(), true, false,
+    expected_centered.view()
+  );
+  assert(relative_error(
+    actual_centered.view(), expected_centered.view()) < tolerance
+  );
+  centered_operator.materialize(actual_centered);
+  assert(relative_error(
+    actual_centered.view(), centered_crosscov.view()) < tolerance
+  );
+
   for (std::size_t step = 0; step <= 3; ++step) {
     ExplicitOperator<T, ReferenceBackend<T>> explicit_operator(
       explicit_crosscov.view(), backend

@@ -41,6 +41,34 @@ void check_plssvd() {
   assert(model.prediction_weights[0].rows() == 1);
   assert(model.prediction_weights[1].rows() == 2);
 
+  fastpls::core::Matrix<T> shifted_y = y;
+  const T response_mean[] = {T(3), T(-2)};
+  for (std::size_t column = 0; column < shifted_y.columns(); ++column) {
+    for (std::size_t row = 0; row < shifted_y.rows(); ++row) {
+      shifted_y(row, column) += response_mean[column];
+    }
+  }
+  fastpls::core::CenteredCrosscovOperator<T, ReferenceBackend<T>> op(
+    x.view(), shifted_y.view(), response_mean, 2, backend
+  );
+  fastpls::core::OperatorRsvdWorkspace<T> workspace;
+  const auto implicit_model = fastpls::core::fit_plssvd_operator<T>(
+    x.view(), op, components, 2, controls, backend, workspace
+  );
+  assert(implicit_model.completed_components == model.completed_components);
+  for (std::size_t index = 0; index < model.singular_values.size(); ++index) {
+    const T scale = std::max(std::abs(model.singular_values[index]), T(1));
+    assert(std::abs(implicit_model.singular_values[index] -
+      model.singular_values[index]) / scale <
+      (std::is_same<T, float>::value ? T(2e-4) : T(2e-10)));
+  }
+  fastpls::core::Matrix<T> implicit_prediction(8, 2);
+  backend.gemm(
+    implicit_model.scores.view(),
+    implicit_model.prediction_weights[1].view(), false, false,
+    implicit_prediction.view()
+  );
+
   fastpls::core::Matrix<T> prediction(8, 2);
   backend.gemm(
     model.scores.view(), model.prediction_weights[1].view(), false, false,
@@ -51,6 +79,9 @@ void check_plssvd() {
     for (std::size_t row = 0; row < y.rows(); ++row) {
       const T difference = prediction(row, column) - y(row, column);
       error += difference * difference;
+      assert(std::abs(prediction(row, column) -
+        implicit_prediction(row, column)) <
+        (std::is_same<T, float>::value ? T(2e-4) : T(2e-10)));
     }
   }
   assert(std::isfinite(error));

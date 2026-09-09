@@ -8,6 +8,7 @@
 #include <fastpls/core/kernels.hpp>
 #include <fastpls/core/lda.hpp>
 #include <fastpls/core/matrix.hpp>
+#include <fastpls/core/operators.hpp>
 #include <fastpls/core/plssvd.hpp>
 #include <fastpls/core/simpls.hpp>
 #include <fastpls/core/statistics.hpp>
@@ -557,41 +558,13 @@ std::vector<std::size_t> encoded_class_labels(
 }
 
 template<class T, class Prepared, class Backend, class Metric>
-SEXP fit_plssvd_core_prepared(
+SEXP serialize_plssvd_core_model(
+    const fastpls::core::PlssvdModel<T>& model,
     fastpls::core::ConstMatrixView<T> predictors,
-    const Prepared& prepared, std::size_t response_rank_cap,
-    SEXP components, bool fitted, int oversample, int power,
-    unsigned int seed, const char* xprod_mode, Backend& backend,
+    const Prepared& prepared, SEXP effective_components, bool fitted,
+    const char* xprod_mode, Backend& backend,
     Metric metric, bool array_paths = false) {
   ProtectStack protect;
-  SEXP effective_components = protect.add(Rf_duplicate(components));
-  const std::size_t sample_rank = std::max<std::size_t>(
-    predictors.rows() - 1, 1
-  );
-  const int rank_cap = static_cast<int>(std::min({
-    predictors.columns(), sample_rank, response_rank_cap
-  }));
-  for (R_xlen_t index = 0; index < XLENGTH(effective_components); ++index) {
-    const int value = INTEGER(effective_components)[index];
-    if (value == NA_INTEGER) {
-      throw std::invalid_argument("ncomp cannot contain missing values");
-    }
-    INTEGER(effective_components)[index] = std::max(
-      1, std::min(value, rank_cap)
-    );
-  }
-
-  fastpls::core::PlssvdControls controls;
-  controls.rsvd.oversample = oversample;
-  controls.rsvd.power = power;
-  controls.rsvd.seed = seed;
-  const auto model = fastpls::core::fit_plssvd_preprocessed<T>(
-    predictors, prepared.crossprod.view(),
-    INTEGER(effective_components),
-    static_cast<std::size_t>(XLENGTH(effective_components)), controls,
-    backend
-  );
-
   std::vector<fastpls::core::Matrix<T>> fitted_values;
   std::vector<double> r2_values(
     static_cast<std::size_t>(XLENGTH(effective_components)), NA_REAL
@@ -671,7 +644,9 @@ SEXP fit_plssvd_core_prepared(
       fitted_values, INTEGER(effective_components)
     )) : R_NilValue
   );
-  SEXP r2 = protect.add(Rf_allocVector(REALSXP, XLENGTH(components)));
+  SEXP r2 = protect.add(Rf_allocVector(
+    REALSXP, XLENGTH(effective_components)
+  ));
   std::copy(r2_values.begin(), r2_values.end(), REAL(r2));
   SET_VECTOR_ELT(output, 12, r2);
   SET_VECTOR_ELT(output, 13, Rf_mkString("plssvd"));
@@ -686,6 +661,50 @@ SEXP fit_plssvd_core_prepared(
   );
   Rf_setAttrib(output, R_NamesSymbol, names);
   return output;
+}
+
+SEXP capped_plssvd_components(
+    SEXP components, std::size_t samples, std::size_t predictors,
+    std::size_t response_rank_cap, ProtectStack& protect) {
+  SEXP effective = protect.add(Rf_duplicate(components));
+  const std::size_t sample_rank = std::max<std::size_t>(samples - 1, 1);
+  const int rank_cap = static_cast<int>(std::min({
+    predictors, sample_rank, response_rank_cap
+  }));
+  for (R_xlen_t index = 0; index < XLENGTH(effective); ++index) {
+    const int value = INTEGER(effective)[index];
+    if (value == NA_INTEGER) {
+      throw std::invalid_argument("ncomp cannot contain missing values");
+    }
+    INTEGER(effective)[index] = std::max(1, std::min(value, rank_cap));
+  }
+  return effective;
+}
+
+template<class T, class Prepared, class Backend, class Metric>
+SEXP fit_plssvd_core_prepared(
+    fastpls::core::ConstMatrixView<T> predictors,
+    const Prepared& prepared, std::size_t response_rank_cap,
+    SEXP components, bool fitted, int oversample, int power,
+    unsigned int seed, const char* xprod_mode, Backend& backend,
+    Metric metric, bool array_paths = false) {
+  ProtectStack protect;
+  SEXP effective = capped_plssvd_components(
+    components, predictors.rows(), predictors.columns(), response_rank_cap,
+    protect
+  );
+  fastpls::core::PlssvdControls controls;
+  controls.rsvd.oversample = oversample;
+  controls.rsvd.power = power;
+  controls.rsvd.seed = seed;
+  const auto model = fastpls::core::fit_plssvd_preprocessed<T>(
+    predictors, prepared.crossprod.view(), INTEGER(effective),
+    static_cast<std::size_t>(XLENGTH(effective)), controls, backend
+  );
+  return serialize_plssvd_core_model(
+    model, predictors, prepared, effective, fitted, xprod_mode, backend,
+    metric, array_paths
+  );
 }
 
 template<class T, class Backend>
@@ -938,7 +957,7 @@ template<class T, class Backend>
 SEXP fit_dense_core_prepared(
     fastpls::core::ConstMatrixView<T> predictors,
     fastpls::core::ConstMatrixView<T> responses,
-    const fastpls::core::DenseCrossprodResult<T>& prepared,
+    const fastpls::core::DensePreprocessingResult<T>& prepared,
     SEXP components, bool fitted, int method, int oversample, int power,
     unsigned int seed, const char* xprod_mode, Backend& backend,
     bool array_paths) {
@@ -963,6 +982,44 @@ SEXP fit_dense_core_prepared(
   }
   throw std::invalid_argument(
     "fastPLS dense core method must be PLS-SVD or SIMPLS"
+  );
+}
+
+template<class T, class Backend>
+SEXP fit_dense_plssvd_operator(
+    fastpls::core::ConstMatrixView<T> predictors,
+    fastpls::core::ConstMatrixView<T> responses,
+    const fastpls::core::DensePreprocessingResult<T>& prepared,
+    SEXP components, bool fitted, int oversample, int power,
+    unsigned int seed, const char* xprod_mode, Backend& backend,
+    bool array_paths) {
+  ProtectStack protect;
+  SEXP effective = capped_plssvd_components(
+    components, predictors.rows(), predictors.columns(), responses.columns(),
+    protect
+  );
+  fastpls::core::CenteredCrosscovOperator<T, Backend> crosscov(
+    predictors, responses, prepared.response_mean.data(),
+    prepared.response_mean.size(), backend
+  );
+  fastpls::core::PlssvdControls controls;
+  controls.rsvd.oversample = oversample;
+  controls.rsvd.power = power;
+  controls.rsvd.seed = seed;
+  fastpls::core::OperatorRsvdWorkspace<T> workspace;
+  const auto model = fastpls::core::fit_plssvd_operator<T>(
+    predictors, crosscov, INTEGER(effective),
+    static_cast<std::size_t>(XLENGTH(effective)), controls, backend, workspace
+  );
+  const auto metric = [&](fastpls::core::ConstMatrixView<T> values) {
+    return fastpls::core::dense_response_r2(
+      responses, prepared.response_mean.data(),
+      prepared.response_mean.size(), values
+    );
+  };
+  return serialize_plssvd_core_model(
+    model, predictors, prepared, effective, fitted, xprod_mode, backend,
+    metric, array_paths
   );
 }
 
@@ -2195,6 +2252,49 @@ extern "C" SEXP _fastPLS_pls_matrix_core_cpp(
       components, fit_code, method_code, Rf_asInteger(oversample),
       Rf_asInteger(power), static_cast<unsigned int>(Rf_asInteger(seed)),
       "float64_dense_crosscov", backend, true
+    );
+  });
+}
+
+extern "C" SEXP _fastPLS_pls_matrix_core_xprod_cpp(
+    SEXP predictors, SEXP responses, SEXP components, SEXP scaling,
+    SEXP fit, SEXP method, SEXP oversample, SEXP power, SEXP seed) {
+  return translate_exceptions("double implicit core PLS fitting", [&] {
+    if (TYPEOF(components) != INTSXP || XLENGTH(components) < 1 ||
+        Rf_asInteger(method) != 1) {
+      throw std::invalid_argument(
+        "double implicit core PLS currently requires PLS-SVD"
+      );
+    }
+    fastpls::core::Matrix<double> x = numeric_matrix_from_sexp(
+      predictors, "Xtrain"
+    );
+    fastpls::core::Matrix<double> owned_y;
+    fastpls::core::ConstMatrixView<double> y;
+    if (Rf_isMatrix(responses) && TYPEOF(responses) == REALSXP) {
+      y = numeric_matrix_view(responses, "Ytrain");
+    } else {
+      owned_y = numeric_matrix_from_sexp(responses, "Ytrain");
+      y = fastpls::core::ConstMatrixView<double>(owned_y.view());
+    }
+    const int scaling_code = Rf_asInteger(scaling);
+    const int fit_code = Rf_asLogical(fit);
+    if (x.rows() != y.rows() || scaling_code < 1 || scaling_code > 3 ||
+        fit_code == NA_LOGICAL) {
+      throw std::invalid_argument(
+        "double implicit core PLS dimensions or controls are invalid"
+      );
+    }
+    fastpls::runtime::CpuLinearAlgebraF64 backend;
+    const auto prepared = fastpls::core::prepare_scaled_dense_operator(
+      x.view(), y,
+      static_cast<fastpls::core::PredictorScaling>(scaling_code), backend
+    );
+    return fit_dense_plssvd_operator(
+      fastpls::core::ConstMatrixView<double>(x.view()), y, prepared,
+      components, fit_code, Rf_asInteger(oversample), Rf_asInteger(power),
+      static_cast<unsigned int>(Rf_asInteger(seed)),
+      "float64_implicit_crosscov", backend, true
     );
   });
 }
