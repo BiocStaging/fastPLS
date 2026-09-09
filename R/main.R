@@ -9225,6 +9225,18 @@ stop("Could not extract regression predictions from fold fit.", call. = FALSE)
     seed,
     left_only
 ) {
+    if (identical(method, "cpu_rsvd")) {
+        elapsed <- system.time({
+            output <- fastsvd_core_cpp(
+                as.matrix(A), as.integer(k), as.integer(oversample),
+                as.integer(power), as.integer(seed), isTRUE(left_only)
+            )
+        })["elapsed"]
+        output$elapsed <- as.numeric(elapsed)
+        output$method <- method
+        output$precision <- "double"
+        return(output)
+    }
     method_id <- .svd_method_id(method)
     if (is.na(method_id)) {
         stop("Unknown method", call. = FALSE)
@@ -9333,6 +9345,34 @@ stop("Could not extract regression predictions from fold fit.", call. = FALSE)
     if (identical(.Platform$OS.type, "windows")) {
         return(.fastsvd_float32_windows(x, k, backend, svd.method, oversample,
             power, seed, left_only))
+    }
+    if (identical(backend, "cpu")) {
+        t_elapsed <- system.time({
+            raw <- fastsvd_float32_core_cpp(
+                .as_float32_matrix(x, "x"), as.integer(k),
+                as.integer(oversample), as.integer(power), as.integer(seed),
+                isTRUE(left_only)
+            )
+        })["elapsed"]
+        return(list(
+            U = .float32_from_bits(raw$U),
+            s = as.vector(raw$s),
+            Vt = if (is.null(raw$Vt)) NULL else .float32_from_bits(raw$Vt),
+            method = svd.method,
+            elapsed = as.numeric(t_elapsed),
+            precision = "float32",
+            case_audited = isTRUE(raw$case_audited),
+            case_certified = isTRUE(raw$case_certified),
+            deterministic_fallback = isTRUE(raw$deterministic_fallback),
+            audit_attempts = raw$audit_attempts,
+            effective_oversample = raw$effective_oversample,
+            effective_power = raw$effective_power,
+            effective_seed = raw$effective_seed,
+            audit_subspace_error = raw$audit_subspace_error,
+            audit_singular_value_error = raw$audit_singular_value_error,
+            audit_triplet_residual = raw$audit_triplet_residual,
+            audit_omitted_direction_ratio = raw$audit_omitted_direction_ratio
+        ))
     }
     backend_id <- switch(backend, cpu = 0L, cuda = 1L, metal = 2L)
     svd_id <- .float32_svd_id(svd.method)

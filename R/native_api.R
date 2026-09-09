@@ -4,6 +4,24 @@ cpu_backend_description_cpp <- function() {
     .Call("_fastPLS_cpu_backend_description", PACKAGE = "fastPLS")
 }
 
+fastsvd_core_cpp <- function(
+    matrix, components, oversample, power, seed, left_only = FALSE
+) {
+    .Call(
+        "_fastPLS_fastsvd_core_cpp", matrix, components, oversample, power,
+        seed, left_only, PACKAGE = "fastPLS"
+    )
+}
+
+fastsvd_float32_core_cpp <- function(
+    matrix, components, oversample, power, seed, left_only = FALSE
+) {
+    .Call(
+        "_fastPLS_fastsvd_float32_core_cpp", matrix, components,
+        oversample, power, seed, left_only, PACKAGE = "fastPLS"
+    )
+}
+
 pls_labels_core_cpp <- function(
     predictors, labels, class_count, components, scaling, fit,
     oversample, power, seed, store_scores = TRUE

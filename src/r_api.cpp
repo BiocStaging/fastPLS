@@ -1,8 +1,10 @@
 #include "r_api.h"
 #include "accelerator_core_backend.h"
 #include "core_cpu_backend.h"
+#include "rsvd_audit.h"
 
 #include <R_ext/Error.h>
+#include <fastpls/core/audited_rsvd.hpp>
 #include <fastpls/core/classification.hpp>
 #include <fastpls/core/diagnostics.hpp>
 #include <fastpls/core/kernels.hpp>
@@ -30,8 +32,6 @@ namespace fastpls_svd {
 bool has_cuda_backend();
 bool has_metal_backend();
 bool cuda_lda_native_available();
-void reset_rsvd_audit_summary();
-fastpls::core::RSVDAuditSummary current_rsvd_audit_summary();
 }
 
 namespace {
@@ -231,6 +231,15 @@ SEXP numeric_matrix(const fastpls::core::Matrix<double>& values) {
     REALSXP, static_cast<int>(values.rows()), static_cast<int>(values.columns())
   );
   std::copy(values.data(), values.data() + values.size(), REAL(result));
+  return result;
+}
+
+template<class T>
+SEXP numeric_vector(const std::vector<T>& values) {
+  SEXP result = Rf_allocVector(REALSXP, values.size());
+  for (std::size_t index = 0; index < values.size(); ++index) {
+    REAL(result)[index] = static_cast<double>(values[index]);
+  }
   return result;
 }
 
@@ -571,6 +580,64 @@ class ProtectStack {
  private:
   int count_ = 0;
 };
+
+template<class T, class MatrixSerializer>
+SEXP serialize_audited_rsvd(
+    const fastpls::core::AuditedSingularTriplets<T>& result,
+    MatrixSerializer&& serialize_matrix) {
+  ProtectStack protect;
+  SEXP output = protect.add(Rf_allocVector(VECSXP, 15));
+  SEXP names = protect.add(Rf_allocVector(STRSXP, 15));
+  const char* labels[] = {
+    "U", "s", "Vt", "randomized", "case_audited", "case_certified",
+    "deterministic_fallback", "audit_attempts", "effective_oversample",
+    "effective_power", "effective_seed", "audit_subspace_error",
+    "audit_singular_value_error", "audit_triplet_residual",
+    "audit_omitted_direction_ratio"
+  };
+  for (int index = 0; index < 15; ++index) {
+    SET_STRING_ELT(names, index, Rf_mkChar(labels[index]));
+  }
+  SET_VECTOR_ELT(output, 0, serialize_matrix(result.decomposition.U));
+  SET_VECTOR_ELT(
+    output, 1, numeric_vector(result.decomposition.singular_values)
+  );
+  SET_VECTOR_ELT(
+    output, 2, result.decomposition.Vt.rows() == 0 ? R_NilValue :
+      serialize_matrix(result.decomposition.Vt)
+  );
+  SET_VECTOR_ELT(output, 3, Rf_ScalarLogical(TRUE));
+  SET_VECTOR_ELT(output, 4, Rf_ScalarLogical(TRUE));
+  SET_VECTOR_ELT(
+    output, 5, Rf_ScalarLogical(result.audit.certified ? TRUE : FALSE)
+  );
+  SET_VECTOR_ELT(
+    output, 6,
+    Rf_ScalarLogical(result.audit.deterministic_fallback ? TRUE : FALSE)
+  );
+  SET_VECTOR_ELT(output, 7, Rf_ScalarInteger(result.audit.attempts));
+  SET_VECTOR_ELT(
+    output, 8, Rf_ScalarInteger(result.audit.effective_oversample)
+  );
+  SET_VECTOR_ELT(
+    output, 9, Rf_ScalarInteger(result.audit.effective_power)
+  );
+  SET_VECTOR_ELT(output, 10, Rf_ScalarReal(result.audit.effective_seed));
+  SET_VECTOR_ELT(
+    output, 11, Rf_ScalarReal(result.audit.subspace_error)
+  );
+  SET_VECTOR_ELT(
+    output, 12, Rf_ScalarReal(result.audit.singular_value_error)
+  );
+  SET_VECTOR_ELT(
+    output, 13, Rf_ScalarReal(result.audit.triplet_residual)
+  );
+  SET_VECTOR_ELT(
+    output, 14, Rf_ScalarReal(result.audit.omitted_direction_ratio)
+  );
+  Rf_setAttrib(output, R_NamesSymbol, names);
+  return output;
+}
 
 template<class T, class MatrixSerializer>
 SEXP serialize_opls_filter(const fastpls::core::OplsFilter<T>& filter,
@@ -1309,6 +1376,100 @@ extern "C" SEXP _fastPLS_rsvd_audit_summary_debug() {
   Rf_setAttrib(output, R_NamesSymbol, names);
   UNPROTECT(2);
   return output;
+}
+
+extern "C" SEXP _fastPLS_fastsvd_core_cpp(
+    SEXP matrix, SEXP components, SEXP oversample, SEXP power, SEXP seed,
+    SEXP left_only) {
+  return translate_exceptions("double core rSVD", [&] {
+    const int retained = Rf_asInteger(components);
+    const int oversample_count = Rf_asInteger(oversample);
+    const int power_count = Rf_asInteger(power);
+    const int seed_value = Rf_asInteger(seed);
+    const int left_only_value = Rf_asLogical(left_only);
+    if (retained < 1 || oversample_count < 0 || power_count < 0 ||
+        seed_value == NA_INTEGER || left_only_value == NA_LOGICAL) {
+      throw std::invalid_argument("double core rSVD controls are invalid");
+    }
+    const auto values = numeric_matrix_view(matrix, "x");
+    fastpls::runtime::CpuLinearAlgebraF64 backend;
+    fastpls::core::ExplicitOperator<
+      double, fastpls::runtime::CpuLinearAlgebraF64
+    > input(values, backend);
+    fastpls::core::RsvdControls controls;
+    controls.oversample = oversample_count;
+    controls.power = power_count;
+    controls.seed = static_cast<unsigned int>(seed_value);
+    controls.left_only = left_only_value == TRUE;
+    try {
+      const auto result = fastpls::core::audited_operator_rsvd<double>(
+        input, retained, controls, backend
+      );
+      fastpls_svd::record_rsvd_audit_case(
+        result.audit.certified, result.audit.deterministic_fallback,
+        result.audit.attempts, result.audit.effective_oversample,
+        result.audit.effective_power, result.audit.triplet_residual,
+        result.audit.omitted_direction_ratio
+      );
+      return serialize_audited_rsvd<double>(
+        result, [](const fastpls::core::Matrix<double>& value) {
+          return numeric_matrix(value);
+        }
+      );
+    } catch (...) {
+      fastpls_svd::record_rsvd_audit_case(
+        false, false, 0, 0, 0, 0.0, 0.0, true
+      );
+      throw;
+    }
+  });
+}
+
+extern "C" SEXP _fastPLS_fastsvd_float32_core_cpp(
+    SEXP matrix, SEXP components, SEXP oversample, SEXP power, SEXP seed,
+    SEXP left_only) {
+  return translate_exceptions("float32 core rSVD", [&] {
+    const int retained = Rf_asInteger(components);
+    const int oversample_count = Rf_asInteger(oversample);
+    const int power_count = Rf_asInteger(power);
+    const int seed_value = Rf_asInteger(seed);
+    const int left_only_value = Rf_asLogical(left_only);
+    if (retained < 1 || oversample_count < 0 || power_count < 0 ||
+        seed_value == NA_INTEGER || left_only_value == NA_LOGICAL) {
+      throw std::invalid_argument("float32 core rSVD controls are invalid");
+    }
+    auto values = float_matrix_from_s4(matrix, "x");
+    fastpls::runtime::CpuLinearAlgebraF32 backend;
+    fastpls::core::ExplicitOperator<
+      float, fastpls::runtime::CpuLinearAlgebraF32
+    > input(values.view(), backend);
+    fastpls::core::RsvdControls controls;
+    controls.oversample = oversample_count;
+    controls.power = power_count;
+    controls.seed = static_cast<unsigned int>(seed_value);
+    controls.left_only = left_only_value == TRUE;
+    try {
+      const auto result = fastpls::core::audited_operator_rsvd<float>(
+        input, retained, controls, backend
+      );
+      fastpls_svd::record_rsvd_audit_case(
+        result.audit.certified, result.audit.deterministic_fallback,
+        result.audit.attempts, result.audit.effective_oversample,
+        result.audit.effective_power, result.audit.triplet_residual,
+        result.audit.omitted_direction_ratio
+      );
+      return serialize_audited_rsvd<float>(
+        result, [](const fastpls::core::Matrix<float>& value) {
+          return float_bits_matrix(value);
+        }
+      );
+    } catch (...) {
+      fastpls_svd::record_rsvd_audit_case(
+        false, false, 0, 0, 0, 0.0, 0.0, true
+      );
+      throw;
+    }
+  });
 }
 
 extern "C" SEXP _fastPLS_lda_train_prefix_cpp(

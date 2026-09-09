@@ -43,6 +43,12 @@ SEXP _fastPLS_cpu_backend_description();
 SEXP _fastPLS_lda_cuda_native_available();
 SEXP _fastPLS_rsvd_audit_reset_debug();
 SEXP _fastPLS_rsvd_audit_summary_debug();
+SEXP _fastPLS_fastsvd_core_cpp(SEXP matrix, SEXP components,
+                               SEXP oversample, SEXP power, SEXP seed,
+                               SEXP left_only);
+SEXP _fastPLS_fastsvd_float32_core_cpp(SEXP matrix, SEXP components,
+                                       SEXP oversample, SEXP power,
+                                       SEXP seed, SEXP left_only);
 SEXP _fastPLS_lda_train_prefix_cpp(SEXP scores, SEXP labels,
                                     SEXP class_count, SEXP components,
                                     SEXP ridge);

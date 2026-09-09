@@ -1,4 +1,5 @@
 #include "svd_iface.h"
+#include "rsvd_audit.h"
 #include <fastpls/native/operator_rsvd.hpp>
 
 #include <algorithm>
@@ -13,42 +14,13 @@
 
 namespace fastpls_svd {
 
-namespace {
-thread_local RSVDAuditSummary rsvd_audit_summary;
-}
-
-void reset_rsvd_audit_summary() {
-  rsvd_audit_summary = RSVDAuditSummary();
-}
-
 void record_rsvd_audit_result(const SVDResult& result, bool failure) {
-  ++rsvd_audit_summary.solves;
-  if (failure) {
-    ++rsvd_audit_summary.failures;
-    return;
-  }
-  if (result.case_certified) ++rsvd_audit_summary.certified;
-  if (result.deterministic_fallback) ++rsvd_audit_summary.deterministic_fallbacks;
-  rsvd_audit_summary.max_attempts = std::max(
-    rsvd_audit_summary.max_attempts, result.audit_attempts
+  record_rsvd_audit_case(
+    result.case_certified, result.deterministic_fallback,
+    result.audit_attempts, result.effective_oversample,
+    result.effective_power_iters, result.audit_triplet_residual,
+    result.audit_omitted_direction_ratio, failure
   );
-  rsvd_audit_summary.max_effective_oversample = std::max(
-    rsvd_audit_summary.max_effective_oversample, result.effective_oversample
-  );
-  rsvd_audit_summary.max_effective_power_iters = std::max(
-    rsvd_audit_summary.max_effective_power_iters, result.effective_power_iters
-  );
-  rsvd_audit_summary.max_triplet_residual = std::max(
-    rsvd_audit_summary.max_triplet_residual, result.audit_triplet_residual
-  );
-  rsvd_audit_summary.max_omitted_direction_ratio = std::max(
-    rsvd_audit_summary.max_omitted_direction_ratio,
-    result.audit_omitted_direction_ratio
-  );
-}
-
-RSVDAuditSummary current_rsvd_audit_summary() {
-  return rsvd_audit_summary;
 }
 
 namespace {
