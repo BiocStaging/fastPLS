@@ -1066,6 +1066,14 @@ SEXP fit_dense_simpls_operator(
     static_cast<std::size_t>(maximum_components), false,
     oversample, power, seed
   );
+  const long double crosscov_bytes =
+    static_cast<long double>(predictors.columns()) *
+    static_cast<long double>(responses.columns()) * sizeof(T);
+  if (crosscov_bytes > 512.0L * 1024.0L * 1024.0L) {
+    controls.maximum_block = 1;
+    controls.batch_candidate_geometry = false;
+    controls.rank_one_operator_direction = true;
+  }
   fastpls::core::CenteredCrosscovOperator<T, Backend> initial(
     predictors, responses, prepared.response_mean.data(),
     prepared.response_mean.size(), backend

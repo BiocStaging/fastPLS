@@ -32,6 +32,25 @@ struct OperatorRsvdWorkspace {
 
 namespace detail {
 
+template<class T>
+bool normalize_column(Matrix<T>& values) {
+  if (values.columns() != 1 || values.rows() == 0) return false;
+  long double squared_norm = 0.0L;
+  for (std::size_t row = 0; row < values.rows(); ++row) {
+    const long double value = static_cast<long double>(values(row, 0));
+    squared_norm += value * value;
+  }
+  const T norm = static_cast<T>(std::sqrt(squared_norm));
+  if (!std::isfinite(norm) ||
+      norm <= std::numeric_limits<T>::epsilon()) {
+    return false;
+  }
+  for (std::size_t row = 0; row < values.rows(); ++row) {
+    values(row, 0) /= norm;
+  }
+  return true;
+}
+
 template<class T, class Backend>
 SingularTriplets<T> finalize_operator_sample(
     ConstMatrixView<T> basis,
@@ -133,6 +152,36 @@ SingularTriplets<T> finalize_operator_sample(
 }
 
 }  // namespace detail
+
+// Fresh rank-one subspace iteration avoids the oversampled block workspace
+// when only the next leading direction is required. This is important for
+// SIMPLS operators whose response side is too large to materialize.
+template<class T, class Operator, class Backend>
+bool randomized_dominant_operator_direction(
+    Operator& input,
+    const RsvdControls& controls,
+    Backend& backend,
+    OperatorRsvdWorkspace<T>& workspace,
+    Matrix<T>& direction) {
+  if (input.rows() == 0 || input.columns() == 0) return false;
+  std::mt19937 generator(controls.seed);
+  std::normal_distribution<T> normal(T(0), T(1));
+  direction.resize(input.rows(), 1);
+  for (std::size_t row = 0; row < direction.rows(); ++row) {
+    direction(row, 0) = normal(generator);
+  }
+  if (!detail::normalize_column(direction)) return false;
+
+  const int iterations = std::max(controls.power, 1);
+  for (int iteration = 0; iteration < iterations; ++iteration) {
+    input.multiply(direction.view(), true, workspace.reverse);
+    if (!detail::normalize_column(workspace.reverse)) return false;
+    input.multiply(workspace.reverse.view(), false, workspace.sample);
+    if (!detail::normalize_column(workspace.sample)) return false;
+    direction = std::move(workspace.sample);
+  }
+  return true;
+}
 
 template<class T, class Operator, class Backend>
 SingularTriplets<T> randomized_operator_svd(

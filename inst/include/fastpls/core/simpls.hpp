@@ -26,6 +26,7 @@ struct SimplsControls {
   bool reorthogonalize = true;
   bool store_scores = true;
   bool use_right_gram = true;
+  bool rank_one_operator_direction = false;
   bool batch_candidate_geometry = false;
   bool phase_timing = false;
   RsvdControls rsvd;
@@ -682,15 +683,25 @@ SimplsModel<T> fit_simpls_operator(
     RsvdControls rsvd = controls.rsvd;
     rsvd.seed += static_cast<unsigned int>(component);
     rsvd.left_only = true;
-    auto decomposition = randomized_operator_svd<T>(
-      projected_crosscov, static_cast<int>(block), rsvd, backend,
-      rsvd_workspace
-    );
+    Matrix<T> candidates;
+    if (block == 1 && controls.rank_one_operator_direction) {
+      if (!randomized_dominant_operator_direction<T>(
+            projected_crosscov, rsvd, backend, rsvd_workspace,
+            candidates)) {
+        break;
+      }
+    } else {
+      auto decomposition = randomized_operator_svd<T>(
+        projected_crosscov, static_cast<int>(block), rsvd, backend,
+        rsvd_workspace
+      );
+      candidates = std::move(decomposition.U);
+    }
     model.timing.direction += std::chrono::duration<double>(
       Clock::now() - direction_started
     ).count();
     const std::size_t available = std::min(
-      block, decomposition.U.columns()
+      block, candidates.columns()
     );
     if (available == 0) break;
 
@@ -699,7 +710,7 @@ SimplsModel<T> fit_simpls_operator(
       const auto geometry_started = Clock::now();
       workspace.candidate_scores.resize(n, available);
       backend.gemm(
-        predictors, decomposition.U.view(), false, false,
+        predictors, candidates.view(), false, false,
         workspace.candidate_scores.view()
       );
       workspace.candidate_loadings.resize(p, available);
@@ -719,7 +730,7 @@ SimplsModel<T> fit_simpls_operator(
       const auto component_started = Clock::now();
       Matrix<T> direction(p, 1);
       simpls_detail::copy_column(
-        ConstMatrixView<T>(decomposition.U.view()), candidate,
+        ConstMatrixView<T>(candidates.view()), candidate,
         direction.view(), 0
       );
 
