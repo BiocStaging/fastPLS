@@ -223,6 +223,9 @@ SEXP _fastPLS_pls_float32_matrix_core_cpp(
 SEXP _fastPLS_pls_labels_core_predict_cpp(
   SEXP model, SEXP predictors, SEXP project
 );
+SEXP _fastPLS_pls_class_predict_topk_core_cpp(
+  SEXP model, SEXP predictors, SEXP top, SEXP project, SEXP block_size
+);
 SEXP _fastPLS_pls_float32_labels_core_cpp(
   SEXP predictors, SEXP labels, SEXP class_count, SEXP components,
   SEXP scaling, SEXP fit, SEXP store_scores, SEXP method, SEXP oversample,

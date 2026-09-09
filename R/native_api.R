@@ -238,6 +238,16 @@ pls_labels_core_predict_cpp <- function(model, predictors, project = FALSE) {
     )
 }
 
+pls_class_predict_topk_core_cpp <- function(
+    model, predictors, top = 1L, project = FALSE, block_size = 4096L
+) {
+    .Call(
+        "_fastPLS_pls_class_predict_topk_core_cpp", model, predictors,
+        as.integer(top), isTRUE(project), as.integer(block_size),
+        PACKAGE = "fastPLS"
+    )
+}
+
 pls_simpls_labels_core_cpp <- function(
     predictors, labels, class_count, components, scaling, fit,
     oversample, power, seed, store_scores = TRUE

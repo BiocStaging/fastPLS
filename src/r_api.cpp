@@ -26,6 +26,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <exception>
+#include <limits>
 #include <stdexcept>
 #include <string>
 #include <type_traits>
@@ -3567,6 +3568,170 @@ extern "C" SEXP _fastPLS_pls_labels_core_predict_cpp(
     SEXP names = protect.add(Rf_allocVector(STRSXP, 2));
     SET_STRING_ELT(names, 0, Rf_mkChar("Ypred"));
     SET_STRING_ELT(names, 1, Rf_mkChar("Ttest"));
+    Rf_setAttrib(output, R_NamesSymbol, names);
+    return output;
+  });
+}
+
+extern "C" SEXP _fastPLS_pls_class_predict_topk_core_cpp(
+    SEXP model, SEXP predictors, SEXP top, SEXP project, SEXP block_size) {
+  return translate_exceptions("double core top-k PLS prediction", [&] {
+    const auto x = numeric_matrix_view(predictors, "newdata");
+    const auto projection = numeric_matrix_view(
+      list_element(model, "R"), "model$R"
+    );
+    const auto loadings = numeric_matrix_view(
+      list_element(model, "Q"), "model$Q"
+    );
+    const auto center = numeric_values(
+      list_element(model, "mX"), "model$mX"
+    );
+    const auto scale = numeric_values(
+      list_element(model, "vX"), "model$vX"
+    );
+    const auto response_mean = numeric_values(
+      list_element(model, "mY"), "model$mY"
+    );
+    SEXP components = list_element(model, "ncomp");
+    const int requested_top = Rf_asInteger(top);
+    const int return_projection = Rf_asLogical(project);
+    const int requested_block = Rf_asInteger(block_size);
+    if (x.columns() != projection.rows() ||
+        loadings.rows() != response_mean.size() ||
+        loadings.columns() < projection.columns() ||
+        center.size() != x.columns() || scale.size() != x.columns() ||
+        TYPEOF(components) != INTSXP || XLENGTH(components) < 1 ||
+        requested_top < 1 || requested_block < 1 ||
+        return_projection == NA_LOGICAL) {
+      throw std::invalid_argument(
+        "double core top-k model is incompatible with newdata"
+      );
+    }
+    const std::size_t class_count = response_mean.size();
+    const std::size_t keep = std::min<std::size_t>(
+      static_cast<std::size_t>(requested_top), class_count
+    );
+    const std::size_t prefix_count = static_cast<std::size_t>(
+      XLENGTH(components)
+    );
+    const std::size_t maximum_components = projection.columns();
+    for (std::size_t column = 0; column < x.columns(); ++column) {
+      if (!std::isfinite(scale[column]) || scale[column] == 0.0) {
+        throw std::invalid_argument(
+          "double core top-k model contains an invalid predictor scale"
+        );
+      }
+    }
+    for (std::size_t index = 0; index < prefix_count; ++index) {
+      const int count = INTEGER(components)[index];
+      if (count < 1 || static_cast<std::size_t>(count) > maximum_components) {
+        throw std::invalid_argument(
+          "double core top-k component counts are inconsistent"
+        );
+      }
+    }
+
+    ProtectStack protect;
+    const R_xlen_t output_length = static_cast<R_xlen_t>(
+      x.rows() * keep * prefix_count
+    );
+    SEXP top_index = protect.add(Rf_allocVector(INTSXP, output_length));
+    SEXP top_score = protect.add(Rf_allocVector(REALSXP, output_length));
+    SEXP dimensions = protect.add(Rf_allocVector(INTSXP, 3));
+    INTEGER(dimensions)[0] = static_cast<int>(x.rows());
+    INTEGER(dimensions)[1] = static_cast<int>(keep);
+    INTEGER(dimensions)[2] = static_cast<int>(prefix_count);
+    Rf_setAttrib(top_index, R_DimSymbol, dimensions);
+    Rf_setAttrib(top_score, R_DimSymbol, dimensions);
+    SEXP projected = protect.add(Rf_allocMatrix(
+      REALSXP, static_cast<int>(x.rows()),
+      return_projection ? static_cast<int>(maximum_components) : 0
+    ));
+
+    fastpls::runtime::CpuLinearAlgebraF64 backend;
+    const std::size_t rows_per_block = std::min<std::size_t>(
+      static_cast<std::size_t>(requested_block), x.rows()
+    );
+    for (std::size_t start = 0; start < x.rows(); start += rows_per_block) {
+      const std::size_t rows = std::min(rows_per_block, x.rows() - start);
+      fastpls::core::Matrix<double> standardized(rows, x.columns());
+      for (std::size_t column = 0; column < x.columns(); ++column) {
+        for (std::size_t row = 0; row < rows; ++row) {
+          standardized(row, column) =
+            (x(start + row, column) - center[column]) / scale[column];
+        }
+      }
+      fastpls::core::Matrix<double> scores(rows, maximum_components);
+      backend.gemm(
+        standardized.view(), projection, false, false, scores.view()
+      );
+      if (return_projection) {
+        for (std::size_t component = 0;
+             component < maximum_components; ++component) {
+          for (std::size_t row = 0; row < rows; ++row) {
+            REAL(projected)[start + row + component * x.rows()] =
+              scores(row, component);
+          }
+        }
+      }
+      for (std::size_t prefix = 0; prefix < prefix_count; ++prefix) {
+        const std::size_t count = static_cast<std::size_t>(
+          INTEGER(components)[prefix]
+        );
+        const auto score_prefix = fastpls::core::make_const_view(
+          scores.data(), rows, count, scores.rows()
+        );
+        const auto loading_prefix = fastpls::core::make_const_view(
+          loadings.data(), loadings.rows(), count,
+          loadings.leading_dimension()
+        );
+        fastpls::core::Matrix<double> values(rows, class_count);
+        backend.gemm(
+          score_prefix, loading_prefix, false, true, values.view()
+        );
+        for (std::size_t row = 0; row < rows; ++row) {
+          std::vector<double> best_scores(
+            keep, -std::numeric_limits<double>::infinity()
+          );
+          std::vector<int> best_indices(keep, 0);
+          for (std::size_t category = 0;
+               category < class_count; ++category) {
+            const double value =
+              values(row, category) + response_mean[category];
+            for (std::size_t rank = 0; rank < keep; ++rank) {
+              if (value > best_scores[rank]) {
+                for (std::size_t lower = keep - 1; lower > rank; --lower) {
+                  best_scores[lower] = best_scores[lower - 1];
+                  best_indices[lower] = best_indices[lower - 1];
+                }
+                best_scores[rank] = value;
+                best_indices[rank] = static_cast<int>(category + 1);
+                break;
+              }
+            }
+          }
+          for (std::size_t rank = 0; rank < keep; ++rank) {
+            const std::size_t destination = start + row +
+              x.rows() * rank + x.rows() * keep * prefix;
+            INTEGER(top_index)[destination] = best_indices[rank];
+            REAL(top_score)[destination] = best_scores[rank];
+          }
+        }
+      }
+    }
+
+    SEXP output = protect.add(Rf_allocVector(VECSXP, 4));
+    SEXP names = protect.add(Rf_allocVector(STRSXP, 4));
+    const char* field_names[4] = {
+      "top_index", "top_score", "Ttest", "predict_backend"
+    };
+    for (int index = 0; index < 4; ++index) {
+      SET_STRING_ELT(names, index, Rf_mkChar(field_names[index]));
+    }
+    SET_VECTOR_ELT(output, 0, top_index);
+    SET_VECTOR_ELT(output, 1, top_score);
+    SET_VECTOR_ELT(output, 2, projected);
+    SET_VECTOR_ELT(output, 3, Rf_mkString("core_topk"));
     Rf_setAttrib(output, R_NamesSymbol, names);
     return output;
   });

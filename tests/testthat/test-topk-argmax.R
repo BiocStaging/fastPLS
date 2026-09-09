@@ -23,6 +23,33 @@ test_that("top-k classification prediction preserves argmax by default", {
   expect_equal(dim(top5$Ypred_top_score[[1]]), c(length(idx), 5L))
 })
 
+test_that("standalone SIMPLS top-k prediction matches the full score path", {
+  set.seed(20260909)
+  X <- matrix(rnorm(140 * 18), nrow = 140, ncol = 18)
+  y <- factor(sample(paste0("C", seq_len(7)), 140, replace = TRUE))
+  train <- seq_len(110)
+  test <- X[-train, , drop = FALSE]
+  fit <- pls(
+    X[train, , drop = FALSE], y[train], ncomp = c(1L, 3L, 5L),
+    method = "simpls", backend = "cpu", seed = 91L
+  )
+  model <- fastPLS:::.fastpls_restore_internal_output_fields(fit)
+  compact <- fastPLS:::.class_topk_predict(
+    model, test, top = 3L, proj = TRUE, backend = "cpp"
+  )
+  full <- fastPLS:::pls_labels_core_predict_cpp(model, test, TRUE)
+  expected <- fastPLS:::.class_topk_from_score_cube(
+    full$Ypred, model$lev, model$ncomp, top = 3L
+  )
+
+  expect_identical(compact$Ypred, expected$Ypred)
+  expect_identical(compact$Ypred_top, expected$Ypred_top)
+  expect_equal(compact$Ypred_top_score, expected$Ypred_top_score,
+               tolerance = 2e-12)
+  expect_equal(compact$Ttest, full$Ttest, tolerance = 2e-12)
+  expect_identical(compact$predict_backend, "core_topk")
+})
+
 test_that("label-aware PLSSVD model avoids dense response storage", {
   set.seed(20260514)
   X <- matrix(rnorm(80 * 12), nrow = 80, ncol = 12)

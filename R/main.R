@@ -677,7 +677,7 @@ out$Ypred_index <- matrix(top_index[, 1L, ], nrow = dims[1L], ncol = dims[3L])
             isTRUE(proj)
         )
     } else {
-        pls_class_predict_topk_cpp(
+        pls_class_predict_topk_core_cpp(
             model,
             as.matrix(Xtest),
             as.integer(top),
