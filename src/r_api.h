@@ -36,6 +36,7 @@ SEXP _fastPLS_cuda_resident_predict_path_cpp(
 SEXP _fastPLS_cuda_matrix_multiply(SEXP left, SEXP right);
 SEXP _fastPLS_has_cuda();
 SEXP _fastPLS_has_metal();
+SEXP _fastPLS_set_cpu_threads(SEXP threads);
 SEXP _fastPLS_rsvd_audit_reset_debug();
 SEXP _fastPLS_rsvd_audit_summary_debug();
 SEXP _fastPLS_fastsvd_core_cpp(SEXP matrix, SEXP components,
@@ -218,6 +219,13 @@ SEXP _fastPLS_pls_labels_core_predict_cpp(
 );
 SEXP _fastPLS_pls_class_predict_topk_core_cpp(
   SEXP model, SEXP predictors, SEXP top, SEXP project, SEXP block_size
+);
+SEXP _fastPLS_pls_float32_class_predict_compact_cpp(
+  SEXP model, SEXP predictors, SEXP use_lda, SEXP block_size
+);
+SEXP _fastPLS_lda_project_train_prefix_float32_cpp(
+  SEXP model, SEXP predictors, SEXP labels, SEXP class_count,
+  SEXP components
 );
 SEXP _fastPLS_pls_float32_labels_backend_core_cpp(
   SEXP predictors, SEXP labels, SEXP class_count, SEXP components,

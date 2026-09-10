@@ -1,7 +1,7 @@
 Package: fastPLS
 Type: Package
 Title: Fast Partial Least Squares for High-Dimensional Data
-Version: 0.99.56
+Version: 0.99.57
 Date: 2026-09-09
 Authors@R: c(
     person(
@@ -37,12 +37,13 @@ URL: https://github.com/tkcaccia/fastPLS
 BugReports: https://github.com/tkcaccia/fastPLS/issues
 biocViews: Software, DimensionReduction, Classification, Regression,
     GenePrediction, GeneExpression, Metabolomics, SingleCell, GPU
-SystemRequirements: Optional CUDA Toolkit and NVIDIA GPU driver for CUDA
-    acceleration; optional Apple Metal framework on macOS for Metal
-    acceleration. CPU-only builds do not require GPU software.
+SystemRequirements: OpenBLAS development libraries on Linux and Windows;
+    optional CUDA Toolkit and NVIDIA GPU driver for CUDA acceleration;
+    optional Apple Metal framework on macOS for Metal acceleration. CPU-only
+    builds do not require GPU software.
 Depends: R (>= 4.6.0)
 Imports: Biobase, methods, float
-Suggests: BiocStyle, knitr, RhpcBLASctl, rmarkdown, testthat (>= 3.0.0)
+Suggests: BiocStyle, knitr, rmarkdown, testthat (>= 3.0.0)
 VignetteBuilder: knitr
 NeedsCompilation: yes
 Config/testthat/edition: 3

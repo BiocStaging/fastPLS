@@ -96,9 +96,9 @@ fastpls::core::Matrix<float> float_matrix_from_s4_impl(
   const std::size_t columns = static_cast<std::size_t>(INTEGER(dimensions)[1]);
   fastpls::core::Matrix<float> values(rows, columns);
   const int* source = INTEGER(bits);
-  for (std::size_t index = 0; index < values.size(); ++index) {
-    values.data()[index] = decode_float32(source[index]);
-  }
+  static_assert(sizeof(float) == sizeof(int),
+                "float32 bridge requires 32-bit float and int storage");
+  std::memcpy(values.data(), source, values.size() * sizeof(float));
   UNPROTECT(1);
   return values;
 }
@@ -127,9 +127,11 @@ fastpls::core::Matrix<float> float_matrix_from_bits(SEXP object,
     throw std::invalid_argument(std::string(name) + " must be non-empty");
   }
   fastpls::core::Matrix<float> values(rows, columns);
-  for (std::size_t index = 0; index < values.size(); ++index) {
-    values.data()[index] = decode_float32(INTEGER(object)[index]);
-  }
+  static_assert(sizeof(float) == sizeof(int),
+                "float32 bridge requires 32-bit float and int storage");
+  std::memcpy(
+    values.data(), INTEGER(object), values.size() * sizeof(float)
+  );
   return values;
 }
 
@@ -226,9 +228,9 @@ SEXP float_bits_matrix(const fastpls::core::Matrix<float>& values) {
   SEXP result = Rf_allocMatrix(
     INTSXP, static_cast<int>(values.rows()), static_cast<int>(values.columns())
   );
-  for (std::size_t index = 0; index < values.size(); ++index) {
-    INTEGER(result)[index] = encode_float32(values.data()[index]);
-  }
+  static_assert(sizeof(float) == sizeof(int),
+                "float32 bridge requires 32-bit float and int storage");
+  std::memcpy(INTEGER(result), values.data(), values.size() * sizeof(float));
   return result;
 }
 
@@ -463,6 +465,22 @@ SEXP float_lda_model(const fastpls::core::LdaModel<float>& model) {
   };
   for (int index = 0; index < 8; ++index) {
     SET_STRING_ELT(names, index, Rf_mkChar(labels[index]));
+  }
+  Rf_setAttrib(output, R_NamesSymbol, names);
+  UNPROTECT(2);
+  return output;
+}
+
+SEXP float_lda_models(
+    const std::vector<fastpls::core::LdaModel<float>>& models,
+    const int* components) {
+  SEXP output = PROTECT(Rf_allocVector(VECSXP, models.size()));
+  SEXP names = PROTECT(Rf_allocVector(STRSXP, models.size()));
+  for (std::size_t index = 0; index < models.size(); ++index) {
+    SET_VECTOR_ELT(output, index, float_lda_model(models[index]));
+    SET_STRING_ELT(
+      names, index, Rf_mkChar(std::to_string(components[index]).c_str())
+    );
   }
   Rf_setAttrib(output, R_NamesSymbol, names);
   UNPROTECT(2);
@@ -1538,6 +1556,25 @@ extern "C" SEXP _fastPLS_has_metal() {
   return Rf_ScalarLogical(fastpls_svd::has_metal_backend());
 }
 
+extern "C" SEXP _fastPLS_set_cpu_threads(SEXP threads) {
+  const int requested = Rf_asInteger(threads);
+  if (requested == NA_INTEGER || requested < 1) {
+    Rf_error("fastPLS CPU thread count must be a positive integer");
+  }
+  const std::vector<std::string> configured =
+    fastpls::runtime::set_cpu_threads(requested);
+  SEXP output = PROTECT(Rf_allocVector(STRSXP, configured.size()));
+  for (R_xlen_t index = 0;
+       index < static_cast<R_xlen_t>(configured.size()); ++index) {
+    SET_STRING_ELT(
+      output, index,
+      Rf_mkChar(configured[static_cast<std::size_t>(index)].c_str())
+    );
+  }
+  UNPROTECT(1);
+  return output;
+}
+
 extern "C" SEXP _fastPLS_rsvd_audit_reset_debug() {
   fastpls_svd::reset_rsvd_audit_summary();
   return R_NilValue;
@@ -2256,28 +2293,153 @@ extern "C" SEXP _fastPLS_lda_train_prefix_float32_cpp(
     }
     const fastpls::core::Matrix<float> values =
       float_matrix_from_s4(scores, "Ttrain");
-    const auto models = fastpls::core::train_lda_prefixes(
-      values.view(), INTEGER(labels), static_cast<std::size_t>(XLENGTH(labels)),
-      static_cast<std::size_t>(classes), INTEGER(components),
-      static_cast<std::size_t>(XLENGTH(components))
-    );
-    SEXP output = PROTECT(Rf_allocVector(VECSXP, models.size()));
-    SEXP names = PROTECT(Rf_allocVector(STRSXP, models.size()));
-    for (std::size_t index = 0; index < models.size(); ++index) {
-      SET_VECTOR_ELT(output, index, float_lda_model(models[index]));
-      SET_STRING_ELT(
-        names, index, Rf_mkChar(std::to_string(INTEGER(components)[index]).c_str())
+    if (XLENGTH(labels) != static_cast<R_xlen_t>(values.rows())) {
+      throw std::invalid_argument(
+        "float32 PLS-LDA requires one label per score row"
       );
     }
-    Rf_setAttrib(output, R_NamesSymbol, names);
-    UNPROTECT(2);
-    return output;
+    fastpls::core::Matrix<float> gram(values.columns(), values.columns());
+    fastpls::runtime::cpu_crossprod_f32(values.view(), gram.view());
+    fastpls::core::Matrix<float> class_sums(
+      static_cast<std::size_t>(classes), values.columns()
+    );
+    std::vector<float> counts(static_cast<std::size_t>(classes), 0.0f);
+    for (std::size_t row = 0; row < values.rows(); ++row) {
+      const int encoded = INTEGER(labels)[row] - 1;
+      if (encoded < 0 || encoded >= classes) {
+        throw std::invalid_argument(
+          "float32 PLS-LDA labels must be encoded as 1..n_classes"
+        );
+      }
+      const std::size_t class_index = static_cast<std::size_t>(encoded);
+      counts[class_index] += 1.0f;
+      for (std::size_t component = 0;
+           component < values.columns(); ++component) {
+        class_sums(class_index, component) += values(row, component);
+      }
+    }
+    const auto models = fastpls::core::train_lda_prefixes_from_moments<float>(
+      gram.view(), class_sums.view(), counts.data(), counts.size(),
+      values.rows(), INTEGER(components),
+      static_cast<std::size_t>(XLENGTH(components))
+    );
+    return float_lda_models(models, INTEGER(components));
   } catch (const std::exception& exception) {
     Rf_error("%s", exception.what());
   } catch (...) {
     Rf_error("Unknown error in float32 PLS-LDA fitting");
   }
   return R_NilValue;
+}
+
+extern "C" SEXP _fastPLS_lda_project_train_prefix_float32_cpp(
+    SEXP model, SEXP predictors, SEXP labels, SEXP class_count,
+    SEXP components) {
+  return translate_exceptions("projected float32 PLS-LDA fitting", [&] {
+    if (TYPEOF(labels) != INTSXP || TYPEOF(components) != INTSXP ||
+        XLENGTH(components) < 1) {
+      throw std::invalid_argument(
+        "projected float32 PLS-LDA requires integer labels and components"
+      );
+    }
+    const int classes = Rf_asInteger(class_count);
+    if (classes < 2) {
+      throw std::invalid_argument(
+        "projected float32 PLS-LDA requires at least two classes"
+      );
+    }
+    const auto x = float_matrix_from_s4(predictors, "Xtrain");
+    const auto projection = float_matrix_from_s4(
+      list_element(model, "R"), "model$R"
+    );
+    const auto center = float_matrix_from_s4(
+      list_element(model, "mX"), "model$mX"
+    );
+    const auto scale = float_matrix_from_s4(
+      list_element(model, "vX"), "model$vX"
+    );
+    if (x.rows() != static_cast<std::size_t>(XLENGTH(labels)) ||
+        x.columns() != projection.rows() || center.size() != x.columns() ||
+        scale.size() != x.columns()) {
+      throw std::invalid_argument(
+        "projected float32 PLS-LDA dimensions are inconsistent"
+      );
+    }
+    std::size_t maximum = 0;
+    for (R_xlen_t index = 0; index < XLENGTH(components); ++index) {
+      const int count = INTEGER(components)[index];
+      if (count < 1 ||
+          static_cast<std::size_t>(count) > projection.columns()) {
+        throw std::invalid_argument(
+          "projected float32 PLS-LDA components exceed model rank"
+        );
+      }
+      maximum = std::max(maximum, static_cast<std::size_t>(count));
+    }
+
+    fastpls::core::Matrix<float> scaled_projection(x.columns(), maximum);
+    std::vector<float> offset(maximum, 0.0f);
+    for (std::size_t component = 0; component < maximum; ++component) {
+      for (std::size_t predictor = 0; predictor < x.columns(); ++predictor) {
+        const float divisor = scale.data()[predictor];
+        if (!std::isfinite(divisor) || divisor == 0.0f) {
+          throw std::invalid_argument(
+            "projected float32 PLS-LDA contains an invalid predictor scale"
+          );
+        }
+        const float weight = projection(predictor, component) / divisor;
+        scaled_projection(predictor, component) = weight;
+        offset[component] += center.data()[predictor] * weight;
+      }
+    }
+    fastpls::core::Matrix<float> scores(x.rows(), maximum);
+    fastpls::runtime::cpu_gemm_f32(
+      x.view(), scaled_projection.view(), false, false, scores.view()
+    );
+    for (std::size_t component = 0; component < maximum; ++component) {
+      for (std::size_t row = 0; row < scores.rows(); ++row) {
+        scores(row, component) -= offset[component];
+      }
+    }
+
+    fastpls::core::Matrix<float> gram(maximum, maximum);
+    fastpls::runtime::cpu_crossprod_f32(scores.view(), gram.view());
+    fastpls::core::Matrix<float> class_sums(
+      static_cast<std::size_t>(classes), maximum
+    );
+    std::vector<float> counts(static_cast<std::size_t>(classes), 0.0f);
+    for (std::size_t row = 0; row < scores.rows(); ++row) {
+      const int encoded = INTEGER(labels)[row] - 1;
+      if (encoded < 0 || encoded >= classes) {
+        throw std::invalid_argument(
+          "projected float32 PLS-LDA labels must be encoded as 1..n_classes"
+        );
+      }
+      const std::size_t class_index = static_cast<std::size_t>(encoded);
+      counts[class_index] += 1.0f;
+      for (std::size_t component = 0; component < maximum; ++component) {
+        class_sums(class_index, component) += scores(row, component);
+      }
+    }
+    const auto models = fastpls::core::train_lda_prefixes_from_moments<float>(
+      gram.view(), class_sums.view(), counts.data(), counts.size(),
+      scores.rows(), INTEGER(components),
+      static_cast<std::size_t>(XLENGTH(components))
+    );
+    ProtectStack protect;
+    SEXP output = protect.add(Rf_allocVector(VECSXP, 2));
+    SEXP fitted = protect.add(float_lda_models(
+      models, INTEGER(components)
+    ));
+    SEXP retained_scores = protect.add(float_bits_matrix(scores));
+    SEXP names = protect.add(Rf_allocVector(STRSXP, 2));
+    SET_STRING_ELT(names, 0, Rf_mkChar("models"));
+    SET_STRING_ELT(names, 1, Rf_mkChar("Ttrain"));
+    SET_VECTOR_ELT(output, 0, fitted);
+    SET_VECTOR_ELT(output, 1, retained_scores);
+    Rf_setAttrib(output, R_NamesSymbol, names);
+    return output;
+  });
 }
 
 extern "C" SEXP _fastPLS_lda_predict_float32_cpp(
@@ -3665,6 +3827,221 @@ extern "C" SEXP _fastPLS_pls_class_predict_topk_core_cpp(
     SET_VECTOR_ELT(output, 2, projected);
     SET_VECTOR_ELT(output, 3, Rf_mkString("core_topk"));
     Rf_setAttrib(output, R_NamesSymbol, names);
+    return output;
+  });
+}
+
+extern "C" SEXP _fastPLS_pls_float32_class_predict_compact_cpp(
+    SEXP model, SEXP predictors, SEXP use_lda, SEXP block_size) {
+  return translate_exceptions("compact float32 class prediction", [&] {
+    if (!Rf_isS4(predictors) || !Rf_inherits(predictors, "float32")) {
+      throw std::invalid_argument(
+        "compact float32 prediction requires float32 newdata"
+      );
+    }
+    const int lda = Rf_asLogical(use_lda);
+    const int requested_block = Rf_asInteger(block_size);
+    if (lda == NA_LOGICAL || requested_block < 1) {
+      throw std::invalid_argument(
+        "compact float32 prediction controls are invalid"
+      );
+    }
+
+    ProtectStack protect;
+    SEXP bits = protect.add(R_do_slot(predictors, Rf_install("Data")));
+    const SEXP input_dimensions = Rf_getAttrib(bits, R_DimSymbol);
+    if (TYPEOF(bits) != INTSXP || TYPEOF(input_dimensions) != INTSXP ||
+        XLENGTH(input_dimensions) != 2 || INTEGER(input_dimensions)[0] < 1 ||
+        INTEGER(input_dimensions)[1] < 1) {
+      throw std::invalid_argument("newdata contains invalid float32 storage");
+    }
+    const std::size_t sample_count = static_cast<std::size_t>(
+      INTEGER(input_dimensions)[0]
+    );
+    const std::size_t predictor_count = static_cast<std::size_t>(
+      INTEGER(input_dimensions)[1]
+    );
+    const int* input_bits = INTEGER(bits);
+
+    const auto projection = float_matrix_from_s4(
+      list_element(model, "R"), "model$R"
+    );
+    const auto center_matrix = float_matrix_from_s4(
+      list_element(model, "mX"), "model$mX"
+    );
+    const auto scale_matrix = float_matrix_from_s4(
+      list_element(model, "vX"), "model$vX"
+    );
+    const auto response_mean_matrix = float_matrix_from_s4(
+      list_element(model, "mY"), "model$mY"
+    );
+    SEXP components = list_element(model, "ncomp");
+    if (projection.rows() != predictor_count ||
+        center_matrix.size() != predictor_count ||
+        scale_matrix.size() != predictor_count ||
+        response_mean_matrix.size() < 2 || TYPEOF(components) != INTSXP ||
+        XLENGTH(components) < 1) {
+      throw std::invalid_argument(
+        "compact float32 model is incompatible with newdata"
+      );
+    }
+    const std::size_t class_count = response_mean_matrix.size();
+    const std::size_t prefix_count = static_cast<std::size_t>(
+      XLENGTH(components)
+    );
+    for (std::size_t column = 0; column < predictor_count; ++column) {
+      if (!std::isfinite(scale_matrix.data()[column]) ||
+          scale_matrix.data()[column] == 0.0f) {
+        throw std::invalid_argument(
+          "compact float32 model contains an invalid predictor scale"
+        );
+      }
+    }
+
+    std::vector<fastpls::core::Matrix<float>> weights(prefix_count);
+    std::vector<std::vector<float>> constants(prefix_count);
+    if (lda == TRUE) {
+      SEXP lda_data = list_element(model, "lda");
+      SEXP models = list_element(lda_data, "models");
+      const SEXP model_names = Rf_getAttrib(models, R_NamesSymbol);
+      if (TYPEOF(models) != VECSXP || TYPEOF(model_names) != STRSXP) {
+        throw std::invalid_argument(
+          "compact float32 LDA models do not match the component path"
+        );
+      }
+      for (std::size_t index = 0; index < prefix_count; ++index) {
+        const std::string key = std::to_string(INTEGER(components)[index]);
+        SEXP fitted = R_NilValue;
+        for (R_xlen_t candidate = 0; candidate < XLENGTH(models); ++candidate) {
+          if (STRING_ELT(model_names, candidate) != NA_STRING &&
+              key == CHAR(STRING_ELT(model_names, candidate))) {
+            fitted = VECTOR_ELT(models, candidate);
+            break;
+          }
+        }
+        if (fitted == R_NilValue) {
+          throw std::invalid_argument(
+            "compact float32 LDA model is missing a component prefix"
+          );
+        }
+        const auto linear = float_matrix_from_bits(
+          list_element(fitted, "linear"), "LDA linear coefficients"
+        );
+        weights[index].resize(linear.columns(), linear.rows());
+        for (std::size_t class_index = 0;
+             class_index < linear.rows(); ++class_index) {
+          for (std::size_t component = 0;
+               component < linear.columns(); ++component) {
+            weights[index](component, class_index) =
+              linear(class_index, component);
+          }
+        }
+        const auto intercept = float_matrix_from_bits(
+          list_element(fitted, "constants"), "LDA constants"
+        );
+        constants[index].assign(
+          intercept.data(), intercept.data() + intercept.size()
+        );
+      }
+    } else {
+      SEXP stored = list_element(model, "W_latent");
+      if (TYPEOF(stored) == VECSXP && XLENGTH(stored) == XLENGTH(components)) {
+        for (std::size_t index = 0; index < prefix_count; ++index) {
+          weights[index] = float_matrix_from_s4(
+            VECTOR_ELT(stored, static_cast<R_xlen_t>(index)),
+            "PLS-SVD latent prediction weights"
+          );
+        }
+      } else {
+        const auto loadings = float_matrix_from_s4(
+          list_element(model, "Q"), "SIMPLS response loadings"
+        );
+        for (std::size_t index = 0; index < prefix_count; ++index) {
+          const int retained = INTEGER(components)[index];
+          if (retained < 1 ||
+              static_cast<std::size_t>(retained) > loadings.columns()) {
+            throw std::invalid_argument(
+              "SIMPLS component path exceeds the response loadings"
+            );
+          }
+          weights[index].resize(
+            static_cast<std::size_t>(retained), class_count
+          );
+          for (std::size_t response = 0; response < class_count; ++response) {
+            for (int component = 0; component < retained; ++component) {
+              weights[index](static_cast<std::size_t>(component), response) =
+                loadings(response, static_cast<std::size_t>(component));
+            }
+          }
+        }
+      }
+    }
+
+    for (std::size_t index = 0; index < prefix_count; ++index) {
+      const int retained = INTEGER(components)[index];
+      if (retained < 1 ||
+          static_cast<std::size_t>(retained) > projection.columns() ||
+          weights[index].rows() != static_cast<std::size_t>(retained) ||
+          weights[index].columns() != class_count ||
+          (lda == TRUE && constants[index].size() != class_count)) {
+        throw std::invalid_argument(
+          "compact float32 classifier dimensions are inconsistent"
+        );
+      }
+    }
+
+    SEXP output = protect.add(Rf_allocMatrix(
+      INTSXP, static_cast<int>(sample_count), static_cast<int>(prefix_count)
+    ));
+    fastpls::runtime::CpuLinearAlgebraF32 backend;
+    const std::size_t rows_per_block = std::min<std::size_t>(
+      static_cast<std::size_t>(requested_block), sample_count
+    );
+    for (std::size_t start = 0; start < sample_count;
+         start += rows_per_block) {
+      const std::size_t count = std::min(rows_per_block, sample_count - start);
+      fastpls::core::Matrix<float> block(count, predictor_count);
+      for (std::size_t column = 0; column < predictor_count; ++column) {
+        std::memcpy(
+          block.data() + column * count,
+          input_bits + column * sample_count + start,
+          count * sizeof(float)
+        );
+        const float location = center_matrix.data()[column];
+        const float divisor = scale_matrix.data()[column];
+        for (std::size_t row = 0; row < count; ++row) {
+          block(row, column) = (block(row, column) - location) / divisor;
+        }
+      }
+      fastpls::core::Matrix<float> scores(count, projection.columns());
+      backend.gemm(block.view(), projection.view(), false, false, scores.view());
+      for (std::size_t index = 0; index < prefix_count; ++index) {
+        const std::size_t retained = static_cast<std::size_t>(
+          INTEGER(components)[index]
+        );
+        const auto score_prefix = fastpls::core::make_const_view(
+          scores.data(), count, retained, scores.rows()
+        );
+        fastpls::core::Matrix<float> discriminants(count, class_count);
+        backend.gemm(
+          score_prefix, weights[index].view(), false, false,
+          discriminants.view()
+        );
+        const float* offset = lda == TRUE ? constants[index].data() :
+          response_mean_matrix.data();
+        for (std::size_t response = 0; response < class_count; ++response) {
+          for (std::size_t row = 0; row < count; ++row) {
+            discriminants(row, response) += offset[response];
+          }
+        }
+        for (std::size_t row = 0; row < count; ++row) {
+          INTEGER(output)[start + row + index * sample_count] =
+            static_cast<int>(
+              fastpls::core::row_argmax(discriminants.view(), row) + 1
+            );
+        }
+      }
+    }
     return output;
   });
 }

@@ -173,11 +173,11 @@ The `backend` argument selects where the main numerical work is performed.
 `backend = "cpu"` uses the package's compiled, dependency-free C++ core with
 native rSVD. It is usually best for small and moderate
 datasets, low-dimensional problems, and machines without GPU support.
-The CPU kernels use the BLAS/LAPACK implementation selected when fastPLS is
-built. macOS builds use Apple Accelerate by default. On Linux and other
-Unix-like systems, configuration automatically selects OpenBLAS when it can be
-located through `OPENBLAS_ROOT` or `pkg-config`; otherwise the package uses the
-BLAS selected by R. Linking against a multithreaded BLAS enables eligible
+The CPU kernels use Apple Accelerate by default on macOS and OpenBLAS by
+default on Linux and Windows. Configuration locates OpenBLAS through
+`OPENBLAS_ROOT` or `pkg-config` and stops with installation guidance when it is
+unavailable. Set `FASTPLS_USE_OPENBLAS=0` only to request R's BLAS explicitly.
+Linking against multithreaded OpenBLAS enables eligible
 matrix operations to use multiple CPU cores. For example,
 `options(backend = "cpu", cores = 4L)` selects CPU execution and requests four
 threads from the linked BLAS/OpenMP runtime. An explicit `backend` argument

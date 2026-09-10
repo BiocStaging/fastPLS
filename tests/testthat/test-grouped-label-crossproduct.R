@@ -44,3 +44,65 @@ test_that("grouped-label float32 products preserve class predictions", {
     )$Ypred[[5L]]
     expect_identical(grouped_prediction, shuffled_prediction)
 })
+
+test_that("float32 class-sum fallback preserves preprocessing statistics", {
+    skip_if_not_installed("float")
+    set.seed(73)
+    per_class <- 600L
+    labels <- factor(rep(letters[1:4], each = per_class))
+    X <- matrix(rnorm(length(labels) * 12L), ncol = 12L)
+    X <- sweep(X, 2L, seq(2, 24, by = 2), "+")
+    Xtest <- matrix(rnorm(80L * 12L), ncol = 12L)
+    Xtest <- sweep(Xtest, 2L, seq(2, 24, by = 2), "+")
+    interleaved <- as.vector(vapply(
+        seq_len(per_class),
+        function(index) index + (0:3) * per_class,
+        integer(4L)
+    ))
+
+    fit_once <- function(index) {
+        suppressWarnings(pls(
+            float::fl(X[index, , drop = FALSE]), labels[index], ncomp = 1:4,
+            method = "simpls", backend = "cpu", svd.method = "rsvd",
+            seed = 29, oversample = 10, power = 3,
+            return_variance = FALSE
+        ))
+    }
+    grouped_fit <- fit_once(seq_len(nrow(X)))
+    interleaved_fit <- fit_once(interleaved)
+
+    expect_equal(
+        float::dbl(grouped_fit$mX),
+        float::dbl(interleaved_fit$mX),
+        tolerance = 2e-5
+    )
+    expect_identical(
+        predict(grouped_fit, float::fl(Xtest))$Ypred[[4L]],
+        predict(interleaved_fit, float::fl(Xtest))$Ypred[[4L]]
+    )
+})
+
+test_that("compact float32 class prediction matches retained-score paths", {
+    skip_if_not_installed("float")
+    predictors <- float::fl(as.matrix(iris[, seq_len(4L)]))
+    labels <- factor(iris$Species)
+
+    for (method in c("simpls", "plssvd")) {
+        for (classifier in c("argmax", "lda")) {
+            fit <- suppressWarnings(pls(
+                predictors, labels, ncomp = 1:3, method = method,
+                classifier = classifier, backend = "cpu",
+                svd.method = "rsvd", oversample = 32L, power = 5L,
+                seed = 123L, return_variance = FALSE
+            ))
+            compact <- predict(fit, predictors, backend = "cpu")$Ypred
+            retained <- predict(
+                fit, predictors, backend = "cpu", raw_scores = TRUE
+            )$Ypred
+            expect_identical(
+                lapply(compact, as.character),
+                lapply(retained, as.character)
+            )
+        }
+    }
+})

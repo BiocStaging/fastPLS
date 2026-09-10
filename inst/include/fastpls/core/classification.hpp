@@ -302,6 +302,14 @@ LabelCrossprodResult<T> scaled_label_crossprod(
   return result;
 }
 
+template<class T, class Label>
+void centered_label_crossprod(ConstMatrixView<T> predictors,
+                              const Label* labels,
+                              std::size_t label_count,
+                              const T* center_offset,
+                              std::size_t class_count,
+                              MatrixView<T> output);
+
 template<class T, class Label, class Backend>
 LabelCrossprodResult<T> prepare_scaled_label_crossprod(
     MatrixView<T> predictors, const Label* labels,
@@ -315,8 +323,15 @@ LabelCrossprodResult<T> prepare_scaled_label_crossprod(
   if (!label_crossprod_from_runs(
       ConstMatrixView<T>(predictors), labels, label_count, class_count,
       result, backend)) {
-    return prepare_scaled_label_crossprod(
-      predictors, labels, label_count, class_count, scaling
+    // The predictor buffer is already centered/scaled; only the class sums
+    // may be recomputed here, otherwise preprocessing statistics are lost.
+    std::vector<T> center_offset(class_count);
+    for (std::size_t response = 0; response < class_count; ++response) {
+      center_offset[response] = -result.response_mean[response];
+    }
+    centered_label_crossprod(
+      ConstMatrixView<T>(predictors), labels, label_count,
+      center_offset.data(), class_count, result.crossprod.view()
     );
   }
   return result;

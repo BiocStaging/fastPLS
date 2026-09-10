@@ -1,5 +1,11 @@
 # Hand-written R C-API entry points used by the dependency-free core.
 
+set_cpu_threads_cpp <- function(threads) {
+    .Call(
+        "_fastPLS_set_cpu_threads", as.integer(threads), PACKAGE = "fastPLS"
+    )
+}
+
 fastsvd_core_cpp <- function(
     matrix, components, oversample, power, seed, left_only = FALSE
 ) {
@@ -198,6 +204,24 @@ pls_class_predict_topk_core_cpp <- function(
         "_fastPLS_pls_class_predict_topk_core_cpp", model, predictors,
         as.integer(top), isTRUE(project), as.integer(block_size),
         PACKAGE = "fastPLS"
+    )
+}
+
+pls_float32_class_predict_compact_cpp <- function(
+    model, predictors, use_lda = FALSE, block_size = 4096L
+) {
+    .Call(
+        "_fastPLS_pls_float32_class_predict_compact_cpp", model, predictors,
+        isTRUE(use_lda), as.integer(block_size), PACKAGE = "fastPLS"
+    )
+}
+
+lda_project_train_prefix_float32_cpp <- function(
+    model, predictors, labels, class_count, components
+) {
+    .Call(
+        "_fastPLS_lda_project_train_prefix_float32_cpp", model, predictors,
+        labels, class_count, components, PACKAGE = "fastPLS"
     )
 }
 

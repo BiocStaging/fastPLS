@@ -10,6 +10,8 @@
 
 #if !defined(_WIN32)
 #include <dlfcn.h>
+#else
+#include <windows.h>
 #endif
 
 #if defined(FASTPLS_USE_ACCELERATE)
@@ -21,6 +23,18 @@
 #else
 #include <R_ext/BLAS.h>
 #include <R_ext/RS.h>
+#endif
+
+#if !defined(FASTPLS_USE_ACCELERATE) && \
+    !defined(FASTPLS_USE_OPENBLAS)
+extern "C" {
+BLAS_extern void F77_NAME(ssyrk)(
+  const char* uplo, const char* trans, const BLAS_INT* n,
+  const BLAS_INT* k, const float* alpha, const float* a,
+  const BLAS_INT* lda, const float* beta, float* c,
+  const BLAS_INT* ldc FCLEN FCLEN
+);
+}
 #endif
 
 namespace fastpls {
@@ -131,6 +145,15 @@ bool cpu_gemv_f32(core::ConstMatrixView<float> matrix,
   return true;
 #elif defined(FASTPLS_USE_OPENBLAS)
   configure_openblas_threads();
+#if defined(_WIN32)
+  cblas_sgemv(
+    CblasColMajor, transpose ? CblasTrans : CblasNoTrans,
+    static_cast<int>(matrix.rows()),
+    static_cast<int>(matrix.columns()), 1.0f, matrix.data(),
+    static_cast<int>(matrix.leading_dimension()), vector, 1, 0.0f,
+    output, 1
+  );
+#else
   const CblasSgemv sgemv = linked_openblas_sgemv();
   if (sgemv == nullptr) return false;
   sgemv(
@@ -140,6 +163,7 @@ bool cpu_gemv_f32(core::ConstMatrixView<float> matrix,
     static_cast<int>(matrix.leading_dimension()), vector, 1, 0.0f,
     output, 1
   );
+#endif
   return true;
 #elif !defined(_WIN32) && !defined(__APPLE__)
   const CblasSgemv sgemv = system_cblas_sgemv();
@@ -158,6 +182,73 @@ bool cpu_gemv_f32(core::ConstMatrixView<float> matrix,
 }
 
 }  // namespace
+
+std::vector<std::string> set_cpu_threads(const int threads) {
+  if (threads < 1) {
+    throw std::invalid_argument("fastPLS CPU thread count must be positive");
+  }
+  std::vector<std::string> configured;
+#if defined(FASTPLS_USE_OPENBLAS)
+  openblas_set_num_threads(threads);
+  configured.emplace_back("OpenBLAS");
+#endif
+#if !defined(_WIN32)
+  using ThreadSetter = void (*)(int);
+  const auto invoke = [&](const char* symbol, const char* runtime) {
+    ThreadSetter setter = reinterpret_cast<ThreadSetter>(
+      dlsym(RTLD_DEFAULT, symbol)
+    );
+    if (setter == nullptr) return;
+    setter(threads);
+    if (std::find(configured.begin(), configured.end(), runtime) ==
+        configured.end()) {
+      configured.emplace_back(runtime);
+    }
+  };
+#if !defined(FASTPLS_USE_OPENBLAS)
+  invoke("openblas_set_num_threads", "OpenBLAS");
+#endif
+  invoke("MKL_Set_Num_Threads", "MKL");
+  invoke("mkl_set_num_threads", "MKL");
+  invoke("bli_thread_set_num_threads", "BLIS");
+  invoke("omp_set_num_threads", "OpenMP");
+#elif !defined(FASTPLS_USE_OPENBLAS)
+  using ThreadSetter = void (*)(int);
+  const auto invoke = [&](const char* const* libraries,
+                          const std::size_t library_count,
+                          const char* symbol,
+                          const char* runtime) {
+    for (std::size_t index = 0; index < library_count; ++index) {
+      HMODULE module = GetModuleHandleA(libraries[index]);
+      if (module == nullptr) continue;
+      ThreadSetter setter = reinterpret_cast<ThreadSetter>(
+        GetProcAddress(module, symbol)
+      );
+      if (setter == nullptr) continue;
+      setter(threads);
+      if (std::find(configured.begin(), configured.end(), runtime) ==
+          configured.end()) {
+        configured.emplace_back(runtime);
+      }
+      return;
+    }
+  };
+  const char* openblas_libraries[] = {
+    "libopenblas.dll", "openblas.dll", "Rblas.dll"
+  };
+  const char* mkl_libraries[] = {"mkl_rt.dll"};
+  const char* blis_libraries[] = {"libblis.dll", "blis.dll"};
+  const char* openmp_libraries[] = {
+    "libgomp-1.dll", "libomp.dll", "vcomp140.dll"
+  };
+  invoke(openblas_libraries, 3, "openblas_set_num_threads", "OpenBLAS");
+  invoke(mkl_libraries, 1, "MKL_Set_Num_Threads", "MKL");
+  invoke(mkl_libraries, 1, "mkl_set_num_threads", "MKL");
+  invoke(blis_libraries, 2, "bli_thread_set_num_threads", "BLIS");
+  invoke(openmp_libraries, 3, "omp_set_num_threads", "OpenMP");
+#endif
+  return configured;
+}
 
 void cpu_gemm_f32(core::ConstMatrixView<float> left,
                   core::ConstMatrixView<float> right,
@@ -196,6 +287,18 @@ void cpu_gemm_f32(core::ConstMatrixView<float> left,
   );
 #elif defined(FASTPLS_USE_OPENBLAS)
   configure_openblas_threads();
+#if defined(_WIN32)
+  cblas_sgemm(
+    CblasColMajor,
+    transpose_left ? CblasTrans : CblasNoTrans,
+    transpose_right ? CblasTrans : CblasNoTrans,
+    static_cast<int>(rows), static_cast<int>(columns),
+    static_cast<int>(inner_left), 1.0f, left.data(),
+    static_cast<int>(left.leading_dimension()), right.data(),
+    static_cast<int>(right.leading_dimension()), 0.0f, output.data(),
+    static_cast<int>(output.leading_dimension())
+  );
+#else
   const CblasSgemm sgemm = linked_openblas_sgemm();
   if (sgemm == nullptr) {
     throw std::runtime_error("fastPLS could not resolve OpenBLAS SGEMM");
@@ -210,6 +313,7 @@ void cpu_gemm_f32(core::ConstMatrixView<float> left,
     static_cast<int>(right.leading_dimension()), 0.0f, output.data(),
     static_cast<int>(output.leading_dimension())
   );
+#endif
 #elif !defined(_WIN32) && !defined(__APPLE__)
   const CblasSgemm sgemm = system_cblas_sgemm();
   if (sgemm != nullptr) {
@@ -266,6 +370,18 @@ void cpu_gemm_f64(core::ConstMatrixView<double> left,
   );
 #elif defined(FASTPLS_USE_OPENBLAS)
   configure_openblas_threads();
+#if defined(_WIN32)
+  cblas_dgemm(
+    CblasColMajor,
+    transpose_left ? CblasTrans : CblasNoTrans,
+    transpose_right ? CblasTrans : CblasNoTrans,
+    static_cast<int>(rows), static_cast<int>(columns),
+    static_cast<int>(inner_left), 1.0, left.data(),
+    static_cast<int>(left.leading_dimension()), right.data(),
+    static_cast<int>(right.leading_dimension()), 0.0, output.data(),
+    static_cast<int>(output.leading_dimension())
+  );
+#else
   const CblasDgemm dgemm = linked_openblas_dgemm();
   if (dgemm == nullptr) {
     throw std::runtime_error("fastPLS could not resolve OpenBLAS DGEMM");
@@ -280,6 +396,7 @@ void cpu_gemm_f64(core::ConstMatrixView<double> left,
     static_cast<int>(right.leading_dimension()), 0.0, output.data(),
     static_cast<int>(output.leading_dimension())
   );
+#endif
 #else
   const char trans_left = transpose_left ? 'T' : 'N';
   const char trans_right = transpose_right ? 'T' : 'N';
@@ -296,6 +413,50 @@ void cpu_gemm_f64(core::ConstMatrixView<double> left,
     right.data(), &ldb, &beta, output.data(), &ldc FCONE FCONE
   );
 #endif
+}
+
+void cpu_crossprod_f32(core::ConstMatrixView<float> input,
+                       core::MatrixView<float> output) {
+  if (output.rows() != input.columns() ||
+      output.columns() != input.columns()) {
+    throw std::invalid_argument(
+      "fastPLS CPU float32 cross-product dimensions are inconsistent"
+    );
+  }
+  const int dimension = static_cast<int>(input.columns());
+  const int observations = static_cast<int>(input.rows());
+#if defined(FASTPLS_USE_ACCELERATE)
+  cblas_ssyrk(
+    CblasColMajor, CblasUpper, CblasTrans, dimension, observations,
+    1.0f, input.data(), static_cast<int>(input.leading_dimension()),
+    0.0f, output.data(), static_cast<int>(output.leading_dimension())
+  );
+#elif defined(FASTPLS_USE_OPENBLAS)
+  configure_openblas_threads();
+  cblas_ssyrk(
+    CblasColMajor, CblasUpper, CblasTrans, dimension, observations,
+    1.0f, input.data(), static_cast<int>(input.leading_dimension()),
+    0.0f, output.data(), static_cast<int>(output.leading_dimension())
+  );
+#else
+  const char upper = 'U';
+  const char transpose = 'T';
+  const BLAS_INT n = static_cast<BLAS_INT>(dimension);
+  const BLAS_INT k = static_cast<BLAS_INT>(observations);
+  const BLAS_INT lda = static_cast<BLAS_INT>(input.leading_dimension());
+  const BLAS_INT ldc = static_cast<BLAS_INT>(output.leading_dimension());
+  const float alpha = 1.0f;
+  const float beta = 0.0f;
+  F77_CALL(ssyrk)(
+    &upper, &transpose, &n, &k, &alpha, input.data(), &lda, &beta,
+    output.data(), &ldc FCONE FCONE
+  );
+#endif
+  for (std::size_t column = 0; column < output.columns(); ++column) {
+    for (std::size_t row = column + 1; row < output.rows(); ++row) {
+      output(row, column) = output(column, row);
+    }
+  }
 }
 
 void CpuLinearAlgebraF64::gemm(core::ConstMatrixView<double> left,

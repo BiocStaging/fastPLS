@@ -30,20 +30,11 @@ test_that("generic backend option controls fastPLS and explicit values win", {
 
 test_that("CPU core option is validated and applied to thread runtimes", {
   old_cores <- getOption("cores", NULL)
-  old_blas_cores <- if (requireNamespace("RhpcBLASctl", quietly = TRUE)) {
-    RhpcBLASctl::blas_get_num_procs()
-  } else {
-    NULL
-  }
   variables <- c("OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS", "GOTO_NUM_THREADS",
                  "MKL_NUM_THREADS", "BLIS_NUM_THREADS", "VECLIB_MAXIMUM_THREADS")
   old_environment <- Sys.getenv(variables, unset = NA_character_)
   on.exit({
     options(cores = old_cores)
-    if (!is.null(old_blas_cores)) {
-      RhpcBLASctl::blas_set_num_threads(old_blas_cores)
-      RhpcBLASctl::omp_set_num_threads(old_blas_cores)
-    }
     for (variable in variables) {
       value <- old_environment[[variable]]
       if (is.na(value)) Sys.unsetenv(variable) else do.call(Sys.setenv,
@@ -53,6 +44,11 @@ test_that("CPU core option is validated and applied to thread runtimes", {
   options(cores = 3L)
   expect_identical(fastPLS:::.fastpls_apply_cpu_cores(), 3L)
   expect_true(all(Sys.getenv(variables) == "3"))
+  expect_type(fastPLS:::set_cpu_threads_cpp(2L), "character")
+  expect_error(
+    fastPLS:::set_cpu_threads_cpp(0L),
+    "positive integer"
+  )
   options(cores = 1.5)
   expect_error(fastPLS:::.fastpls_apply_cpu_cores(), "positive integer")
 })

@@ -1,4 +1,13 @@
-# fastPLS 0.99.56
+# fastPLS 0.99.57
+
+* Removed the optional `RhpcBLASctl` dependency. `options(cores = n)` now uses
+  an internal compiled bridge to configure loaded OpenBLAS, MKL, BLIS and
+  OpenMP runtimes when they expose thread-control functions, while retaining
+  environment-based requests for Apple Accelerate and other BLAS libraries.
+
+* Made OpenBLAS the default CPU numerical library on Linux and Windows. The
+  configure scripts now stop with installation guidance when OpenBLAS is not
+  found; `FASTPLS_USE_OPENBLAS=0` remains an explicit portability override.
 
 * Completed the MIT-licensed core migration by removing the remaining Rcpp,
   RcppArmadillo and Armadillo source boundaries, generated wrappers and

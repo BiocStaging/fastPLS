@@ -4,6 +4,8 @@ set -eu
 use_cuda="${FASTPLS_USE_CUDA:-auto}"
 require_cuda="${FASTPLS_REQUIRE_CUDA:-0}"
 cuda_root="${CUDA_ROOT:-${CUDA_PATH:-}}"
+use_openblas="${FASTPLS_USE_OPENBLAS:-auto}"
+openblas_root="${OPENBLAS_ROOT:-}"
 
 normalize_path() {
   p="$1"
@@ -57,9 +59,76 @@ if [ "${use_cuda}" = "1" ] && [ "${have_cuda}" != "1" ]; then
   echo "fastPLS configure.win: set FASTPLS_REQUIRE_CUDA=1 to make missing CUDA a configuration error"
 fi
 
-pkg_cppflags=""
+openblas_cppflags=""
+openblas_libs=""
+openblas_origin=""
+
+find_openblas_from_root() {
+  [ -n "${openblas_root}" ] || return 1
+  header="$(find "${openblas_root}/include" -name openblas_config.h -print 2>/dev/null | head -n 1 || true)"
+  library="$(find "${openblas_root}" -name 'libopenblas.a' -print 2>/dev/null | head -n 1 || true)"
+  [ -n "${header}" ] && [ -n "${library}" ] || return 1
+  include_dir="$(normalize_path "$(dirname "${header}")")"
+  library_file="$(normalize_path "${library}")"
+  openblas_cppflags="-I\"${include_dir}\""
+  openblas_libs="\"${library_file}\""
+  openblas_origin="${openblas_root}"
+}
+
+find_rtools_openblas() {
+  for candidate in \
+    "${R_TOOLS_SOFT:-}" \
+    "${RTOOLS46_HOME:-}" \
+    "${RTOOLS45_HOME:-}" \
+    "${RTOOLS44_HOME:-}" \
+    /c/rtools*/x86_64-w64-mingw32.static.posix \
+    /c/rtools*/aarch64-w64-mingw32.static.posix
+  do
+    [ -n "${candidate}" ] && [ -d "${candidate}" ] || continue
+    openblas_root="${candidate}"
+    if find_openblas_from_root; then
+      openblas_origin="Rtools (${candidate})"
+      return 0
+    fi
+  done
+  return 1
+}
+
+find_openblas() {
+  if find_openblas_from_root; then
+    return 0
+  fi
+  if find_rtools_openblas; then
+    return 0
+  fi
+  if command -v pkg-config >/dev/null 2>&1 && pkg-config --exists openblas; then
+    openblas_cppflags="$(pkg-config --cflags openblas)"
+    openblas_libs="$(pkg-config --libs openblas)"
+    openblas_origin="pkg-config"
+    return 0
+  fi
+  return 1
+}
+
+if [ "${use_openblas}" = "auto" ]; then
+  use_openblas="1"
+fi
+if [ "${use_openblas}" = "1" ] && ! find_openblas; then
+  echo "ERROR: OpenBLAS is required for the default fastPLS Windows build but was not found." >&2
+  echo "Install the static OpenBLAS development archive for Rtools or set OPENBLAS_ROOT." >&2
+  echo "Set FASTPLS_USE_OPENBLAS=0 only to request R's BLAS explicitly." >&2
+  exit 1
+fi
+
+if [ "${use_openblas}" = "1" ]; then
+  echo "fastPLS configure.win: using OpenBLAS (${openblas_origin})"
+  pkg_cppflags="-DFASTPLS_USE_OPENBLAS ${openblas_cppflags}"
+  pkg_libs="${openblas_libs}"
+else
+  pkg_cppflags=""
+  pkg_libs='$(LAPACK_LIBS) $(BLAS_LIBS)'
+fi
 pkg_cxxflags=""
-pkg_libs=""
 cuda_objects=""
 cuda_rule=""
 
@@ -69,9 +138,9 @@ rm -f src/core_metal_backend.mm src/svd_metal_backend.mm
 
 if [ "${have_cuda}" = "1" ]; then
   echo "fastPLS configure.win: CUDA Toolkit found at ${cuda_root}"
-  pkg_cppflags="-DFASTPLS_HAS_CUDA -DFASTPLS_HAS_CUDA_KERNELS -I\"${cuda_root}/include\""
+  pkg_cppflags="${pkg_cppflags} -DFASTPLS_HAS_CUDA -DFASTPLS_HAS_CUDA_KERNELS -I\"${cuda_root}/include\""
   pkg_cxxflags="-DFASTPLS_HAS_CUDA -DFASTPLS_HAS_CUDA_KERNELS"
-  pkg_libs="-L\"${cuda_root}/lib/x64\" -lcudart -lcublas -lcusolver -lcurand"
+  pkg_libs="-L\"${cuda_root}/lib/x64\" -lcudart -lcublas -lcusolver -lcurand ${pkg_libs}"
 
   nvcc="${cuda_root}/bin/nvcc.exe"
   cuda_objects=" core_cuda_backend.o"

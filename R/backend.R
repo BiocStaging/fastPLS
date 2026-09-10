@@ -8,9 +8,9 @@
 #' linked BLAS and OpenMP runtimes. Matrix operations can use those threads
 #' when the installed numerical library supports runtime thread control;
 #' sequential PLS deflation steps remain serial. macOS builds use Apple
-#' Accelerate by default. On other Unix-like systems, configuration
-#' automatically selects OpenBLAS when it is found through `OPENBLAS_ROOT` or
-#' `pkg-config`; otherwise fastPLS uses the BLAS selected by R.
+#' Accelerate by default. Linux and Windows builds use OpenBLAS by default;
+#' configuration locates it through `OPENBLAS_ROOT` or `pkg-config`. Set
+#' `FASTPLS_USE_OPENBLAS=0` only to request R's BLAS explicitly.
 #'
 #' @param backend Optional backend: `"cpu"`, `"cuda"`, or `"metal"`. The
 #'   Metal route is a float32 Apple-silicon PLS route
@@ -174,9 +174,6 @@ fastPLS_backend <- function(backend = NULL) {
             )
         ))
     )
-    if (requireNamespace("RhpcBLASctl", quietly = TRUE)) {
-        try(RhpcBLASctl::blas_set_num_threads(cores), silent = TRUE)
-        try(RhpcBLASctl::omp_set_num_threads(cores), silent = TRUE)
-    }
+    set_cpu_threads_cpp(cores)
     invisible(cores)
 }

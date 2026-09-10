@@ -8,6 +8,7 @@ use_cuda="${FASTPLS_USE_CUDA:-auto}"
 require_cuda="${FASTPLS_REQUIRE_CUDA:-0}"
 cuda_root="${CUDA_ROOT:-${CUDA_PATH:-}}"
 use_metal="${FASTPLS_USE_METAL:-auto}"
+system_name="$(uname -s)"
 
 pkg_cxxflags=""
 pkg_cppflags=""
@@ -16,33 +17,53 @@ cuda_objects=""
 metal_objects=""
 metal_mm_rule=""
 
-find_openblas_root() {
-  if [ -n "${openblas_root}" ]; then
-    printf "%s" "${openblas_root}"
-    return
-  fi
-  if command -v pkg-config >/dev/null 2>&1 && pkg-config --exists openblas; then
-    pkg-config --variable=prefix openblas
-    return
-  fi
-  if [ "$(uname -s)" = "Darwin" ] &&
-     [ -d "/opt/homebrew/opt/openblas" ]; then
-    printf "%s" "/opt/homebrew/opt/openblas"
-  fi
+openblas_cppflags=""
+openblas_libs=""
+openblas_origin=""
+
+find_openblas_from_root() {
+  [ -n "${openblas_root}" ] || return 1
+  header="$(find -H "${openblas_root}/include" -name openblas_config.h -print 2>/dev/null | head -n 1 || true)"
+  library="$(find -H "${openblas_root}" \( -name 'libopenblas.so' -o -name 'libopenblas.dylib' -o -name 'libopenblas.a' \) -print 2>/dev/null | head -n 1 || true)"
+  [ -n "${header}" ] && [ -n "${library}" ] || return 1
+  openblas_cppflags="-I$(dirname "${header}")"
+  openblas_library_dir="$(dirname "${library}")"
+  openblas_libs="-L${openblas_library_dir} -Wl,-rpath,${openblas_library_dir} -lopenblas"
+  openblas_origin="${openblas_root}"
 }
 
-if [ "${use_openblas}" = "auto" ] && [ "$(uname -s)" != "Darwin" ]; then
-  openblas_root="$(find_openblas_root || true)"
-  if [ -n "${openblas_root}" ]; then
-    use_openblas="1"
-  else
-    use_openblas="0"
+find_openblas() {
+  if find_openblas_from_root; then
+    return 0
   fi
-elif [ "${use_openblas}" = "1" ]; then
-  openblas_root="$(find_openblas_root || true)"
+  if command -v pkg-config >/dev/null 2>&1 && pkg-config --exists openblas; then
+    openblas_cppflags="$(pkg-config --cflags openblas)"
+    openblas_libs="$(pkg-config --libs openblas)"
+    openblas_origin="pkg-config"
+    return 0
+  fi
+  if [ "${system_name}" = "Darwin" ] && [ -d "/opt/homebrew/opt/openblas" ]; then
+    openblas_root="/opt/homebrew/opt/openblas"
+    find_openblas_from_root
+    return
+  fi
+  return 1
+}
+
+if [ "${use_openblas}" = "auto" ] && [ "${system_name}" = "Linux" ]; then
+  use_openblas="1"
+elif [ "${use_openblas}" = "auto" ] && [ "${system_name}" != "Darwin" ]; then
+  if find_openblas; then use_openblas="1"; else use_openblas="0"; fi
 fi
 
-if [ "$(uname -s)" = "Darwin" ] &&
+if [ "${use_openblas}" = "1" ] && ! find_openblas; then
+  echo "ERROR: OpenBLAS is required for this fastPLS ${system_name} build but was not found." >&2
+  echo "Install the OpenBLAS development package and pkg-config, or set OPENBLAS_ROOT." >&2
+  echo "Set FASTPLS_USE_OPENBLAS=0 only to request R's BLAS explicitly." >&2
+  exit 1
+fi
+
+if [ "${system_name}" = "Darwin" ] &&
    [ "${use_openblas}" != "1" ] &&
    [ "${use_accelerate}" != "0" ] &&
    [ "${use_accelerate}" != "false" ] &&
@@ -51,21 +72,17 @@ if [ "$(uname -s)" = "Darwin" ] &&
   pkg_cppflags="-DFASTPLS_USE_ACCELERATE"
   pkg_libs="-framework Accelerate"
 elif [ "${use_openblas}" = "1" ]; then
-  if [ ! -d "${openblas_root}/include" ] || [ ! -d "${openblas_root}/lib" ]; then
-    echo "ERROR: FASTPLS_USE_OPENBLAS=1 but OPENBLAS_ROOT is incomplete: ${openblas_root}" >&2
-    exit 1
-  fi
-  echo "fastPLS configure: using OpenBLAS from ${openblas_root}; thread count is controlled by OpenBLAS"
-  pkg_cppflags="-DFASTPLS_USE_OPENBLAS -I${openblas_root}/include"
-  if [ "$(uname -s)" = "Darwin" ]; then
+  echo "fastPLS configure: using OpenBLAS (${openblas_origin}); thread count is controlled by OpenBLAS"
+  pkg_cppflags="-DFASTPLS_USE_OPENBLAS ${openblas_cppflags}"
+  if [ "${system_name}" = "Darwin" ]; then
     openblas_dl_lib=""
   else
     openblas_dl_lib="-ldl"
   fi
-  pkg_libs="-L${openblas_root}/lib -Wl,-rpath,${openblas_root}/lib -lopenblas ${openblas_dl_lib}"
+  pkg_libs="${openblas_libs} ${openblas_dl_lib}"
 fi
 
-if [ "$(uname -s)" != "Darwin" ] && [ "${use_openblas}" != "1" ]; then
+if [ "${system_name}" != "Darwin" ] && [ "${use_openblas}" != "1" ]; then
   pkg_libs="${pkg_libs} -ldl"
 fi
 
@@ -140,7 +157,7 @@ else
 fi
 
 have_metal=0
-if [ "$(uname -s)" = "Darwin" ]; then
+if [ "${system_name}" = "Darwin" ]; then
   system_metal_framework="/System/Library/Frameworks/Metal.framework"
   metal_sdk=""
   if [ ! -d "${system_metal_framework}" ]; then
@@ -176,7 +193,7 @@ if [ "${have_metal}" = "1" ]; then
   metal_mm_rule='
 %.o: %.mm
 	$(CXX17) -std=gnu++17 $(ALL_CPPFLAGS) $(PKG_CPPFLAGS) $(CXX17FLAGS) $(CXX17PICFLAGS) $(PKG_CXXFLAGS) -x objective-c++ -fobjc-arc -c $< -o $@'
-elif [ "$(uname -s)" = "Darwin" ]; then
+elif [ "${system_name}" = "Darwin" ]; then
   if [ "${use_metal}" = "0" ] || [ "${use_metal}" = "false" ] || [ "${use_metal}" = "FALSE" ]; then
     echo "fastPLS configure: Apple Metal backend disabled by FASTPLS_USE_METAL=${use_metal}"
   else

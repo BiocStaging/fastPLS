@@ -8,8 +8,15 @@ Metal is enabled automatically when the system frameworks are available.
 CPU-only installation
 ---------------------
 
-No external GPU software is required. Standard R package installation should
-build the CPU implementation on Linux, macOS and Windows.
+No external GPU software is required. macOS uses Apple Accelerate. Linux and
+Windows use OpenBLAS by default and require its development headers and
+libraries. On Debian or Ubuntu, install them with:
+
+  sudo apt-get install libopenblas-dev pkg-config
+
+If OpenBLAS is installed outside the standard search path, set OPENBLAS_ROOT
+to its prefix before installation. Set FASTPLS_USE_OPENBLAS=0 only when an
+explicit build against R's BLAS is required.
 
 CUDA installation
 -----------------

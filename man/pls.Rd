@@ -214,11 +214,9 @@ model can include predictions for held-out samples, latent scores, fitted
 values, variance summaries, and optional classification heads.
 }
 \details{
-The compiled CPU backend uses the BLAS/LAPACK implementation selected at
-package build time. macOS builds use Apple Accelerate by default. On Linux and
-other Unix-like systems, configuration automatically selects OpenBLAS when it
-is found through \code{OPENBLAS_ROOT} or \code{pkg-config}; otherwise the package
-uses the BLAS selected by R. A multithreaded BLAS can execute eligible matrix products
+The compiled CPU backend uses Apple Accelerate by default on macOS and
+OpenBLAS by default on Linux and Windows. Set \code{FASTPLS_USE_OPENBLAS=0} only
+to request R's BLAS explicitly. OpenBLAS can execute eligible matrix products
 on several CPU cores, but the SIMPLS deflation sequence remains serial and
 additional threads are not guaranteed to reduce runtime.
 

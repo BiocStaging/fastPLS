@@ -13,7 +13,12 @@
 #include <string>
 #include <vector>
 
-#if defined(FASTPLS_USE_ACCELERATE) || defined(FASTPLS_USE_OPENBLAS)
+#if defined(FASTPLS_USE_ACCELERATE) || defined(FASTPLS_USE_OPENBLAS) || \
+    (!defined(_WIN32) && !defined(__APPLE__))
+#define FASTPLS_HAS_F32_LAPACK 1
+#endif
+
+#if defined(FASTPLS_HAS_F32_LAPACK)
 extern "C" {
 void F77_NAME(sgeqrf)(const La_INT*, const La_INT*, float*, const La_INT*,
                       float*, float*, const La_INT*, La_INT*);
@@ -38,7 +43,7 @@ namespace fastpls {
 namespace runtime {
 namespace {
 
-#if defined(FASTPLS_USE_ACCELERATE) || defined(FASTPLS_USE_OPENBLAS)
+#if defined(FASTPLS_HAS_F32_LAPACK)
 template<class T>
 core::Matrix<T> contiguous_copy(core::ConstMatrixView<T> input) {
   core::Matrix<T> output(input.rows(), input.columns());
@@ -72,7 +77,7 @@ La_INT workspace_size(float query) {
 }
 #endif
 
-#if !defined(FASTPLS_USE_ACCELERATE) && !defined(FASTPLS_USE_OPENBLAS)
+#if !defined(FASTPLS_HAS_F32_LAPACK)
 float column_dot(const core::Matrix<float>& matrix,
                  std::size_t first, std::size_t second) {
   float value = 0.0f;
@@ -298,7 +303,7 @@ bool portable_svd(core::ConstMatrixView<float> input,
 
 bool CpuLinearAlgebraF32::qr_economy(core::ConstMatrixView<float> input,
                                      core::Matrix<float>& q) const {
-#if defined(FASTPLS_USE_ACCELERATE) || defined(FASTPLS_USE_OPENBLAS)
+#if defined(FASTPLS_HAS_F32_LAPACK)
   if (input.empty()) {
     q.resize(input.rows(), 0);
     return true;
@@ -356,7 +361,7 @@ bool CpuLinearAlgebraF32::symmetric_eigen(
       "fastPLS float32 symmetric eigendecomposition requires a square matrix"
     );
   }
-#if defined(FASTPLS_USE_ACCELERATE) || defined(FASTPLS_USE_OPENBLAS)
+#if defined(FASTPLS_HAS_F32_LAPACK)
   const La_INT n = lapack_dimension(matrix.rows(), "eigendecomposition");
   if (n == 0) {
     eigenvalues.clear();
@@ -397,7 +402,7 @@ bool CpuLinearAlgebraF32::svd_economy(
     core::Matrix<float>& u,
     std::vector<float>& singular_values,
     core::Matrix<float>& vt) const {
-#if defined(FASTPLS_USE_ACCELERATE) || defined(FASTPLS_USE_OPENBLAS)
+#if defined(FASTPLS_HAS_F32_LAPACK)
   const La_INT m = lapack_dimension(input.rows(), "SVD");
   const La_INT n = lapack_dimension(input.columns(), "SVD");
   const La_INT rank = std::min(m, n);

@@ -22,6 +22,7 @@ static const R_CallMethodDef call_entries[] = {
   FASTPLS_CALL(_fastPLS_cuda_resident_predict_path_cpp, 4),
   FASTPLS_CALL(_fastPLS_has_cuda, 0),
   FASTPLS_CALL(_fastPLS_has_metal, 0),
+  FASTPLS_CALL(_fastPLS_set_cpu_threads, 1),
   FASTPLS_CALL(_fastPLS_rsvd_audit_reset_debug, 0),
   FASTPLS_CALL(_fastPLS_rsvd_audit_summary_debug, 0),
   FASTPLS_CALL(_fastPLS_fastsvd_core_cpp, 6),
@@ -75,6 +76,8 @@ static const R_CallMethodDef call_entries[] = {
   FASTPLS_CALL(_fastPLS_pls_float32_matrix_backend_core_cpp, 11),
   FASTPLS_CALL(_fastPLS_pls_labels_core_predict_cpp, 3),
   FASTPLS_CALL(_fastPLS_pls_class_predict_topk_core_cpp, 5),
+  FASTPLS_CALL(_fastPLS_pls_float32_class_predict_compact_cpp, 4),
+  FASTPLS_CALL(_fastPLS_lda_project_train_prefix_float32_cpp, 5),
   FASTPLS_CALL(_fastPLS_pls_float32_labels_backend_core_cpp, 12),
   {nullptr, nullptr, 0}
 };

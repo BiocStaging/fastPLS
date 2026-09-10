@@ -65,15 +65,13 @@ redistributed with fastPLS. Acquisition and data-use notes are provided in
 - `kernelpls`: linear, RBF, or polynomial kernel construction followed by the
   selected PLS core.
 
-The CPU backend uses the BLAS/LAPACK library linked when the package is built.
-macOS builds use Apple Accelerate by default. On Linux and other Unix-like
-systems, configuration automatically uses OpenBLAS when `OPENBLAS_ROOT` points
-to an installation or `pkg-config` can locate `openblas`; otherwise it uses the
-BLAS selected by R.
+The CPU backend uses Apple Accelerate by default on macOS and OpenBLAS by
+default on Linux and Windows. Configuration locates OpenBLAS through
+`OPENBLAS_ROOT` or `pkg-config` and stops with installation guidance when it is
+unavailable. Set `FASTPLS_USE_OPENBLAS=0` only to request R's BLAS explicitly.
 Set `options(cores = 4L)` to request four CPU threads. Eligible matrix
 operations can use multiple cores when linked to a multithreaded BLAS,
-for example OpenBLAS. Set `FASTPLS_USE_OPENBLAS=1` to require OpenBLAS and fail
-configuration when it cannot be found. SIMPLS deflation remains sequential, so multicore gains depend
+for example OpenBLAS. SIMPLS deflation remains sequential, so multicore gains depend
 on matrix shape. In the controlled one-, two-, and four-thread study, the
 four-thread speed-up ranged from 1.03- to 1.77-fold across the three tested
 matrix regimes; this is not a guarantee that additional threads help every fit.

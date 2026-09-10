@@ -5,10 +5,13 @@
 
 #include <fastpls/core/matrix.hpp>
 
+#include <string>
 #include <vector>
 
 namespace fastpls {
 namespace runtime {
+
+std::vector<std::string> set_cpu_threads(int threads);
 
 void cpu_gemm_f32(core::ConstMatrixView<float> left,
                   core::ConstMatrixView<float> right,
@@ -21,6 +24,9 @@ void cpu_gemm_f64(core::ConstMatrixView<double> left,
                   bool transpose_left,
                   bool transpose_right,
                   core::MatrixView<double> output);
+
+void cpu_crossprod_f32(core::ConstMatrixView<float> input,
+                       core::MatrixView<float> output);
 
 class CpuLinearAlgebraF32 {
  public:

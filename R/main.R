@@ -2334,6 +2334,30 @@ print.fastPLS <- function(x, ...) {
 ) {
     .require_float_package()
     top <- .resolve_top_k(top, top5)
+    compact <- object$classification &&
+        identical(backend, "cpu") &&
+        is.null(Ytest) &&
+        !proj &&
+        top == 1L &&
+        !raw_scores
+    if (compact) {
+        input <- .as_float32_matrix(newdata, "newdata")
+        block_size <- .float32_prediction_block_size(object, nrow(input))
+        use_lda <- .is_lda_classifier(
+            object$classification_rule %||% "argmax"
+        )
+        codes <- pls_float32_class_predict_compact_cpp(
+            object, input, use_lda, block_size
+        )
+        predicted <- as.data.frame(lapply(
+            seq_along(object$ncomp),
+            function(index) {
+                factor(object$lev[codes[, index]], levels = object$lev)
+            }
+        ))
+        names(predicted) <- .fastpls_ncomp_names(object$ncomp)
+        return(list(Ypred = predicted, Q2Y = NULL))
+    }
     Xtest <- .float32_prediction_input(object, newdata)
     if (!isTRUE(object$classification)) {
         return(.float32_regression_prediction(
@@ -3666,17 +3690,29 @@ print.fastPLS <- function(x, ...) {
             call. = FALSE
         )
     }
-    Ttrain32 <- .float32_train_scores(model, Xtrain)
     unique_ncomp <- sort(unique(as.integer(model$ncomp)))
 
     if (.is_lda_classifier(classifier)) {
-        route <- .float32_lda_train_route(model)
-        lda_models <- route$fun(
-            Ttrain32,
-            y_codes,
-            length(model$lev),
-            as.integer(unique_ncomp)
-        )
+        projected_cpu <- identical(model$execution_route, "CPU") &&
+            !.is_float32(model$Ttrain)
+        if (projected_cpu) {
+            projected <- lda_project_train_prefix_float32_cpp(
+                model, .as_float32_matrix(Xtrain, "Xtrain"), y_codes,
+                length(model$lev), as.integer(unique_ncomp)
+            )
+            lda_models <- projected$models
+            model$Ttrain <- .float32_from_bits(projected$Ttrain)
+            route <- list(backend = "float32_cpp_projected_lda")
+        } else {
+            route <- .float32_lda_train_route(model)
+            Ttrain32 <- .float32_train_scores(model, Xtrain)
+            lda_models <- route$fun(
+                Ttrain32,
+                y_codes,
+                length(model$lev),
+                as.integer(unique_ncomp)
+            )
+        }
         names(lda_models) <- as.character(unique_ncomp)
         model$lda <- list(
             ncomp = unique_ncomp,
@@ -8167,6 +8203,34 @@ plot.permutation <- function(
     invisible(TRUE)
 }
 
+.float32_simpls_uses_cached_crossprod <- function(Xtrain, ncomp) {
+    bounded_env <- function(name, default, minimum, maximum) {
+        raw <- Sys.getenv(name, unset = "")
+        value <- suppressWarnings(as.integer(raw))
+        if (!nzchar(raw) || is.na(value)) {
+            value <- default
+        }
+        max(minimum, min(maximum, value))
+    }
+    maximum_predictors <- bounded_env(
+        "FASTPLS_FAST_CROSSPROD_MAX_P",
+        if (identical(Sys.info()[["sysname"]], "Darwin")) 2048L else 512L,
+        16L, 65536L
+    )
+    minimum_components <- bounded_env(
+        "FASTPLS_FAST_CROSSPROD_MIN_NCOMP", 20L, 1L, 1024L
+    )
+    minimum_ratio <- bounded_env(
+        "FASTPLS_FAST_CROSSPROD_MIN_N_TO_P_RATIO", 8L, 1L, 1024L
+    )
+    samples <- nrow(Xtrain)
+    predictors <- ncol(Xtrain)
+    max(as.integer(ncomp)) >= minimum_components &&
+        predictors <= samples &&
+        samples >= predictors * minimum_ratio &&
+        predictors <= maximum_predictors
+}
+
 .pls_fit_float32_model <- function(context, config) {
     ctl <- context$control
     if (identical(context$method, "opls")) {
@@ -8185,13 +8249,18 @@ plot.permutation <- function(
             context$classifier, config$lda_ridge)
     }
     else {
+        retain_lda_scores <- .is_lda_classifier(context$classifier) &&
+            (!identical(context$backend, "cpu") ||
+                identical(context$method, "plssvd") ||
+                !.float32_simpls_uses_cached_crossprod(
+                    context$Xtrain, config$ncomp
+                ))
         fitted <- .fit_float32_pls(context$Xtrain, context$Ytrain,
             config$ncomp,
             context$scal, context$method, context$backend, ctl$svd.method,
             ctl$rsvd_oversample,
             ctl$rsvd_power, ctl$seed, config$fit,
-            store_scores = config$fit ||
-                .is_lda_classifier(context$classifier))
+            store_scores = config$fit || retain_lda_scores)
         .attach_float32_classifier(fitted, context$Xtrain, context$Ytrain,
             context$classifier,
             config$lda_ridge)
@@ -8629,8 +8698,9 @@ plot.permutation <- function(
 #' model can include predictions for held-out samples, latent scores, fitted
 #' values, variance summaries, and optional classification heads.
 #'
-#' The compiled CPU backend uses the BLAS/LAPACK implementation selected at
-#' package build time. A multithreaded BLAS can execute eligible matrix products
+#' The compiled CPU backend uses Apple Accelerate by default on macOS and
+#' OpenBLAS by default on Linux and Windows. Set `FASTPLS_USE_OPENBLAS=0` only
+#' to request R's BLAS explicitly. OpenBLAS can execute eligible matrix products
 #' on several CPU cores, but the SIMPLS deflation sequence remains serial and
 #' additional threads are not guaranteed to reduce runtime.
 #'
