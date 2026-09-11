@@ -176,11 +176,22 @@ bool fold_sample_response_gram_enabled(
     2.0L * k * a * iterations * training_rows * q;
   const long double cached_sample_gram =
     n * n * q + k * a * iterations * training_rows * training_rows;
-  return cached_sample_gram < repeated_operator;
+  // Require a useful margin because forming and extracting the dense sample
+  // Gram has higher memory traffic than the operator-only estimate captures.
+  return cached_sample_gram < 0.60L * repeated_operator;
 }
 
 inline bool fold_simpls_moments_enabled(
     std::size_t samples, std::size_t predictors, std::size_t components) {
+#if defined(FASTPLS_USE_OPENBLAS)
+  // A single-thread OpenBLAS predictor Gram is slower than direct fold fits
+  // in the tall classification regime used by this route. Multithreaded
+  // OpenBLAS and Apple Accelerate retain the moments optimization.
+  const char* raw_threads = std::getenv("OPENBLAS_NUM_THREADS");
+  const long openblas_threads = raw_threads == nullptr ? 1L :
+    std::strtol(raw_threads, nullptr, 10);
+  if (openblas_threads <= 1L) return false;
+#endif
   return components >= 20 && predictors <= 2048 && predictors <= samples &&
     samples >= predictors * 8;
 }

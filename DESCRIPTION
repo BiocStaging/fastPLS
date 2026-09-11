@@ -1,7 +1,7 @@
 Package: fastPLS
 Type: Package
 Title: Fast Partial Least Squares for High-Dimensional Data
-Version: 0.99.60
+Version: 0.99.61
 Date: 2026-09-11
 Authors@R: c(
     person(
