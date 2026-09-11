@@ -30,7 +30,8 @@ test_that("public float32 SIMPLS uses the explicit Metal operator", {
         fit,
         float::fl(x[test, , drop = FALSE]),
         float::fl(y[test, , drop = FALSE]),
-        proj = TRUE
+        proj = TRUE,
+        backend = "metal"
     )
     expect_equal(
         float::dbl(predicted$Ypred[[3L]]),
@@ -56,7 +57,8 @@ test_that("Metal classification preserves labels and top ranks", {
         backend = "metal", fit = TRUE, proj = TRUE, seed = 17
     )
     predicted <- predict(
-        fit, float::fl(x[181:240, , drop = FALSE]), y[181:240], top = 2L
+        fit, float::fl(x[181:240, , drop = FALSE]), y[181:240], top = 2L,
+        backend = "metal"
     )
 
     expect_true(all(is.finite(fit$accuracy)))
@@ -90,7 +92,8 @@ test_that("Metal score projection and float32 LDA preserve the discriminant", {
         return_variance = FALSE, seed = 29
     )
     metal <- predict(
-        fit, float::fl(x[test, , drop = FALSE]), y[test], raw_scores = TRUE
+        fit, float::fl(x[test, , drop = FALSE]), y[test], raw_scores = TRUE,
+        backend = "metal"
     )
     models <- fastPLS:::lda_train_prefix_float32_cpp(
         fastPLS:::.as_float32_matrix(fit$Ttrain, "Ttrain"), as.integer(y[train]),
@@ -245,7 +248,9 @@ test_that("Metal rejects float64 and uses its assigned CPU prediction", {
         float::fl(x), float::fl(y), ncomp = 2,
         backend = "metal", return_variance = FALSE
     )
-    default_prediction <- predict(fit, float::fl(x))$Ypred[[1L]]
+    default_prediction <- predict(
+        fit, float::fl(x), backend = "auto"
+    )$Ypred[[1L]]
     expect_equal(
         predict(fit, float::fl(x), backend = "metal")$Ypred[[1L]],
         default_prediction,

@@ -27,7 +27,6 @@ pls.double.cv(
   classifier = c("argmax", "lda"),
   lda_ridge = NULL,
   bycol = FALSE,
-  xprod = NULL,
   selection_metric = "auto",
   ...
 )
@@ -55,10 +54,12 @@ replicate stay together in training or test data. The default
 
 \item{backend}{Implementation backend: \code{cpu}, \code{cuda}, or
 \code{metal}. Multiple values are tuned in the inner loop. Metal requires
-float32 input and Apple Metal. Fold orchestration remains on the host;
-every fold uses the same fixed operation split as \code{pls()}, with
-training-sample products on Metal and reduced factorizations, sequential
-component updates, LDA, and prediction on the CPU. When omitted,
+float32 input and Apple Metal. R validates the request and constructs a
+reproducible grouped-fold plan. CPU and Metal use the compiled nested-CV
+coordinator for fold loops, fitting, prediction, and metric accumulation.
+CUDA uses the R coordinator around CUDA-native single-CV and outer-fit
+kernels; supported CUDA fits do not substitute a CPU estimator. Metal uses
+the same fixed operation split as \code{pls()}. When omitted,
 \code{options(backend = ...)} defines the session default; \code{options(cores = n)}
 controls the CPU thread request. Every requested backend must be available;
 unavailable accelerator entries raise an error instead of using CPU.}
@@ -122,9 +123,6 @@ fallback sequence rather than a user-tuned ridge.}
 metrics in the returned \code{metrics} list. The default \code{FALSE} returns only
 aggregate metrics.}
 
-\item{xprod}{Use the matrix-free cross-product route where available for
-inner component optimization. \code{NULL} applies fastPLS defaults.}
-
 \item{selection_metric}{Metric used by inner CV and by the permutation test.
 Use \code{"auto"} (accuracy for classification and RMSD for regression),
 \code{"accuracy"}, \code{"balanced_accuracy"}, \code{"r2"}, \code{"q2"}, or \code{"rmsd"}.
@@ -142,13 +140,15 @@ Use the same compact names documented in \code{\link[=fastsvd]{fastsvd()}}, such
 A list with the following elements. \code{metrics$cross_validated}
 contains one complete \code{evaluate()} result per repeated outer-CV run, and
 \code{metrics$aggregate} evaluates the final vote-aggregated or averaged
-prediction. \code{metrics$definitions} records the exact R2Y and Q2Y
-denominator conventions.
+prediction. For one run, its fold-aware Q2 is also attached to \code{aggregate};
+after several runs, no unique fold-training reference exists for the
+averaged prediction, so aggregate Q2 is \code{NA}. \code{metrics$definitions} records
+the exact R2Y and Q2Y denominator conventions.
 \itemize{
 \item \code{results}: list with one element per repeated run. Each run stores
 \code{Ypred}/\code{pred}, the outer \code{fold} assignment, \code{best_ncomp} selected in
-each outer fold, fold-level \code{best_parameters}, the complete inner-CV
-objects in \code{inner}, run-level \code{metric_name} and \code{metric_value}, and the
+each outer fold, fold-level \code{best_parameters}, compact inner-CV metric
+summaries in \code{inner}, run-level \code{metric_name} and \code{metric_value}, and the
 default \code{backend} and \code{method}.
 \item \code{Ypred}: final cross-validated predictions. For classification, repeated
 runs are combined by voting; for regression, numeric predictions are
@@ -205,17 +205,10 @@ For LDA classification, each inner and outer training fold uses
 only the classes represented in that fold and maps predictions back to the
 original factor levels. A class absent from a fold's training data cannot
 be predicted in that fold; its held-out observations remain in the
-reported metrics.
-With a CUDA backend, SIMPLS cross-validation keeps task data and fold
-workspaces resident on the device and reuses CUDA library handles across the
-CV call. PLS-SVD uses the resident CUDA route for
-large multivariate regression responses and the faster fold-local CUDA route
-for classification and smaller responses. This internal choice does not alter
-fold assignment, fold-specific preprocessing, requested components, or
-prediction semantics. Unsupported accelerator requests fail explicitly and
-never fall back to CPU.
-On the Metal route, large assigned sample-matrix products use Metal while
-small reduced products use Accelerate.
+reported metrics. With CUDA, nested outer/inner orchestration remains in R,
+while each supported single-CV and outer fit uses its native CUDA route.
+Unsupported accelerator requests fail explicitly and never fall back to
+CPU.
 }
 \examples{
 idx <- c(seq_len(10), 51:60, 101:110)

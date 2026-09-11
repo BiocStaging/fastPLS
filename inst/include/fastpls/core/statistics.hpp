@@ -13,6 +13,7 @@
 #include <cstring>
 #include <limits>
 #include <stdexcept>
+#include <type_traits>
 #include <vector>
 
 namespace fastpls::core {
@@ -349,6 +350,97 @@ struct RegressionMetrics {
 };
 
 template<class T>
+struct RegressionMetricsReference {
+  std::size_t rows = 0;
+  std::size_t columns = 0;
+  std::size_t relative_pairs = 0;
+  long double observed_tss = 0.0L;
+  long double observed_sum = 0.0L;
+  long double observed_square = 0.0L;
+  long double rank_square = 0.0L;
+  double observed_sd = std::numeric_limits<double>::quiet_NaN();
+  std::vector<double> ranks;
+  bool all_finite = false;
+  bool rank_valid = false;
+};
+
+template<class T>
+RegressionMetricsReference<T> regression_metrics_reference(
+    ConstMatrixView<T> observed,
+    double relative_epsilon = std::numeric_limits<double>::epsilon()) {
+  if (observed.empty() || !observed.contiguous()) {
+    throw std::invalid_argument(
+      "regression metric reference must be a non-empty contiguous matrix"
+    );
+  }
+  RegressionMetricsReference<T> result;
+  result.rows = observed.rows();
+  result.columns = observed.columns();
+  const std::size_t size = result.rows * result.columns;
+  std::vector<long double> means(result.columns, 0.0L);
+  for (std::size_t column = 0; column < result.columns; ++column) {
+    for (std::size_t row = 0; row < result.rows; ++row) {
+      const T value = observed(row, column);
+      if (!std::isfinite(value)) return result;
+      means[column] += static_cast<long double>(value);
+      result.observed_sum += static_cast<long double>(value);
+      result.observed_square += static_cast<long double>(value) * value;
+      if (std::abs(static_cast<double>(value)) > relative_epsilon) {
+        ++result.relative_pairs;
+      }
+    }
+    means[column] /= static_cast<long double>(result.rows);
+  }
+  for (std::size_t column = 0; column < result.columns; ++column) {
+    for (std::size_t row = 0; row < result.rows; ++row) {
+      const long double centered =
+        static_cast<long double>(observed(row, column)) - means[column];
+      result.observed_tss += centered * centered;
+    }
+  }
+  const long double count = static_cast<long double>(size);
+  const long double flattened_tss = result.observed_square -
+    result.observed_sum * result.observed_sum / count;
+  result.observed_sd = size > 1 && flattened_tss >= 0.0L ?
+    std::sqrt(static_cast<double>(flattened_tss / (count - 1.0L))) :
+    std::numeric_limits<double>::quiet_NaN();
+
+  result.ranks.resize(size);
+  if constexpr (std::is_same<T, float>::value) {
+    if (size > static_cast<std::size_t>(
+          std::numeric_limits<std::uint32_t>::max())) {
+      throw std::length_error(
+        "float32 Spearman correlation exceeds the supported vector length"
+      );
+    }
+    std::vector<detail::FloatRankEntry> entries(size);
+    for (std::size_t index = 0; index < size; ++index) {
+      entries[index] = {
+        observed.data()[index], static_cast<std::uint32_t>(index)
+      };
+    }
+    result.rank_valid = detail::rank_values(entries, result.ranks);
+  } else {
+    std::vector<detail::RankEntry> entries(size);
+    for (std::size_t index = 0; index < size; ++index) {
+      entries[index] = {
+        static_cast<double>(observed.data()[index]), index
+      };
+    }
+    result.rank_valid = detail::rank_values(entries, result.ranks);
+  }
+  if (result.rank_valid) {
+    const long double mean = (count + 1.0L) / 2.0L;
+    for (const double rank : result.ranks) {
+      const long double centered = rank - mean;
+      result.rank_square += centered * centered;
+    }
+  }
+  result.all_finite = true;
+  return result;
+}
+
+template<class T>
 RegressionMetrics regression_metrics(
     ConstMatrixView<T> observed, ConstMatrixView<T> predicted,
     double cross_validated_q2,
@@ -485,6 +577,153 @@ RegressionMetrics regression_metrics(
     relative_count ? static_cast<double>(relative_sum / relative_count) :
       std::numeric_limits<double>::quiet_NaN(),
     std::isfinite(observed_sd) && rmsd > 0.0 ? observed_sd / rmsd :
+      std::numeric_limits<double>::quiet_NaN(),
+    pearson,
+    spearman
+  };
+  return result;
+}
+
+template<class T>
+RegressionMetrics regression_metrics(
+    ConstMatrixView<T> observed, ConstMatrixView<T> predicted,
+    double cross_validated_q2, const RegressionMetricsReference<T>& reference,
+    double relative_epsilon = std::numeric_limits<double>::epsilon()) {
+  if (observed.rows() != predicted.rows() ||
+      observed.columns() != predicted.columns() || observed.empty() ||
+      !observed.contiguous() || !predicted.contiguous() ||
+      reference.rows != observed.rows() ||
+      reference.columns != observed.columns()) {
+    throw std::invalid_argument(
+      "regression metric matrices must be contiguous with matching dimensions"
+    );
+  }
+  if (!reference.all_finite) {
+    return regression_metrics(
+      observed, predicted, cross_validated_q2, relative_epsilon
+    );
+  }
+
+  const std::size_t size = observed.rows() * observed.columns();
+  long double sse = 0.0L;
+  long double absolute_error = 0.0L;
+  long double error_sum = 0.0L;
+  long double predicted_sum = 0.0L;
+  long double predicted_square = 0.0L;
+  long double cross_sum = 0.0L;
+  long double relative_sum = 0.0L;
+  std::vector<double> relative_values;
+  relative_values.reserve(reference.relative_pairs);
+  for (std::size_t index = 0; index < size; ++index) {
+    const T value = observed.data()[index];
+    const T estimate = predicted.data()[index];
+    if (!std::isfinite(estimate)) {
+      return regression_metrics(
+        observed, predicted, cross_validated_q2, relative_epsilon
+      );
+    }
+    const long double error = static_cast<long double>(estimate) - value;
+    sse += error * error;
+    absolute_error += std::abs(error);
+    error_sum += error;
+    predicted_sum += estimate;
+    predicted_square += static_cast<long double>(estimate) * estimate;
+    cross_sum += static_cast<long double>(value) * estimate;
+    if (std::abs(static_cast<double>(value)) > relative_epsilon) {
+      const double relative = std::abs(
+        static_cast<double>(error) / static_cast<double>(value)
+      ) * 100.0;
+      relative_sum += relative;
+      relative_values.push_back(relative);
+    }
+  }
+
+  double median_relative = std::numeric_limits<double>::quiet_NaN();
+  if (!relative_values.empty()) {
+    const std::size_t middle = relative_values.size() / 2;
+    std::nth_element(
+      relative_values.begin(), relative_values.begin() + middle,
+      relative_values.end()
+    );
+    median_relative = relative_values[middle];
+    if (relative_values.size() % 2 == 0) {
+      const double lower = *std::max_element(
+        relative_values.begin(), relative_values.begin() + middle
+      );
+      median_relative = (lower + median_relative) / 2.0;
+    }
+  }
+
+  const long double count = static_cast<long double>(size);
+  const double rmsd = std::sqrt(static_cast<double>(sse / count));
+  const long double pearson_left = reference.observed_square -
+    reference.observed_sum * reference.observed_sum / count;
+  const long double pearson_right = predicted_square -
+    predicted_sum * predicted_sum / count;
+  const long double pearson_cross = cross_sum -
+    reference.observed_sum * predicted_sum / count;
+  const long double pearson_denominator = std::sqrt(
+    pearson_left * pearson_right
+  );
+  const double pearson = pearson_denominator > 0.0L ?
+    static_cast<double>(pearson_cross / pearson_denominator) :
+    std::numeric_limits<double>::quiet_NaN();
+
+  std::vector<double> predicted_ranks(size);
+  bool predicted_rank_valid = false;
+  if constexpr (std::is_same<T, float>::value) {
+    std::vector<detail::FloatRankEntry> entries(size);
+    for (std::size_t index = 0; index < size; ++index) {
+      entries[index] = {
+        predicted.data()[index], static_cast<std::uint32_t>(index)
+      };
+    }
+    predicted_rank_valid = detail::rank_values(entries, predicted_ranks);
+  } else {
+    std::vector<detail::RankEntry> entries(size);
+    for (std::size_t index = 0; index < size; ++index) {
+      entries[index] = {
+        static_cast<double>(predicted.data()[index]), index
+      };
+    }
+    predicted_rank_valid = detail::rank_values(entries, predicted_ranks);
+  }
+  double spearman = std::numeric_limits<double>::quiet_NaN();
+  if (reference.rank_valid && predicted_rank_valid &&
+      reference.rank_square > 0.0L) {
+    const long double mean = (count + 1.0L) / 2.0L;
+    long double cross = 0.0L;
+    long double predicted_rank_square = 0.0L;
+    for (std::size_t index = 0; index < size; ++index) {
+      const long double left = reference.ranks[index] - mean;
+      const long double right = predicted_ranks[index] - mean;
+      cross += left * right;
+      predicted_rank_square += right * right;
+    }
+    const long double denominator = std::sqrt(
+      reference.rank_square * predicted_rank_square
+    );
+    if (denominator > 0.0L) {
+      spearman = static_cast<double>(cross / denominator);
+    }
+  }
+
+  RegressionMetrics result;
+  result.values = {
+    static_cast<double>(size),
+    reference.observed_tss > 0.0L ?
+      1.0 - static_cast<double>(sse / reference.observed_tss) :
+      std::numeric_limits<double>::quiet_NaN(),
+    cross_validated_q2,
+    rmsd,
+    rmsd,
+    static_cast<double>(absolute_error / count),
+    static_cast<double>(error_sum / count),
+    median_relative,
+    relative_values.empty() ? std::numeric_limits<double>::quiet_NaN() :
+      static_cast<double>(relative_sum / relative_values.size()),
+    std::isfinite(reference.observed_sd) && rmsd > 0.0 ?
+      reference.observed_sd / rmsd :
       std::numeric_limits<double>::quiet_NaN(),
     pearson,
     spearman

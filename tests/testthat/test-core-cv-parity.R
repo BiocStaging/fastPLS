@@ -27,6 +27,18 @@ test_that("standalone core CV is deterministic for grouped classification", {
             expect_identical(core$class_pred, repeated$class_pred)
             expect_equal(core$metric_value, repeated$metric_value)
             expect_true(all(is.finite(core$metric_value)))
+            expect_identical(
+                core$native_best_index,
+                as.integer(which.max(core$metric_value))
+            )
+            expect_identical(
+                core$native_best_ncomp,
+                components[[core$native_best_index]]
+            )
+            if (classifier == 0L) {
+                expect_length(core$Q2Y, length(components))
+                expect_true(all(is.finite(core$Q2Y)))
+            }
         }
     }
 })
@@ -58,6 +70,14 @@ test_that("standalone core CV is deterministic for grouped regression", {
         expect_equal(core$metric_value, repeated$metric_value)
         expect_equal(core$Ypred, repeated$Ypred)
         expect_true(all(is.finite(core$metric_value)))
+        expect_identical(
+            core$native_best_index,
+            as.integer(which.min(core$metric_value))
+        )
+        expect_identical(
+            core$native_best_ncomp,
+            components[[core$native_best_index]]
+        )
     }
 })
 
@@ -124,6 +144,8 @@ test_that("public CPU CV dispatches float32 linear inputs through the core", {
     )
 
     expect_identical(candidate$best_ncomp, reference$best_ncomp)
+    expect_null(candidate$native_best_index)
+    expect_null(candidate$native_best_ncomp)
     expect_equal(candidate$accuracy, reference$accuracy)
     expect_equal(candidate$Q2Y, reference$Q2Y, tolerance = 1e-4)
     expect_true(all(vapply(

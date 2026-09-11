@@ -18,6 +18,7 @@
 #include <cstddef>
 #include <cstdlib>
 #include <limits>
+#include <numeric>
 #include <stdexcept>
 #include <vector>
 
@@ -54,8 +55,12 @@ struct ClassificationCvResult {
   std::vector<int> folds;
   std::vector<int> status;
   std::vector<double> metrics;
+  std::vector<double> q2;
+  Matrix<double> fold_training_r2;
   Matrix<int> predictions;
   std::vector<Matrix<T>> scores;
+  std::size_t best_index = 0;
+  int best_component = 0;
 };
 
 template<class T>
@@ -66,8 +71,11 @@ struct RegressionCvResult {
   std::vector<double> q2;
   std::vector<double> rmsd;
   std::vector<double> observed_r2;
+  Matrix<double> fold_training_r2;
   std::vector<RegressionMetrics> evaluation;
   std::vector<Matrix<T>> predictions;
+  std::size_t best_index = 0;
+  int best_component = 0;
 };
 
 namespace cv_detail {
@@ -76,6 +84,21 @@ struct FoldPartition {
   std::vector<std::size_t> train;
   std::vector<std::size_t> test;
 };
+
+inline std::size_t best_metric_index(
+    const std::vector<double>& values, bool minimize) {
+  std::size_t selected = 0;
+  bool found = false;
+  for (std::size_t index = 0; index < values.size(); ++index) {
+    if (!std::isfinite(values[index])) continue;
+    if (!found || (minimize ? values[index] < values[selected] :
+                              values[index] > values[selected])) {
+      selected = index;
+      found = true;
+    }
+  }
+  return selected;
+}
 
 template<class Backend>
 auto configure_backend_problem(Backend& backend, std::size_t rows,
@@ -753,10 +776,12 @@ inline std::vector<FoldPartition> fold_partitions(
   }
   int maximum = 0;
   for (std::size_t sample = 0; sample < sample_count; ++sample) {
-    if (folds[sample] < 1) {
-      throw std::invalid_argument("cross-validation folds must start at one");
-    }
     maximum = std::max(maximum, folds[sample]);
+  }
+  if (maximum < 1) {
+    throw std::invalid_argument(
+      "cross-validation requires at least one held-out fold"
+    );
   }
   std::vector<FoldPartition> output(static_cast<std::size_t>(maximum));
   for (std::size_t sample = 0; sample < sample_count; ++sample) {
@@ -764,12 +789,69 @@ inline std::vector<FoldPartition> fold_partitions(
       auto& partition = output[static_cast<std::size_t>(fold - 1)];
       if (folds[sample] == fold) {
         partition.test.push_back(sample);
-      } else {
+      } else if (folds[sample] != 0) {
         partition.train.push_back(sample);
       }
     }
   }
   return output;
+}
+
+template<class T>
+std::vector<double> classification_q2_path(
+    const int* labels, std::size_t class_count,
+    const std::vector<FoldPartition>& partitions,
+    const std::vector<Matrix<T>>& scores) {
+  if (scores.empty()) return {};
+  std::vector<long double> tss_by_row(scores.front().rows(), 0.0L);
+  for (const auto& partition : partitions) {
+    if (partition.train.empty() || partition.test.empty()) continue;
+    std::vector<std::size_t> counts(class_count, 0);
+    for (const std::size_t row : partition.train) {
+      const int label = labels[row] - 1;
+      if (label >= 0 && static_cast<std::size_t>(label) < class_count) {
+        ++counts[static_cast<std::size_t>(label)];
+      }
+    }
+    const long double train_count = static_cast<long double>(
+      partition.train.size()
+    );
+    for (const std::size_t row : partition.test) {
+      const int observed = labels[row] - 1;
+      long double row_tss = 0.0L;
+      for (std::size_t class_index = 0;
+           class_index < class_count; ++class_index) {
+        const long double mean = counts[class_index] / train_count;
+        const long double value =
+          static_cast<int>(class_index) == observed ? 1.0L : 0.0L;
+        const long double centered = value - mean;
+        row_tss += centered * centered;
+      }
+      tss_by_row[row] = row_tss;
+    }
+  }
+  const long double tss = std::accumulate(
+    tss_by_row.begin(), tss_by_row.end(), 0.0L
+  );
+  std::vector<double> result(scores.size(),
+    std::numeric_limits<double>::quiet_NaN());
+  if (!(tss > 0.0L)) return result;
+  for (std::size_t prefix = 0; prefix < scores.size(); ++prefix) {
+    long double press = 0.0L;
+    for (std::size_t class_index = 0;
+         class_index < class_count; ++class_index) {
+      for (std::size_t row = 0; row < scores[prefix].rows(); ++row) {
+        if (!(tss_by_row[row] > 0.0L)) continue;
+        const long double observed =
+          labels[row] - 1 == static_cast<int>(class_index) ? 1.0L : 0.0L;
+        const long double residual = observed -
+          static_cast<long double>(scores[prefix](row, class_index));
+        press += residual * residual;
+      }
+    }
+    result[prefix] = 1.0 - static_cast<double>(press / tss);
+  }
+  return result;
 }
 
 template<class T>
@@ -1188,6 +1270,67 @@ double accumulate_regression_error(
 }
 
 template<class T>
+double regression_r2(ConstMatrixView<T> observed,
+                     ConstMatrixView<T> predicted) {
+  if (observed.rows() != predicted.rows() ||
+      observed.columns() != predicted.columns() || observed.empty()) {
+    throw std::invalid_argument(
+      "cross-validation training R2 dimensions are invalid"
+    );
+  }
+  long double residual = 0.0L;
+  long double total = 0.0L;
+  for (std::size_t column = 0; column < observed.columns(); ++column) {
+    long double mean = 0.0L;
+    for (std::size_t row = 0; row < observed.rows(); ++row) {
+      mean += observed(row, column);
+    }
+    mean /= static_cast<long double>(observed.rows());
+    for (std::size_t row = 0; row < observed.rows(); ++row) {
+      const long double error = predicted(row, column) - observed(row, column);
+      const long double centered = observed(row, column) - mean;
+      residual += error * error;
+      total += centered * centered;
+    }
+  }
+  return total > 0.0L ?
+    static_cast<double>(1.0L - residual / total) :
+    std::numeric_limits<double>::quiet_NaN();
+}
+
+inline double balanced_accuracy(const int* labels,
+                                const int* predictions,
+                                const int* folds,
+                                std::size_t sample_count,
+                                std::size_t class_count) {
+  std::vector<long double> correct(class_count, 0.0L);
+  std::vector<long double> total(class_count, 0.0L);
+  for (std::size_t sample = 0; sample < sample_count; ++sample) {
+    if (folds != nullptr && folds[sample] == 0) continue;
+    const int observed = labels[sample] - 1;
+    if (observed < 0 || static_cast<std::size_t>(observed) >= class_count) {
+      throw std::invalid_argument(
+        "balanced accuracy contains an invalid class label"
+      );
+    }
+    total[static_cast<std::size_t>(observed)] += 1.0L;
+    if (predictions[sample] == labels[sample]) {
+      correct[static_cast<std::size_t>(observed)] += 1.0L;
+    }
+  }
+  long double sum = 0.0L;
+  std::size_t represented = 0;
+  for (std::size_t class_index = 0; class_index < class_count; ++class_index) {
+    if (total[class_index] > 0.0L) {
+      sum += correct[class_index] / total[class_index];
+      ++represented;
+    }
+  }
+  return represented > 0 ? static_cast<double>(sum / represented) :
+    std::numeric_limits<double>::quiet_NaN();
+}
+
+template<class T>
 void store_active_scores(Matrix<T>& destination,
                          const std::vector<std::size_t>& rows,
                          ConstMatrixView<T> values,
@@ -1224,7 +1367,8 @@ ClassificationCvResult<T> cross_validate_classification(
     const SimplsControls& simpls_controls, Backend& backend,
     bool store_predictions, bool store_scores,
     std::size_t orthogonal_components = 0,
-    const KernelCvControls& kernel_controls = KernelCvControls()) {
+    const KernelCvControls& kernel_controls = KernelCvControls(),
+    bool calculate_training_r2 = false) {
   if (predictors.empty() || labels == nullptr || class_count < 2 ||
       components == nullptr || prefix_count < 1) {
     throw std::invalid_argument(
@@ -1247,8 +1391,19 @@ ClassificationCvResult<T> cross_validate_classification(
       result.scores.emplace_back(predictors.rows(), class_count);
     }
   }
+  if (calculate_training_r2) {
+    result.fold_training_r2.resize(partitions.size(), prefix_count);
+    std::fill_n(
+      result.fold_training_r2.data(), result.fold_training_r2.size(),
+      std::numeric_limits<double>::quiet_NaN()
+    );
+  }
   std::vector<double> totals(prefix_count, 0.0);
+  const bool complete_fold_cover = std::none_of(
+    folds, folds + predictors.rows(), [](int value) { return value == 0; }
+  );
   const bool reuse_label_statistics =
+    complete_fold_cover &&
     cv_detail::fold_label_statistics_enabled() &&
     (family == LinearPlsFamily::plssvd ||
      family == LinearPlsFamily::simpls);
@@ -1260,6 +1415,7 @@ ClassificationCvResult<T> cross_validate_classification(
     *std::max_element(components, components + prefix_count)
   );
   const bool reuse_predictor_gram =
+    complete_fold_cover &&
     (family == LinearPlsFamily::plssvd ||
      family == LinearPlsFamily::simpls) &&
     cv_detail::fold_predictor_gram_enabled<T>(predictors.columns()) &&
@@ -1311,7 +1467,8 @@ ClassificationCvResult<T> cross_validate_classification(
       continue;
     }
 
-    const bool moments_only = reuse_label_statistics &&
+    const bool moments_only = !calculate_training_r2 &&
+      reuse_label_statistics &&
       reuse_predictor_gram &&
       (family == LinearPlsFamily::plssvd ||
        family == LinearPlsFamily::simpls);
@@ -1431,7 +1588,18 @@ ClassificationCvResult<T> cross_validate_classification(
           );
         }
       }
+      const std::vector<T> centered_response_mean(active.size(), T(0));
       for (std::size_t prefix = 0; prefix < prefix_count; ++prefix) {
+        if (calculate_training_r2) {
+          const auto centered_fit = cv_detail::predict_plssvd_from_scores<T>(
+            model, model.scores.view(), prefix,
+            centered_response_mean, backend
+          );
+          result.fold_training_r2(fold, prefix) = dummy_response_r2(
+            compact.data(), compact.size(), prepared.response_mean.data(),
+            active.size(), centered_fit.view()
+          );
+        }
         std::vector<int> predicted;
         if (head == ClassificationHead::lda) {
           ConstMatrixView<T> score_prefix(
@@ -1484,7 +1652,8 @@ ClassificationCvResult<T> cross_validate_classification(
       controls.rsvd.seed += static_cast<unsigned int>(fold);
       controls.cache_predictor_crossprod = reuse_predictor_gram;
       controls.store_scores =
-        head == ClassificationHead::lda && !moments_only_simpls;
+        (head == ClassificationHead::lda && !moments_only_simpls) ||
+        calculate_training_r2;
       auto model = fit_simpls_preprocessed<T>(
         moments_only_simpls ? ConstMatrixView<T>() :
           ConstMatrixView<T>(train.view()),
@@ -1522,6 +1691,12 @@ ClassificationCvResult<T> cross_validate_classification(
         ) : Matrix<T>();
       Matrix<T> prediction_contribution;
       std::size_t previous_component = 0;
+      Matrix<T> training_response_scores = calculate_training_r2 ?
+        cv_detail::initialize_simpls_prediction<T>(
+          model.scores.rows(), prepared.response_mean
+        ) : Matrix<T>();
+      Matrix<T> training_prediction_contribution;
+      std::size_t previous_training_component = 0;
       for (std::size_t prefix = 0; prefix < prefix_count; ++prefix) {
         const std::size_t requested = static_cast<std::size_t>(
           components[prefix]
@@ -1532,6 +1707,28 @@ ClassificationCvResult<T> cross_validate_classification(
             response_scores.view(), prediction_contribution, backend
           );
           previous_component = requested;
+        }
+        if (calculate_training_r2) {
+          cv_detail::update_simpls_prediction_from_scores<T>(
+            model, model.scores.view(), previous_training_component,
+            requested, training_response_scores.view(),
+            training_prediction_contribution, backend
+          );
+          previous_training_component = requested;
+          Matrix<T> centered_fit(
+            training_response_scores.rows(), training_response_scores.columns()
+          );
+          for (std::size_t column = 0;
+               column < centered_fit.columns(); ++column) {
+            for (std::size_t row = 0; row < centered_fit.rows(); ++row) {
+              centered_fit(row, column) = training_response_scores(row, column) -
+                prepared.response_mean[column];
+            }
+          }
+          result.fold_training_r2(fold, prefix) = dummy_response_r2(
+            compact.data(), compact.size(), prepared.response_mean.data(),
+            active.size(), centered_fit.view()
+          );
         }
         std::vector<int> predicted;
         if (head == ClassificationHead::lda) {
@@ -1582,6 +1779,11 @@ ClassificationCvResult<T> cross_validate_classification(
       result.metrics[prefix] / totals[prefix] :
       std::numeric_limits<double>::quiet_NaN();
   }
+  result.q2 = cv_detail::classification_q2_path<T>(
+    labels, class_count, partitions, result.scores
+  );
+  result.best_index = cv_detail::best_metric_index(result.metrics, false);
+  result.best_component = components[result.best_index];
   return result;
 }
 
@@ -1593,7 +1795,8 @@ RegressionCvResult<T> cross_validate_regression(
     RegressionMetric metric, const PlssvdControls& plssvd_controls,
     const SimplsControls& simpls_controls, Backend& backend,
     bool store_predictions, std::size_t orthogonal_components = 0,
-    const KernelCvControls& kernel_controls = KernelCvControls()) {
+    const KernelCvControls& kernel_controls = KernelCvControls(),
+    bool calculate_training_r2 = false) {
   if (predictors.empty() || responses.empty() ||
       predictors.rows() != responses.rows() || components == nullptr ||
       prefix_count < 1) {
@@ -1619,6 +1822,13 @@ RegressionCvResult<T> cross_validate_regression(
       result.predictions.emplace_back(predictors.rows(), responses.columns());
     }
   }
+  if (calculate_training_r2) {
+    result.fold_training_r2.resize(partitions.size(), prefix_count);
+    std::fill_n(
+      result.fold_training_r2.data(), result.fold_training_r2.size(),
+      std::numeric_limits<double>::quiet_NaN()
+    );
+  }
   long double observed_total_ss = 0.0L;
   for (std::size_t column = 0; column < responses.columns(); ++column) {
     long double total_sum = 0.0L;
@@ -1632,7 +1842,11 @@ RegressionCvResult<T> cross_validate_regression(
       total_sum * total_sum / static_cast<long double>(responses.rows());
   }
   long double fold_training_total_ss = 0.0L;
+  const bool complete_fold_cover = std::none_of(
+    folds, folds + predictors.rows(), [](int value) { return value == 0; }
+  );
   const bool reuse_dense_statistics =
+    complete_fold_cover &&
     (family == LinearPlsFamily::plssvd ||
      family == LinearPlsFamily::simpls) &&
     cv_detail::fold_dense_statistics_enabled<T>(
@@ -1646,6 +1860,7 @@ RegressionCvResult<T> cross_validate_regression(
      family == LinearPlsFamily::simpls) &&
     crosscovariance_bytes > 512.0L * 1024.0L * 1024.0L;
   const bool reuse_sample_response_gram =
+    complete_fold_cover &&
     family == LinearPlsFamily::simpls && use_implicit_crosscovariance &&
     cv_detail::fold_sample_response_gram_enabled<T>(
       predictors.rows(), responses.columns(), maximum_component,
@@ -1656,10 +1871,12 @@ RegressionCvResult<T> cross_validate_regression(
       predictors, responses, backend
     ) : cv_detail::DenseSufficientStatistics<T>();
   const auto full_dense_marginals =
-    use_implicit_crosscovariance && !reuse_dense_statistics ?
+    complete_fold_cover && use_implicit_crosscovariance &&
+      !reuse_dense_statistics ?
       cv_detail::dense_marginal_statistics(predictors, responses) :
       cv_detail::DenseSufficientStatistics<T>();
   const bool reuse_predictor_gram =
+    complete_fold_cover &&
     family == LinearPlsFamily::simpls &&
     simpls_controls.cache_predictor_crossprod &&
     cv_detail::fold_predictor_gram_enabled<T>(predictors.columns());
@@ -1737,10 +1954,18 @@ RegressionCvResult<T> cross_validate_regression(
       prepared = prepare_scaled_dense_crossprod(
         train.view(), train_response.view(), PredictorScaling::none, backend
       );
-    } else if (use_implicit_crosscovariance) {
+    } else if (use_implicit_crosscovariance && complete_fold_cover) {
       prepared = cv_detail::prepare_dense_fold_from_marginals<T>(
         train.view(), test.view(), predictors, responses, partition.test,
         full_dense_marginals, scaling
+      );
+    } else if (use_implicit_crosscovariance) {
+      prepared = prepare_scaled_dense_operator(
+        train.view(), ConstMatrixView<T>(train_response.view()), scaling,
+        backend
+      );
+      cv_detail::standardize(
+        test.view(), prepared.predictor_center, prepared.predictor_scale
       );
     } else if (reuse_dense_statistics) {
       prepared = cv_detail::prepare_dense_fold_from_statistics<T>(
@@ -1787,6 +2012,14 @@ RegressionCvResult<T> cross_validate_regression(
         ConstMatrixView<T>(model.weights.view()),
         model.completed_components, backend
       );
+      Matrix<T> training_scores;
+      if (calculate_training_r2) {
+        training_scores = cv_detail::project_scores<T>(
+          ConstMatrixView<T>(train.view()),
+          ConstMatrixView<T>(model.weights.view()),
+          model.completed_components, backend
+        );
+      }
       for (std::size_t prefix = 0; prefix < prefix_count; ++prefix) {
         const auto prediction = cv_detail::predict_plssvd_from_scores<T>(
           model, test_scores.view(), prefix,
@@ -1799,13 +2032,22 @@ RegressionCvResult<T> cross_validate_regression(
           responses
         );
         counts[prefix] += static_cast<double>(prediction.size());
+        if (calculate_training_r2) {
+          const auto fitted = cv_detail::predict_plssvd_from_scores<T>(
+            model, training_scores.view(), prefix,
+            prepared.response_mean, backend
+          );
+          result.fold_training_r2(fold, prefix) = cv_detail::regression_r2<T>(
+            train_response.view(), fitted.view()
+          );
+        }
       }
     } else if (family == LinearPlsFamily::simpls ||
                family == LinearPlsFamily::opls ||
                family == LinearPlsFamily::kernelpls) {
       SimplsControls controls = simpls_controls;
       controls.rsvd.seed += static_cast<unsigned int>(fold);
-      controls.store_scores = false;
+      controls.store_scores = calculate_training_r2;
       if (reuse_predictor_gram) {
         cv_detail::preload_standardized_predictor_gram<T>(
           full_predictor_gram.view(), heldout_predictor_gram.view(),
@@ -1856,6 +2098,12 @@ RegressionCvResult<T> cross_validate_regression(
       );
       Matrix<T> prediction_contribution;
       std::size_t previous_component = 0;
+      Matrix<T> training_prediction = calculate_training_r2 ?
+        cv_detail::initialize_simpls_prediction<T>(
+          model.scores.rows(), prepared.response_mean
+        ) : Matrix<T>();
+      Matrix<T> training_prediction_contribution;
+      std::size_t previous_training_component = 0;
       for (std::size_t prefix = 0; prefix < prefix_count; ++prefix) {
         const std::size_t requested = static_cast<std::size_t>(
           components[prefix]
@@ -1872,6 +2120,17 @@ RegressionCvResult<T> cross_validate_regression(
           responses
         );
         counts[prefix] += static_cast<double>(prediction.size());
+        if (calculate_training_r2) {
+          cv_detail::update_simpls_prediction_from_scores<T>(
+            model, model.scores.view(), previous_training_component,
+            requested, training_prediction.view(),
+            training_prediction_contribution, backend
+          );
+          previous_training_component = requested;
+          result.fold_training_r2(fold, prefix) = cv_detail::regression_r2<T>(
+            train_response.view(), training_prediction.view()
+          );
+        }
       }
     } else {
       throw std::invalid_argument(
@@ -1897,14 +2156,19 @@ RegressionCvResult<T> cross_validate_regression(
       result.q2[prefix] : result.observed_r2[prefix];
   }
   if (store_predictions) {
+    const auto metric_reference = regression_metrics_reference<T>(responses);
     result.evaluation.reserve(prefix_count);
     for (std::size_t prefix = 0; prefix < prefix_count; ++prefix) {
       result.evaluation.push_back(regression_metrics<T>(
         responses, ConstMatrixView<T>(result.predictions[prefix].view()),
-        result.q2[prefix]
+        result.q2[prefix], metric_reference
       ));
     }
   }
+  result.best_index = cv_detail::best_metric_index(
+    result.metrics, metric == RegressionMetric::rmsd
+  );
+  result.best_component = components[result.best_index];
   return result;
 }
 

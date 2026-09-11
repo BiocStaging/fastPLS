@@ -1,6 +1,6 @@
 # fastPLS
 
-`fastPLS` provides compiled C++ and CUDA implementations of partial least squares
+`fastPLS` provides compiled C++, CUDA, and Apple Metal implementations of partial least squares
 models for high-dimensional regression and classification. The user-facing API
 is intentionally small: algorithms and implementation backends are selected
 through `pls()`, `pls.single.cv()`, `pls.double.cv()`, and
@@ -18,7 +18,7 @@ should use `method = "simpls"`.
 
 The explicit package exports are `pls()`, `pls.single.cv()`, `pls.double.cv()`,
 `evaluate()`, `plot.permutation()`, `ViP()`, `fastsvd()`, `fastcor()`,
-`fastPLS_backend()`, `has_cuda()`, and `has_metal()`. Standard `predict()` and
+`fastPLS_backend()`, `fastPLS_blas()`, `has_cuda()`, and `has_metal()`. Standard `predict()` and
 `plot()` generics dispatch to registered fastPLS methods. There is no exported PCA API. The supported model families are `plssvd`,
 `simpls`, `opls`, and `kernelpls`; classification uses `argmax` or latent-space
 `lda`. The deprecated `lda_ridge` compatibility argument is ignored and warns
@@ -65,10 +65,13 @@ redistributed with fastPLS. Acquisition and data-use notes are provided in
 - `kernelpls`: linear, RBF, or polynomial kernel construction followed by the
   selected PLS core.
 
-The CPU backend uses Apple Accelerate by default on macOS and requires OpenBLAS
-on Linux and Windows. Configuration locates OpenBLAS through `OPENBLAS_ROOT`,
-`pkg-config`, or Rtools. Installation fails explicitly when OpenBLAS is
-unavailable rather than selecting another BLAS.
+The CPU backend uses Apple Accelerate by default on macOS. Linux and Windows
+prefer OpenBLAS when configuration finds it through `OPENBLAS_ROOT`,
+`pkg-config`, or Rtools; otherwise fastPLS uses the BLAS/LAPACK supplied by R.
+Set `FASTPLS_USE_OPENBLAS=1` before installation to require OpenBLAS and fail
+clearly when it is unavailable. `fastPLS_blas()` reports the library selected
+when the installed package was compiled. Our Linux and Windows performance
+benchmarks require `identical(fastPLS_blas(), "OpenBLAS")`.
 Set `options(cores = 4L)` to request four CPU threads. Eligible matrix
 operations can use multiple cores when linked to a multithreaded BLAS,
 for example OpenBLAS. SIMPLS deflation remains sequential, so multicore gains depend
@@ -113,16 +116,13 @@ power iterations. Very small internal decompositions may use a dense numerical
 kernel when a truncated calculation is not meaningful, but no exact or IRLBA
 solver is exposed through the public API.
 
-`rsvd` is a stochastic approximation and remains the primary solver. For CPU
-float64 fits, every
-randomized decomposition is checked using normalized singular-triplet
-residuals and an omitted-direction audit. The solver strengthens the sketch
-automatically when needed. A weak spectral boundary must agree with an
-independent strengthened sketch or a further strengthened native rSVD
-calculation; the effective controls and audit outcome are recorded in
-`diagnostics`.
-CUDA, Metal, and float32 routes record their exact controls and structural
-diagnostics. The controlled validation uses matrix-shape-specific automatic
+`rsvd` is a stochastic approximation and remains the primary solver.
+Standalone CPU `fastsvd()` calls in float32 and float64 use a native
+case-specific audit with strengthened sketches and deterministic recovery when
+needed. PLS fits always report their exact controls and structural diagnostics;
+routes that invoke the audited decomposition also report its case-specific
+outcome, while other routes state that no case certificate is available.
+The controlled validation uses matrix-shape-specific automatic
 controls and reports numerical agreement separately from successful execution.
 For confirmatory coefficient or subspace interpretation, repeat the rSVD fit
 across seeds and inspect the recorded diagnostics and prediction stability.
@@ -239,9 +239,11 @@ selected model family and backend.
 Use `backend = "cuda"` or `backend = "metal"` for supported accelerated PLS
 runs. Standalone accelerator `fastsvd()` routes are rejected because their
 reduced QR/SVD stage is not fully device-native for every matrix shape.
-Cross-validation constructs folds and assembles metric summaries in R. CUDA
-executes supported fold fitting and prediction on device. Metal applies the
-same fixed operation-level CPU/Metal split used by ordinary fitting.
+Single CV uses compiled fold construction and numerical loops. Nested CV uses
+a reproducible fold plan constructed in R; CPU and Metal execute the nested
+fold loops in compiled code, whereas CUDA uses an R coordinator around native
+CUDA single-CV and outer-fit kernels. Final R-object assembly remains host-side.
+No accelerator request silently substitutes a CPU estimator.
 
 CUDA supports PLS-SVD, SIMPLS, OPLS, and linear, RBF, or polynomial kernel PLS
 in float32 and float64. Metal supports the same families in float32 by assigning

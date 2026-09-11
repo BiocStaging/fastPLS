@@ -1,4 +1,29 @@
-# fastPLS 0.99.60
+# fastPLS 0.99.61
+
+* Corrected nested-CV endpoint handling so explicit R2 and Q2 selection can no
+  longer substitute for one another. An R2 permutation test now uses the
+  held-out R2 endpoint rather than descriptive training `R2Y`.
+
+* Corrected nested-CV metric assembly so run-level and response-wise Q2 values
+  retain their fold-training denominators. Single-CV metric paths are now named
+  by component count consistently.
+
+* Synchronized the README, vignette, and reference manual with the current
+  CPU, CUDA, and Metal cross-validation coordinators.
+
+* Made omitted prediction backends follow the same explicit argument, session
+  option, environment variable, and CPU precedence as fitting functions.
+  `backend = "auto"` remains the explicit model-aware prediction choice.
+
+* Made OpenBLAS optional at installation so standard Bioconductor Linux and
+  Windows builders can use the BLAS/LAPACK supplied by R. Automatic detection
+  still prefers OpenBLAS, while `FASTPLS_USE_OPENBLAS=1` provides a fail-fast
+  requirement for benchmark builds. Added `fastPLS_blas()` to report whether
+  the package was compiled with Accelerate, OpenBLAS, or R BLAS/LAPACK.
+
+* Removed unresolved float32 BLAS/LAPACK dependencies from fallback builds.
+  Without Accelerate or OpenBLAS, float32 Gram, QR, eigenvalue, and SVD routes
+  now use the package's portable compiled numerical kernels.
 
 * Added a persistent float32 CUDA matrix workspace for compiled
   cross-validation. Device buffers, the CUDA stream, and the cuBLAS handle are
@@ -20,9 +45,8 @@
   centering, and centering/output workspaces are retained across folds. Wide
   gathered response matrices use aligned storage with 64-byte column padding.
 
-* Made OpenBLAS a mandatory Linux and Windows system requirement and declared
-  `libopenblas-dev` explicitly for `pak`-based Linux build environments.
-  Configuration fails clearly rather than silently linking a different BLAS.
+* Added direct OpenBLAS discovery on Linux and Windows, with explicit
+  `FASTPLS_USE_OPENBLAS=1` fail-fast behavior for controlled benchmark builds.
 
 * Reduced repeated setup in every compiled cross-validation backend. Eligible
   CPU and Metal classification folds now recover both SIMPLS and PLS-SVD

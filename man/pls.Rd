@@ -128,7 +128,8 @@ summaries were requested. \code{metrics} is a list of complete \code{evaluate()}
 results, organized as \code{metrics$fitted} and \code{metrics$test}, with one element
 per requested component count. Common fields are:
 \itemize{
-\item \code{P}: predictor loadings, with one column per latent component.
+\item \code{P}: predictor loadings, with one column per latent component when
+\code{return_loadings = TRUE}; otherwise an empty matrix is returned.
 \item \code{Q}: response loadings or response-side latent coefficients.
 \item \code{R}: predictor weights/rotations used to project new samples into the PLS
 latent space.
@@ -198,10 +199,11 @@ predictor-space variance summaries.
 kernel settings and execution metadata.
 \item \code{diagnostics}: numerical solver diagnostics. For rSVD this records the
 structural-check status, finiteness, requested and effective component
-counts and randomized controls. CPU float64 rSVD fits also record each
-case-specific residual audit, strengthened retry, and deterministic
-recovery. Panel evidence is reported separately and is not interpreted
-as general-use certification. SIMPLS-family fits additionally record
+counts and randomized controls. A route that invokes the case-audited
+CPU decomposition also records its residual audit, strengthened retries,
+and any deterministic recovery; other routes state explicitly that a
+case audit is unavailable. Panel evidence is reported separately and is
+not interpreted as general-use certification. SIMPLS-family fits also record
 whether the active approximate route uses a component-wise oversampled
 sketch or an eligible CPU/CUDA/Metal candidate block, together with the active execution
 optimizations.
@@ -219,10 +221,13 @@ model can include predictions for held-out samples, latent scores, fitted
 values, variance summaries, and optional classification heads.
 }
 \details{
-The compiled CPU backend uses Apple Accelerate by default on macOS.
-OpenBLAS is required on Linux and Windows and can execute eligible matrix products
-on several CPU cores, but the SIMPLS deflation sequence remains serial and
-additional threads are not guaranteed to reduce runtime.
+The compiled CPU backend uses Apple Accelerate by default on macOS. Linux
+and Windows prefer OpenBLAS when it is available and otherwise use the
+BLAS/LAPACK supplied by R. Eligible products can use several CPU cores when
+the selected library supports runtime thread control, but the SIMPLS
+deflation sequence remains serial and additional threads are not guaranteed
+to reduce runtime. Use \code{\link[=fastPLS_blas]{fastPLS_blas()}} to identify the library selected at
+compilation.
 
 Supplying \code{float::float32} predictors or responses requests single-precision
 execution without silent promotion to double. Float32 is route-specific,

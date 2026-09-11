@@ -138,11 +138,13 @@ metric at the selected component count.
 \item \code{Q2Y}: held-out cross-validated Q2; every held-out fold is centered
 on its corresponding fold-training response mean. For factor responses,
 this is dummy-response PLS-DA Q2 using fold-training class proportions and
-is not classification accuracy.
-\item \code{accuracy}: held-out decoded-label accuracy for factor responses.
-\item \code{balanced_accuracy}: held-out mean class recall for factor responses.
+is not classification accuracy. Values are named by component count.
+\item \code{accuracy}: held-out decoded-label accuracy for factor responses,
+named by component count.
+\item \code{balanced_accuracy}: held-out mean class recall for factor responses,
+named by component count.
 \item \code{RMSD}: held-out root mean squared deviation for regression. It is
-\code{NA} for classification.
+\code{NA} for classification. Values are named by component count.
 \item \code{Yfit}: fitted values from the full-data model when \code{fit = TRUE}.
 \item \code{R2Y}: training-set explained-variance path from a model fitted on
 the full dataset when \code{fit = TRUE}; otherwise \code{NA}. For factor
@@ -187,19 +189,8 @@ classifier still receives its own predictions, metric path, and selected
 component count. For sufficiently tall SIMPLS classification problems,
 full-data predictor and class moments are calculated once and each fold's
 training moments are obtained by subtracting its held-out contribution.
-Eligible SIMPLS and PLS-SVD folds can therefore be assembled without
-materializing a training-score matrix. The fold-specific centering, scaling,
-PLS fit, LDA fit, and predictions remain independent.
-With a CUDA backend, SIMPLS cross-validation keeps task data and fold
-workspaces resident on the device and reuses CUDA library handles across the
-CV call. PLS-SVD uses the resident CUDA route for
-large multivariate regression responses and the faster fold-local CUDA route
-for classification and smaller responses. This internal choice does not alter
-fold assignment, fold-specific preprocessing, requested components, or
-prediction semantics. Unsupported accelerator requests fail explicitly and
-never fall back to CPU.
-On the Metal route, large assigned sample-matrix products use Metal while
-small reduced products use Accelerate.
+The fold-specific centering, scaling, PLS fit, LDA fit, and predictions
+remain independent.
 }
 \examples{
 idx <- c(seq_len(12), 51:62, 101:112)

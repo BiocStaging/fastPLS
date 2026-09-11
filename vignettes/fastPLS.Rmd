@@ -173,10 +173,13 @@ The `backend` argument selects where the main numerical work is performed.
 `backend = "cpu"` uses the package's compiled, dependency-free C++ core with
 native rSVD. It is usually best for small and moderate
 datasets, low-dimensional problems, and machines without GPU support.
-The CPU kernels use Apple Accelerate by default on macOS and require OpenBLAS
-on Linux and Windows. Configuration locates OpenBLAS through `OPENBLAS_ROOT`,
-`pkg-config`, or Rtools. Installation fails explicitly when OpenBLAS is
-unavailable rather than selecting another BLAS implementation.
+The CPU kernels use Apple Accelerate by default on macOS. Linux and Windows
+prefer OpenBLAS when configuration finds it through `OPENBLAS_ROOT`,
+`pkg-config`, or Rtools; otherwise the package uses the BLAS/LAPACK supplied by
+R. Set `FASTPLS_USE_OPENBLAS=1` before installation to require OpenBLAS.
+`fastPLS_blas()` reports the library selected when the installed package was
+compiled. Linux and Windows performance benchmarks should proceed only when
+this function returns `"OpenBLAS"`.
 Linking against multithreaded OpenBLAS enables eligible
 matrix operations to use multiple CPU cores. For example,
 `options(backend = "cpu", cores = 4L)` selects CPU execution and requests four
@@ -311,10 +314,11 @@ called directly.
 | `pls.single.cv()` | Select components by grouped cross-validation. |
 | `pls.double.cv()` | Run nested cross-validation. |
 | `evaluate()` | Evaluate classification or regression predictions. |
-| `fastsvd()` | Run a stand-alone truncated SVD through the bundled backends. |
+| `fastsvd()` | Run the stand-alone native CPU randomized SVD. |
 | `fastcor()` | Compute fast Pearson-style correlations. |
 | `ViP()` | Compute variable-importance-in-projection trajectories. |
 | `fastPLS_backend()` | Inspect or set the session backend. |
+| `fastPLS_blas()` | Report the CPU numerical library selected at compilation. |
 | `has_cuda()` | Check whether CUDA-native fastPLS support is available. |
 | `has_metal()` | Check for Apple Metal support. |
 
@@ -958,8 +962,9 @@ c(n_loocv_folds = length(unique(cv_loocv$fold)),
 
 `pls.single.cv()` repeats the same CV splitting strategy over several candidate
 component counts and returns the best value according to the predictive metric:
-accuracy for classification, Q2 for univariate regression, and RMSD-style
-prediction error for multivariate regression outputs. Predictive arguments can
+accuracy for classification and RMSD for regression. Q2, held-out R2, or
+balanced accuracy can instead be requested explicitly through
+`selection_metric`. Predictive arguments can
 also be supplied as vectors to tune a compact grid. Fold-control arguments such
 as `kfold` remain single settings for the whole CV run.
 
@@ -1196,10 +1201,10 @@ optimize model complexity, such as the number of latent variables, whereas the
 outer CV loop (`CV2`) holds out samples that are not used during optimization
     and
 therefore provides the performance estimate of the complete modelling strategy.
-In `fastPLS`, `pls.double.cv()` follows this idea: the inner loop calls
-`pls.single.cv()` to select the best number of components and any vector-valued
-predictive hyperparameters, while the outer loop refits the selected model on
-the corresponding outer training set and predicts the outer test fold. Both
+In `fastPLS`, `pls.double.cv()` follows this idea using a reproducible grouped-
+fold plan constructed in R. CPU and Metal use a compiled coordinator for inner
+selection, outer refitting, prediction, and metric accumulation. CUDA uses an R
+coordinator around native CUDA single-CV and outer-fit kernels. Both
 `kfold_inner` and `kfold_outer` can be ordinary fold counts or `"loocv"`, and
 both respect `constrain`.
 
@@ -1302,10 +1307,11 @@ Important elements returned by `pls.double.cv()` are:
 
 ## SVD Utility
 
-`fastsvd()` provides direct access to the same SVD backends used by PLS. It
-returns the left singular vectors (`u`), singular values (`d`), and right
-singular vectors (`v`) for users who want a truncated decomposition outside a
-PLS model.
+`fastsvd()` provides direct access to the native CPU randomized SVD used by
+PLS. It returns the left singular vectors (`u`), singular values (`d`), and
+right singular vectors (`v`) for users who want a truncated decomposition
+outside a PLS model. Stand-alone CUDA and Metal SVD routes are not exposed;
+their reduced decompositions are not device-native for every matrix shape.
 
 ```{r chunk-034}
 s <- fastsvd(Xtrain, ncomp = 3, seed = 104)
@@ -1438,8 +1444,11 @@ paths when they are unnecessary.
 In ordinary use, leave `xprod = NULL`; fastPLS then chooses the matrix-free
 route automatically only when the cross-product is large enough to justify it.
 
-For `pls.single.cv()` and `pls.double.cv()`, seeded grouped fold construction is
-implemented in C++, while final R object assembly remains host-side. CUDA
+For `pls.single.cv()`, seeded grouped fold construction and the numerical CV
+path are compiled. For `pls.double.cv()`, CPU and Metal nested loops are
+compiled after R constructs the fixed fold plan; CUDA retains R-level nested
+coordination around native CUDA kernels. Final R-object assembly remains
+host-side. CUDA
 SIMPLS CV uploads the task once and
 keeps fold gathering, training-only standardization, fitting, prediction, and
 metric reduction on the device. CUDA PLS-SVD uses the same resident strategy

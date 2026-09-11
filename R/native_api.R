@@ -45,6 +45,20 @@ cv_folds_core_cpp <- function(
     )
 }
 
+pls_double_cv_core_cpp <- function(
+    predictors, response, class_count, outer_folds, inner_folds, components,
+    scaling, method, classifier_metric, selection_metric, north, kernel,
+    gamma, degree, coef0, oversample, power, seed, backend, classification
+) {
+    .Call(
+        "_fastPLS_pls_double_cv_core_cpp", predictors, response, class_count,
+        outer_folds, inner_folds, components, scaling, method,
+        classifier_metric, selection_metric, north, kernel, gamma, degree,
+        coef0, oversample, power, seed, backend, classification,
+        PACKAGE = "fastPLS"
+    )
+}
+
 pls_cv_classification_core_cpp <- function(
     predictors, labels, class_count, folds, components, scaling, method,
     classifier, oversample, power, seed, store_predictions = TRUE,
@@ -590,6 +604,10 @@ has_cuda <- function() {
 
 has_metal <- function() {
     .Call("_fastPLS_has_metal", PACKAGE = "fastPLS")
+}
+
+blas_backend_cpp <- function() {
+    .Call("_fastPLS_blas_backend_cpp", PACKAGE = "fastPLS")
 }
 
 rsvd_audit_reset_debug <- function() {

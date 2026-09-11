@@ -16,8 +16,8 @@ test_that("operation-split Metal compact factors predict every prefix", {
                 raw$execution_route,
                 "CPU/Metal hybrid (operation split)"
             )
-            repeated <- predict(model, X)
-            repeated_again <- predict(model, X)
+            repeated <- predict(model, X, backend = "metal")
+            repeated_again <- predict(model, X, backend = "metal")
             expect_equal(repeated$Ypred, repeated_again$Ypred, tolerance = 0)
             if (fitted) {
                 expect_true(all(is.finite(model$R2Y)))
@@ -47,7 +47,9 @@ test_that("operation-split Metal class paths match independent fits", {
                 method = "simpls", backend = "metal",
                 classifier = classifier, return_variance = FALSE, seed = 19
             )
-            expected <- predict(model, Xtest)$Ypred[[index]]
+            expected <- predict(
+                model, Xtest, backend = "metal"
+            )$Ypred[[index]]
             expect_identical(
                 as.character(independent$Ypred[[1L]]),
                 as.character(expected)

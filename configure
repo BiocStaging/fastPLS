@@ -50,19 +50,24 @@ find_openblas() {
   return 1
 }
 
-if [ "${use_openblas}" = "auto" ] && [ "${system_name}" != "Darwin" ]; then
+if [ "${use_openblas}" = "true" ] || [ "${use_openblas}" = "TRUE" ]; then
   use_openblas="1"
+elif [ "${use_openblas}" = "false" ] || [ "${use_openblas}" = "FALSE" ]; then
+  use_openblas="0"
 fi
 
-if [ "${system_name}" != "Darwin" ] && [ "${use_openblas}" != "1" ]; then
-  echo "ERROR: OpenBLAS is mandatory for fastPLS on ${system_name}." >&2
-  echo "Install its development package or set OPENBLAS_ROOT; disabling it is unsupported." >&2
-  exit 1
-fi
-
-if [ "${use_openblas}" = "1" ] && ! find_openblas; then
-  echo "ERROR: OpenBLAS is required for this fastPLS ${system_name} build but was not found." >&2
+if [ "${use_openblas}" = "auto" ]; then
+  if [ "${system_name}" != "Darwin" ] && find_openblas; then
+    use_openblas="1"
+  else
+    use_openblas="0"
+  fi
+elif [ "${use_openblas}" = "1" ] && ! find_openblas; then
+  echo "ERROR: FASTPLS_USE_OPENBLAS=1 but OpenBLAS was not found." >&2
   echo "Install the OpenBLAS development package and pkg-config, or set OPENBLAS_ROOT." >&2
+  exit 1
+elif [ "${use_openblas}" != "0" ]; then
+  echo "ERROR: FASTPLS_USE_OPENBLAS must be auto, 0, or 1." >&2
   exit 1
 fi
 
@@ -83,6 +88,8 @@ elif [ "${use_openblas}" = "1" ]; then
     openblas_dl_lib="-ldl"
   fi
   pkg_libs="${openblas_libs} ${openblas_dl_lib}"
+elif [ "${system_name}" != "Darwin" ]; then
+  echo "fastPLS configure: OpenBLAS not found; using the BLAS/LAPACK supplied by R"
 fi
 
 if [ "${system_name}" != "Darwin" ] && [ "${use_openblas}" != "1" ]; then

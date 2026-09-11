@@ -20,7 +20,7 @@ test_that("Metal keeps fixed operation ownership for large regression shapes", {
         expect_equal(dim(fit$Ttrain), c(n, 5L), info = method)
         expect_true(all(is.finite(fit$R2Y)), info = method)
 
-        predicted <- predict(fit, float::fl(x))
+        predicted <- predict(fit, float::fl(x), backend = "metal")
         expect_equal(length(predicted$Ypred), 2L, info = method)
         expect_equal(dim(predicted$Ypred[[2L]]), c(n, q), info = method)
         expect_true(

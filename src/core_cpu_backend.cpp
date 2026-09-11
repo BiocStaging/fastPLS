@@ -26,18 +26,6 @@
 #include <R_ext/RS.h>
 #endif
 
-#if !defined(FASTPLS_USE_ACCELERATE) && \
-    !defined(FASTPLS_USE_OPENBLAS)
-extern "C" {
-BLAS_extern void F77_NAME(ssyrk)(
-  const char* uplo, const char* trans, const BLAS_INT* n,
-  const BLAS_INT* k, const float* alpha, const float* a,
-  const BLAS_INT* lda, const float* beta, float* c,
-  const BLAS_INT* ldc FCLEN FCLEN
-);
-}
-#endif
-
 namespace fastpls {
 namespace runtime {
 namespace {
@@ -572,17 +560,8 @@ void cpu_self_gram_f32(core::ConstMatrixView<float> input,
     0.0f, output.data(), static_cast<int>(output.leading_dimension())
   );
 #else
-  const char lower = 'L';
-  const char transpose = transpose_input ? 'T' : 'N';
-  const BLAS_INT n = static_cast<BLAS_INT>(dimension);
-  const BLAS_INT k = static_cast<BLAS_INT>(rank);
-  const BLAS_INT lda = static_cast<BLAS_INT>(input.leading_dimension());
-  const BLAS_INT ldc = static_cast<BLAS_INT>(output.leading_dimension());
-  const float alpha = 1.0f;
-  const float beta = 0.0f;
-  F77_CALL(ssyrk)(
-    &lower, &transpose, &n, &k, &alpha, input.data(), &lda, &beta,
-    output.data(), &ldc FCONE FCONE
+  core::reference_gemm(
+    input, input, transpose_input, !transpose_input, output
   );
 #endif
   if (full_output) mirror_lower_to_upper(output);

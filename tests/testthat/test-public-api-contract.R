@@ -1,7 +1,7 @@
 test_that("the publication API exports only the documented functions", {
   expected <- c(
-    "evaluate", "fastcor", "fastPLS_backend", "fastsvd", "has_cuda",
-    "has_metal", "pls", "pls.double.cv", "pls.single.cv",
+    "evaluate", "fastcor", "fastPLS_backend", "fastPLS_blas", "fastsvd",
+    "has_cuda", "has_metal", "pls", "pls.double.cv", "pls.single.cv",
     "plot.permutation", "ViP"
   )
 

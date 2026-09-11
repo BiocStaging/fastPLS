@@ -22,7 +22,9 @@ test_that("float32 SIMPLS retains score orthogonality on ill-conditioned paths",
             error <- max(abs(gram - diag(ncol(scores))))
             expect_true(error < 5e-3, info = paste(backend, solver, error))
             expect_identical(as.integer(internal$ncomp), 30L)
-            prediction <- float::dbl(predict(model, X)$Ypred[[1L]])
+            prediction <- float::dbl(
+                predict(model, X, backend = backend)$Ypred[[1L]]
+            )
             fitted <- float::dbl(model$Yfit[[1L]])
             relative_error <- sqrt(sum((prediction - fitted)^2) / sum(fitted^2))
             expect_true(relative_error < 1e-5,

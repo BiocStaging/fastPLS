@@ -42,6 +42,57 @@ test_that("pls.single.cv can optimize explicit regression metrics", {
   expect_false(is.null(opt_rmsd$Ypred_optim))
 })
 
+test_that("R2 and Q2 selection never substitute for one another", {
+  q2_only <- data.frame(metric_name = "q2", metric_value = 0.4)
+  r2_only <- data.frame(metric_name = "r2", metric_value = 0.5)
+
+  expect_error(
+    fastPLS:::.cv_best_index(q2_only, "r2"),
+    "selection_metric = 'r2' is unavailable"
+  )
+  expect_error(
+    fastPLS:::.cv_best_index(r2_only, "q2"),
+    "selection_metric = 'q2' is unavailable"
+  )
+})
+
+test_that("single CV metric paths are named by component count", {
+  set.seed(21011)
+  X <- matrix(rnorm(54 * 6), nrow = 54, ncol = 6)
+  y <- factor(rep(c("A", "B", "C"), each = 18))
+  fit <- pls.single.cv(
+    X, y, ncomp = 1:2, kfold = 3,
+    method = "simpls", backend = "cpu", seed = 13
+  )
+
+  expected <- c("ncomp=1", "ncomp=2")
+  expect_identical(names(fit$accuracy), expected)
+  expect_identical(names(fit$balanced_accuracy), expected)
+  expect_identical(names(fit$Q2Y), expected)
+  expect_identical(names(fit$RMSD), expected)
+})
+
+test_that("nested R2 permutation uses the held-out endpoint", {
+  set.seed(21012)
+  X <- matrix(rnorm(48 * 5), nrow = 48, ncol = 5)
+  y <- 0.7 * X[, 1] - 0.2 * X[, 2] + rnorm(48, sd = 0.3)
+  fit <- pls.double.cv(
+    X, y, ncomp = 1:2, kfold_inner = 3, kfold_outer = 3,
+    method = "simpls", backend = "cpu", selection_metric = "r2",
+    perm.test = TRUE, times = 2, seed = 17
+  )
+
+  heldout <- vapply(fit$results, `[[`, numeric(1L), "metric_value")
+  expect_identical(fit$permutation_metric, "r2")
+  expect_equal(fit$permutation_observed, median(heldout))
+
+  mock <- list(
+    results = list(list(metric_name = "r2", metric_value = 0.25)),
+    R2Y = 0.95
+  )
+  expect_equal(fastPLS:::.double_cv_metric_values(mock, "r2"), 0.25)
+})
+
 test_that("a single selected regression path reuses its prediction cube", {
   prediction <- array(seq_len(24), dim = c(4L, 6L, 1L))
   selected <- fastPLS:::.cv_extract_prediction_at(

@@ -37,17 +37,16 @@ URL: https://github.com/tkcaccia/fastPLS
 BugReports: https://github.com/tkcaccia/fastPLS/issues
 biocViews: Software, DimensionReduction, Classification, Regression,
     GenePrediction, GeneExpression, Metabolomics, SingleCell, GPU
-SystemRequirements: OpenBLAS development libraries on Linux and Windows;
-    optional CUDA Toolkit and NVIDIA GPU driver for CUDA acceleration;
-    optional Apple Metal framework on macOS for Metal acceleration. CPU-only
-    builds do not require GPU software.
+SystemRequirements: Optional OpenBLAS development libraries for faster CPU
+    matrix operations; optional CUDA Toolkit and NVIDIA GPU driver for CUDA
+    acceleration; optional Apple Metal framework on macOS for Metal
+    acceleration. CPU-only builds do not require GPU software.
 Depends: R (>= 4.6.0)
 Imports: Biobase, methods, float
 Suggests: BiocStyle, knitr, rmarkdown, testthat (>= 3.0.0)
 VignetteBuilder: knitr
 NeedsCompilation: yes
 Config/testthat/edition: 3
-Config/pak/sysreqs: libopenblas-dev
 Encoding: UTF-8
 Roxygen: list(markdown = TRUE)
 Config/roxygen2/version: 8.1.0

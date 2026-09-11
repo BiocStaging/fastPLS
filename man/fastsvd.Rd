@@ -50,12 +50,12 @@ is supported on the selected backend.}
 The sketch dimension is approximately \code{ncomp + oversample}, capped by the
 matrix rank. Larger values can improve approximation accuracy at the cost of
 extra time and memory. The default starting value is 32. Panel
-agreement is not a guarantee for a new matrix; CPU float64 fits additionally
-apply the case-specific audit described in Details.}
+agreement is not a guarantee for a new matrix; CPU float32 and float64 fits
+apply the native case-specific audit described in Details.}
 
 \item{power}{Number of randomized-SVD power iterations. The default is five on
-CPU. CPU float64 additionally applies case-specific auditing
-and recovery. Each additional iteration adds matrix multiplications.}
+CPU. CPU float64 and float32 execution applies case-specific auditing and
+recovery. Each additional iteration adds matrix multiplications.}
 
 \item{seed}{Random seed used to generate the Gaussian sketch. It affects
 \code{rsvd} results.}
@@ -64,12 +64,14 @@ and recovery. Each additional iteration adds matrix multiplications.}
 A list compatible with \code{base::svd()} containing \code{d}, \code{u}, and
 \code{v}, plus backend metadata \code{backend}, \code{method},
 \code{svd.method}, \code{elapsed}, and \code{ncomp}. The
-\code{diagnostics} element reports rank and finiteness checks. For
-double-precision input it also reports singular-triplet residuals and
-left/right orthogonality errors. CPU rSVD diagnostics include the case-specific
-audit, strengthened retries, and effective controls. Recovery after failed
-CPU sketches uses strengthened native-rSVD attempts. These fields describe the
-numerical checks applied to the current decomposition.
+\code{diagnostics} element reports rank and finiteness checks. Both CPU
+precisions receive the native case-specific rSVD audit, strengthened retries,
+and effective controls. For float32, the audit remains in single precision and
+the R layer does not convert the input to double solely for diagnostics.
+Double-precision input additionally reports selected singular-triplet residuals
+and left/right orthogonality errors. Recovery after failed CPU sketches uses
+strengthened native-rSVD attempts. These fields describe the numerical checks
+applied to the current decomposition.
 }
 \description{
 Computes a truncated singular value decomposition of a dense numeric matrix
@@ -78,7 +80,7 @@ values, requested singular vectors, decomposition rank, elapsed time, and
 backend metadata.
 }
 \details{
-Randomized SVD is stochastic. CPU float64 execution audits each decomposition
+Randomized SVD is stochastic. CPU float32 and float64 execution audits each decomposition
 using normalized left/right singular-triplet residuals and an omitted-direction
 search. An estimated omitted-to-retained boundary ratio above 0.95 is treated
 as weak separation, not by itself as a failed approximation. A residual above
@@ -89,7 +91,7 @@ further attempts with wider sketches and additional power iterations. Each
 recovery result is rechecked. If recovery exceeds its estimated 256 MiB
 major-workspace budget or still fails its checks, an error is returned.
 This budget excludes input matrices, model storage, and runtime overhead;
-it is not a bound on process RSS. Small CPU float64 inputs use a separately
+it is not a bound on process RSS. Small CPU inputs can use a separately
 recorded dense-SVD route. A full-width sketch can also use a dense SVD as
 part of the native algorithm. Accelerator routes report their structural
 diagnostics and exact controls. Confirm coefficient or subspace

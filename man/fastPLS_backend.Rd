@@ -35,9 +35,10 @@ For CPU execution, \code{options(cores = n)} requests \code{n} threads from the
 linked BLAS and OpenMP runtimes. Matrix operations can use those threads
 when the installed numerical library supports runtime thread control;
 sequential PLS deflation steps remain serial. macOS builds use Apple
-Accelerate by default. Linux and Windows builds require OpenBLAS, discovered
-through \code{OPENBLAS_ROOT}, \code{pkg-config}, or Rtools. Installation fails
-explicitly when OpenBLAS is unavailable.
+Accelerate by default. Linux and Windows builds prefer OpenBLAS when it is
+discovered through \code{OPENBLAS_ROOT}, \code{pkg-config}, or Rtools, and otherwise
+use the BLAS/LAPACK supplied by R. Setting \code{FASTPLS_USE_OPENBLAS=1} makes
+OpenBLAS mandatory for that installation.
 }
 \examples{
 old_options <- options(backend = NULL)

@@ -110,17 +110,23 @@ find_openblas() {
   return 1
 }
 
-if [ "${use_openblas}" = "auto" ]; then
+if [ "${use_openblas}" = "true" ] || [ "${use_openblas}" = "TRUE" ]; then
   use_openblas="1"
+elif [ "${use_openblas}" = "false" ] || [ "${use_openblas}" = "FALSE" ]; then
+  use_openblas="0"
 fi
-if [ "${use_openblas}" != "1" ]; then
-  echo "ERROR: OpenBLAS is mandatory for fastPLS on Windows." >&2
-  echo "Install its development archive or set OPENBLAS_ROOT; disabling it is unsupported." >&2
-  exit 1
-fi
-if [ "${use_openblas}" = "1" ] && ! find_openblas; then
-  echo "ERROR: OpenBLAS is required for the default fastPLS Windows build but was not found." >&2
+if [ "${use_openblas}" = "auto" ]; then
+  if find_openblas; then
+    use_openblas="1"
+  else
+    use_openblas="0"
+  fi
+elif [ "${use_openblas}" = "1" ] && ! find_openblas; then
+  echo "ERROR: FASTPLS_USE_OPENBLAS=1 but OpenBLAS was not found." >&2
   echo "Install the static OpenBLAS development archive for Rtools or set OPENBLAS_ROOT." >&2
+  exit 1
+elif [ "${use_openblas}" != "0" ]; then
+  echo "ERROR: FASTPLS_USE_OPENBLAS must be auto, 0, or 1." >&2
   exit 1
 fi
 
@@ -133,6 +139,7 @@ if [ "${use_openblas}" = "1" ]; then
   pkg_cxxflags="-fopenmp"
   pkg_libs="${openblas_libs} -fopenmp"
 else
+  echo "fastPLS configure.win: OpenBLAS not found; using the BLAS/LAPACK supplied by R"
   pkg_cppflags=""
   pkg_cxxflags=""
   pkg_libs='$(LAPACK_LIBS) $(BLAS_LIBS)'

@@ -243,6 +243,17 @@ SEXP numeric_matrix(const fastpls::core::Matrix<double>& values) {
 }
 
 template<class T>
+SEXP numeric_matrix_cast(const fastpls::core::Matrix<T>& values) {
+  SEXP result = Rf_allocMatrix(
+    REALSXP, static_cast<int>(values.rows()), static_cast<int>(values.columns())
+  );
+  for (std::size_t index = 0; index < values.size(); ++index) {
+    REAL(result)[index] = static_cast<double>(values.data()[index]);
+  }
+  return result;
+}
+
+template<class T>
 SEXP numeric_vector(const std::vector<T>& values) {
   SEXP result = Rf_allocVector(REALSXP, values.size());
   for (std::size_t index = 0; index < values.size(); ++index) {
@@ -1647,12 +1658,13 @@ SEXP classification_cv_result(
     orthogonal_components, kernel_controls
   );
 
-  SEXP output = protect.add(Rf_allocVector(VECSXP, 6));
-  SEXP names = protect.add(Rf_allocVector(STRSXP, 6));
-  const char* field_names[6] = {
-    "fold", "status", "ncomp", "metric_value", "class_pred", "Ypred"
+  SEXP output = protect.add(Rf_allocVector(VECSXP, 9));
+  SEXP names = protect.add(Rf_allocVector(STRSXP, 9));
+  const char* field_names[9] = {
+    "fold", "status", "ncomp", "metric_value", "class_pred", "Ypred",
+    "Q2Y", "native_best_index", "native_best_ncomp"
   };
-  for (int index = 0; index < 6; ++index) {
+  for (int index = 0; index < 9; ++index) {
     SET_STRING_ELT(names, index, Rf_mkChar(field_names[index]));
   }
   SET_VECTOR_ELT(output, 0, integer_predictions(result.folds));
@@ -1678,6 +1690,11 @@ SEXP classification_cv_result(
       false, false
     ) : R_NilValue
   );
+  SET_VECTOR_ELT(output, 6, numeric_vector(result.q2));
+  SET_VECTOR_ELT(output, 7, Rf_ScalarInteger(
+    static_cast<int>(result.best_index + 1)
+  ));
+  SET_VECTOR_ELT(output, 8, Rf_ScalarInteger(result.best_component));
   Rf_setAttrib(output, R_NamesSymbol, names);
   return output;
 }
@@ -1732,13 +1749,13 @@ SEXP regression_cv_result(
     kernel_controls
   );
 
-  SEXP output = protect.add(Rf_allocVector(VECSXP, 9));
-  SEXP names = protect.add(Rf_allocVector(STRSXP, 9));
-  const char* field_names[9] = {
+  SEXP output = protect.add(Rf_allocVector(VECSXP, 11));
+  SEXP names = protect.add(Rf_allocVector(STRSXP, 11));
+  const char* field_names[11] = {
     "fold", "status", "ncomp", "metric_value", "Ypred", "Q2Y", "RMSD",
-    "CV_R2", "native_evaluation"
+    "CV_R2", "native_evaluation", "native_best_index", "native_best_ncomp"
   };
-  for (int index = 0; index < 9; ++index) {
+  for (int index = 0; index < 11; ++index) {
     SET_STRING_ELT(names, index, Rf_mkChar(field_names[index]));
   }
   SET_VECTOR_ELT(output, 0, integer_predictions(result.folds));
@@ -1767,7 +1784,641 @@ SEXP regression_cv_result(
     }
     SET_VECTOR_ELT(output, 8, evaluation);
   }
+  SET_VECTOR_ELT(output, 9, Rf_ScalarInteger(
+    static_cast<int>(result.best_index + 1)
+  ));
+  SET_VECTOR_ELT(output, 10, Rf_ScalarInteger(result.best_component));
   Rf_setAttrib(output, R_NamesSymbol, names);
+  return output;
+}
+
+SEXP named_list(ProtectStack& protect,
+                const std::vector<const char*>& field_names) {
+  SEXP output = protect.add(Rf_allocVector(VECSXP, field_names.size()));
+  SEXP names = protect.add(Rf_allocVector(STRSXP, field_names.size()));
+  for (std::size_t index = 0; index < field_names.size(); ++index) {
+    SET_STRING_ELT(names, index, Rf_mkChar(field_names[index]));
+  }
+  Rf_setAttrib(output, R_NamesSymbol, names);
+  return output;
+}
+
+std::vector<int> integer_vector(SEXP object, std::size_t expected,
+                                const char* name) {
+  if (TYPEOF(object) != INTSXP ||
+      XLENGTH(object) != static_cast<R_xlen_t>(expected)) {
+    throw std::invalid_argument(std::string(name) + " has invalid dimensions");
+  }
+  return std::vector<int>(INTEGER(object), INTEGER(object) + expected);
+}
+
+double finite_quantile(std::vector<double> values, double probability) {
+  values.erase(
+    std::remove_if(values.begin(), values.end(), [](double value) {
+      return !std::isfinite(value);
+    }),
+    values.end()
+  );
+  if (values.empty()) return NA_REAL;
+  std::sort(values.begin(), values.end());
+  if (values.size() == 1) return values.front();
+  const double position = probability * static_cast<double>(values.size() - 1);
+  const std::size_t lower = static_cast<std::size_t>(std::floor(position));
+  const std::size_t upper = static_cast<std::size_t>(std::ceil(position));
+  const double fraction = position - static_cast<double>(lower);
+  return values[lower] + fraction * (values[upper] - values[lower]);
+}
+
+SEXP repeated_run_summary(ProtectStack& protect,
+                          const std::vector<double>& r2,
+                          const std::vector<double>& q2,
+                          const std::vector<double>& rmsd) {
+  SEXP output = named_list(protect, {
+    "medianR2Y", "CI95R2Y", "medianQ2Y", "CI95Q2Y", "medianRMSD",
+    "CI95RMSD"
+  });
+  const auto interval = [&](const std::vector<double>& values) {
+    SEXP result = protect.add(Rf_allocVector(REALSXP, 2));
+    REAL(result)[0] = finite_quantile(values, 0.025);
+    REAL(result)[1] = finite_quantile(values, 0.975);
+    return result;
+  };
+  SET_VECTOR_ELT(output, 0, Rf_ScalarReal(finite_quantile(r2, 0.5)));
+  SET_VECTOR_ELT(output, 1, interval(r2));
+  SET_VECTOR_ELT(output, 2, Rf_ScalarReal(finite_quantile(q2, 0.5)));
+  SET_VECTOR_ELT(output, 3, interval(q2));
+  SET_VECTOR_ELT(output, 4, Rf_ScalarReal(finite_quantile(rmsd, 0.5)));
+  SET_VECTOR_ELT(output, 5, interval(rmsd));
+  return output;
+}
+
+int modal_component(const std::vector<int>& values) {
+  if (values.empty()) return NA_INTEGER;
+  std::vector<int> sorted = values;
+  std::sort(sorted.begin(), sorted.end());
+  int selected = sorted.front();
+  std::size_t selected_count = 0;
+  for (std::size_t first = 0; first < sorted.size();) {
+    std::size_t last = first + 1;
+    while (last < sorted.size() && sorted[last] == sorted[first]) ++last;
+    const std::size_t count = last - first;
+    if (count > selected_count) {
+      selected = sorted[first];
+      selected_count = count;
+    }
+    first = last;
+  }
+  return selected;
+}
+
+template<class T>
+std::vector<double> classification_selection_values(
+    const fastpls::core::ClassificationCvResult<T>& result,
+    const int* labels, const int* folds, std::size_t samples,
+    std::size_t classes, int metric_code) {
+  if (metric_code == 3) return result.q2;
+  if (metric_code == 1) return result.metrics;
+  std::vector<double> values(result.metrics.size());
+  for (std::size_t prefix = 0; prefix < values.size(); ++prefix) {
+    values[prefix] = fastpls::core::cv_detail::balanced_accuracy(
+      labels, result.predictions.data() + prefix * samples, folds,
+      samples, classes
+    );
+  }
+  return values;
+}
+
+template<class T>
+double outer_regression_q2(fastpls::core::ConstMatrixView<T> observed,
+                           fastpls::core::ConstMatrixView<T> predicted,
+                           const int* folds) {
+  const auto partitions = fastpls::core::cv_detail::fold_partitions(
+    folds, observed.rows()
+  );
+  long double residual = 0.0L;
+  long double total = 0.0L;
+  for (const auto& partition : partitions) {
+    if (partition.train.empty() || partition.test.empty()) continue;
+    for (std::size_t column = 0; column < observed.columns(); ++column) {
+      long double mean = 0.0L;
+      for (const std::size_t row : partition.train) {
+        mean += observed(row, column);
+      }
+      mean /= static_cast<long double>(partition.train.size());
+      for (const std::size_t row : partition.test) {
+        const long double error = predicted(row, column) - observed(row, column);
+        const long double centered = observed(row, column) - mean;
+        residual += error * error;
+        total += centered * centered;
+      }
+    }
+  }
+  return total > 0.0L ? static_cast<double>(1.0L - residual / total) :
+    std::numeric_limits<double>::quiet_NaN();
+}
+
+template<class T, class Backend>
+SEXP nested_classification_result(
+    fastpls::core::ConstMatrixView<T> predictors, SEXP labels,
+    std::size_t class_count, SEXP outer_folds, SEXP inner_folds,
+    SEXP components, int scaling, int method, int classifier,
+    int selection_metric, int oversample, int power, unsigned int seed,
+    std::size_t orthogonal_components,
+    const fastpls::core::KernelCvControls& kernel_controls,
+    Backend& backend) {
+  ProtectStack protect;
+  SEXP label_values = protect.add(Rf_coerceVector(labels, INTSXP));
+  SEXP component_values = protect.add(Rf_coerceVector(components, INTSXP));
+  if (!Rf_isMatrix(outer_folds) || TYPEOF(outer_folds) != INTSXP ||
+      TYPEOF(inner_folds) != VECSXP || XLENGTH(component_values) < 1 ||
+      XLENGTH(label_values) != static_cast<R_xlen_t>(predictors.rows())) {
+    throw std::invalid_argument("nested classification CV inputs are invalid");
+  }
+  const SEXP dimensions = Rf_getAttrib(outer_folds, R_DimSymbol);
+  const std::size_t samples = static_cast<std::size_t>(INTEGER(dimensions)[0]);
+  const std::size_t runs = static_cast<std::size_t>(INTEGER(dimensions)[1]);
+  if (samples != predictors.rows() ||
+      XLENGTH(inner_folds) != static_cast<R_xlen_t>(runs)) {
+    throw std::invalid_argument("nested classification fold plan is invalid");
+  }
+  const int maximum_component = *std::max_element(
+    INTEGER(component_values),
+    INTEGER(component_values) + XLENGTH(component_values)
+  );
+  fastpls::core::PlssvdControls base_plssvd;
+  base_plssvd.rsvd.oversample = oversample;
+  base_plssvd.rsvd.power = power;
+  base_plssvd.rsvd.seed = seed;
+  SEXP output = named_list(protect, {"results", "aggregate"});
+  SEXP run_results = protect.add(Rf_allocVector(VECSXP, runs));
+  SET_VECTOR_ELT(output, 0, run_results);
+  std::vector<int> run_predictions(runs * samples, NA_INTEGER);
+  std::vector<int> selected_components;
+  std::vector<double> accuracies(runs, NA_REAL);
+  std::vector<double> balanced_accuracies(runs, NA_REAL);
+  std::vector<double> q2_values(runs, NA_REAL);
+  std::vector<double> r2_values(runs, NA_REAL);
+  std::vector<double> rmsd_values(runs, NA_REAL);
+  selected_components.reserve(runs * 10);
+  for (std::size_t run = 0; run < runs; ++run) {
+    const int* outer = INTEGER(outer_folds) + run * samples;
+    int outer_count = 0;
+    for (std::size_t row = 0; row < samples; ++row) {
+      outer_count = std::max(outer_count, outer[row]);
+    }
+    SEXP run_inner = VECTOR_ELT(inner_folds, run);
+    if (TYPEOF(run_inner) != VECSXP || XLENGTH(run_inner) != outer_count) {
+      throw std::invalid_argument("nested classification inner folds are invalid");
+    }
+    std::vector<int> prediction(samples, NA_INTEGER);
+    std::vector<int> best_components(static_cast<std::size_t>(outer_count));
+    std::vector<double> fold_q2(static_cast<std::size_t>(outer_count), NA_REAL);
+    std::vector<double> fold_r2(static_cast<std::size_t>(outer_count), NA_REAL);
+    SEXP inner_objects = protect.add(Rf_allocVector(VECSXP, outer_count));
+    SEXP parameter_objects = protect.add(Rf_allocVector(VECSXP, outer_count));
+    for (int fold = 1; fold <= outer_count; ++fold) {
+      const auto inner_full = integer_vector(
+        VECTOR_ELT(run_inner, fold - 1), samples, "nested inner fold"
+      );
+      std::vector<std::size_t> training_rows;
+      training_rows.reserve(samples);
+      for (std::size_t row = 0; row < samples; ++row) {
+        if (outer[row] != fold) training_rows.push_back(row);
+      }
+      auto inner_predictors = fastpls::core::cv_detail::gather_rows<T>(
+        predictors, training_rows
+      );
+      std::vector<int> inner_labels(training_rows.size());
+      std::vector<int> inner(training_rows.size());
+      for (std::size_t index = 0; index < training_rows.size(); ++index) {
+        inner_labels[index] = INTEGER(label_values)[training_rows[index]];
+        inner[index] = inner_full[training_rows[index]];
+      }
+      auto inner_plssvd = base_plssvd;
+      inner_plssvd.rsvd.seed = seed + 1000U * (run + 1U) +
+        static_cast<unsigned int>(fold);
+      auto inner_simpls = simpls_controls(
+        training_rows.size(), predictors.columns(), class_count,
+        static_cast<std::size_t>(maximum_component), true,
+        oversample, power, inner_plssvd.rsvd.seed
+      );
+      const auto inner_result = fastpls::core::cross_validate_classification<T>(
+        inner_predictors.view(), inner_labels.data(), class_count, inner.data(),
+        INTEGER(component_values), static_cast<std::size_t>(XLENGTH(component_values)),
+        static_cast<fastpls::core::PredictorScaling>(scaling),
+        static_cast<fastpls::core::LinearPlsFamily>(method),
+        static_cast<fastpls::core::ClassificationHead>(classifier),
+        inner_plssvd, inner_simpls, backend, true, selection_metric == 3,
+        orthogonal_components, kernel_controls
+      );
+      const auto selection_values = classification_selection_values<T>(
+        inner_result, inner_labels.data(), inner.data(), training_rows.size(),
+        class_count, selection_metric
+      );
+      const std::size_t selected = fastpls::core::cv_detail::best_metric_index(
+        selection_values, false
+      );
+      const int selected_component = INTEGER(component_values)[selected];
+      best_components[static_cast<std::size_t>(fold - 1)] = selected_component;
+      selected_components.push_back(selected_component);
+
+      std::vector<int> holdout(samples, -1);
+      for (std::size_t row = 0; row < samples; ++row) {
+        if (outer[row] == fold) holdout[row] = 1;
+      }
+      auto outer_plssvd = base_plssvd;
+      outer_plssvd.rsvd.seed = seed + 2000U * (run + 1U) +
+        static_cast<unsigned int>(fold);
+      auto outer_simpls = simpls_controls(
+        training_rows.size(), predictors.columns(), class_count,
+        static_cast<std::size_t>(selected_component), true,
+        oversample, power, outer_plssvd.rsvd.seed
+      );
+      const auto outer_result = fastpls::core::cross_validate_classification<T>(
+        predictors, INTEGER(label_values), class_count, holdout.data(),
+        &selected_component, 1,
+        static_cast<fastpls::core::PredictorScaling>(scaling),
+        static_cast<fastpls::core::LinearPlsFamily>(method),
+        static_cast<fastpls::core::ClassificationHead>(classifier),
+        outer_plssvd, outer_simpls, backend, true, true,
+        orthogonal_components, kernel_controls, true
+      );
+      for (std::size_t row = 0; row < samples; ++row) {
+        if (outer[row] == fold) prediction[row] = outer_result.predictions(row, 0);
+      }
+      if (!outer_result.q2.empty()) {
+        fold_q2[static_cast<std::size_t>(fold - 1)] = outer_result.q2[0];
+      }
+      if (outer_result.fold_training_r2.size() > 0) {
+        fold_r2[static_cast<std::size_t>(fold - 1)] =
+          outer_result.fold_training_r2(0, 0);
+      }
+
+      SEXP inner_object = named_list(protect, {
+        "ncomp", "metric_value", "Q2Y", "best_ncomp", "best_index",
+        "selection_metric"
+      });
+      SET_VECTOR_ELT(inner_object, 0, component_values);
+      SET_VECTOR_ELT(inner_object, 1, numeric_vector(selection_values));
+      SET_VECTOR_ELT(inner_object, 2, numeric_vector(inner_result.q2));
+      SET_VECTOR_ELT(inner_object, 3, Rf_ScalarInteger(selected_component));
+      SET_VECTOR_ELT(inner_object, 4, Rf_ScalarInteger(selected + 1));
+      const char* inner_metric_name = selection_metric == 2 ?
+        "balanced_accuracy" : selection_metric == 3 ? "q2" : "accuracy";
+      SET_VECTOR_ELT(inner_object, 5, Rf_mkString(inner_metric_name));
+      SET_VECTOR_ELT(inner_objects, fold - 1, inner_object);
+      SEXP parameters = named_list(protect, {"ncomp"});
+      SET_VECTOR_ELT(parameters, 0, Rf_ScalarInteger(selected_component));
+      SET_VECTOR_ELT(parameter_objects, fold - 1, parameters);
+    }
+    const double accuracy = [&] {
+      long double correct = 0.0L;
+      for (std::size_t row = 0; row < samples; ++row) {
+        correct += prediction[row] == INTEGER(label_values)[row] ? 1.0L : 0.0L;
+      }
+      return static_cast<double>(correct / samples);
+    }();
+    const double balanced = fastpls::core::cv_detail::balanced_accuracy(
+      INTEGER(label_values), prediction.data(), nullptr,
+      samples, class_count
+    );
+    const auto finite_mean = [](const std::vector<double>& values) {
+      long double total = 0.0L;
+      std::size_t count = 0;
+      for (const double value : values) {
+        if (std::isfinite(value)) {
+          total += value;
+          ++count;
+        }
+      }
+      return count > 0 ? static_cast<double>(total / count) : NA_REAL;
+    };
+    std::copy(
+      prediction.begin(), prediction.end(),
+      run_predictions.begin() + static_cast<std::ptrdiff_t>(run * samples)
+    );
+    accuracies[run] = accuracy;
+    balanced_accuracies[run] = balanced;
+    q2_values[run] = finite_mean(fold_q2);
+    r2_values[run] = finite_mean(fold_r2);
+    SEXP run_object = named_list(protect, {
+      "Ypred", "pred", "fold", "best_ncomp", "best_parameters", "inner",
+      "metric_name", "metric_value", "accuracy", "balanced_accuracy",
+      "Q2Y", "R2Y", "RMSD", "fold_Q2Y", "fold_R2Y"
+    });
+    SEXP prediction_object = protect.add(integer_predictions(prediction));
+    SET_VECTOR_ELT(run_object, 0, prediction_object);
+    SET_VECTOR_ELT(run_object, 1, prediction_object);
+    SET_VECTOR_ELT(run_object, 2, integer_predictions(
+      std::vector<int>(outer, outer + samples)
+    ));
+    SET_VECTOR_ELT(run_object, 3, integer_predictions(best_components));
+    SET_VECTOR_ELT(run_object, 4, parameter_objects);
+    SET_VECTOR_ELT(run_object, 5, inner_objects);
+    const char* metric_name = selection_metric == 2 ?
+      "balanced_accuracy" : selection_metric == 3 ? "q2" : "accuracy";
+    SET_VECTOR_ELT(run_object, 6, Rf_mkString(metric_name));
+    SET_VECTOR_ELT(run_object, 7, Rf_ScalarReal(
+      selection_metric == 2 ? balanced : selection_metric == 3 ?
+        finite_mean(fold_q2) : accuracy
+    ));
+    SET_VECTOR_ELT(run_object, 8, Rf_ScalarReal(accuracy));
+    SET_VECTOR_ELT(run_object, 9, Rf_ScalarReal(balanced));
+    SET_VECTOR_ELT(run_object, 10, Rf_ScalarReal(finite_mean(fold_q2)));
+    SET_VECTOR_ELT(run_object, 11, Rf_ScalarReal(finite_mean(fold_r2)));
+    SET_VECTOR_ELT(run_object, 12, Rf_ScalarReal(NA_REAL));
+    SET_VECTOR_ELT(run_object, 13, numeric_vector(fold_q2));
+    SET_VECTOR_ELT(run_object, 14, numeric_vector(fold_r2));
+    SET_VECTOR_ELT(run_results, run, run_object);
+  }
+  std::vector<double> votes(samples * class_count, 0.0);
+  std::vector<int> aggregate_prediction(samples, NA_INTEGER);
+  for (std::size_t run = 0; run < runs; ++run) {
+    for (std::size_t row = 0; row < samples; ++row) {
+      const int value = run_predictions[run * samples + row];
+      if (value >= 1 && static_cast<std::size_t>(value) <= class_count) {
+        votes[row + static_cast<std::size_t>(value - 1) * samples] += 1.0;
+      }
+    }
+  }
+  for (std::size_t row = 0; row < samples; ++row) {
+    double best = 0.0;
+    for (std::size_t class_index = 0; class_index < class_count;
+         ++class_index) {
+      const double value = votes[row + class_index * samples];
+      if (value > best) {
+        best = value;
+        aggregate_prediction[row] = static_cast<int>(class_index + 1);
+      }
+    }
+  }
+  SEXP aggregate = named_list(protect, {
+    "Ypred", "vote_counts", "accuracy", "balanced_accuracy", "Q2Y",
+    "R2Y", "RMSD", "metric_name", "bcomp", "repeated_summary"
+  });
+  SET_VECTOR_ELT(aggregate, 0, integer_predictions(aggregate_prediction));
+  SEXP vote_matrix = protect.add(Rf_allocMatrix(
+    REALSXP, static_cast<int>(samples), static_cast<int>(class_count)
+  ));
+  std::copy(votes.begin(), votes.end(), REAL(vote_matrix));
+  SET_VECTOR_ELT(aggregate, 1, vote_matrix);
+  SET_VECTOR_ELT(aggregate, 2, numeric_vector(accuracies));
+  SET_VECTOR_ELT(aggregate, 3, numeric_vector(balanced_accuracies));
+  SET_VECTOR_ELT(aggregate, 4, numeric_vector(q2_values));
+  SET_VECTOR_ELT(aggregate, 5, numeric_vector(r2_values));
+  SET_VECTOR_ELT(aggregate, 6, numeric_vector(rmsd_values));
+  SEXP metric_names = protect.add(Rf_allocVector(STRSXP, runs));
+  const char* aggregate_metric_name = selection_metric == 2 ?
+    "balanced_accuracy" : selection_metric == 3 ? "q2" : "accuracy";
+  for (std::size_t run = 0; run < runs; ++run) {
+    SET_STRING_ELT(
+      metric_names, static_cast<R_xlen_t>(run),
+      Rf_mkChar(aggregate_metric_name)
+    );
+  }
+  SET_VECTOR_ELT(aggregate, 7, metric_names);
+  SET_VECTOR_ELT(
+    aggregate, 8, Rf_ScalarInteger(modal_component(selected_components))
+  );
+  SET_VECTOR_ELT(
+    aggregate, 9, runs > 1 ? repeated_run_summary(
+      protect, r2_values, q2_values, rmsd_values
+    ) : R_NilValue
+  );
+  SET_VECTOR_ELT(output, 1, aggregate);
+  return output;
+}
+
+template<class T, class Backend>
+SEXP nested_regression_result(
+    fastpls::core::ConstMatrixView<T> predictors,
+    fastpls::core::ConstMatrixView<T> responses,
+    SEXP outer_folds, SEXP inner_folds, SEXP components,
+    int scaling, int method, int selection_metric,
+    int oversample, int power, unsigned int seed,
+    std::size_t orthogonal_components,
+    const fastpls::core::KernelCvControls& kernel_controls,
+    Backend& backend) {
+  ProtectStack protect;
+  SEXP component_values = protect.add(Rf_coerceVector(components, INTSXP));
+  if (!Rf_isMatrix(outer_folds) || TYPEOF(outer_folds) != INTSXP ||
+      TYPEOF(inner_folds) != VECSXP || XLENGTH(component_values) < 1) {
+    throw std::invalid_argument("nested regression CV inputs are invalid");
+  }
+  const SEXP dimensions = Rf_getAttrib(outer_folds, R_DimSymbol);
+  const std::size_t samples = static_cast<std::size_t>(INTEGER(dimensions)[0]);
+  const std::size_t runs = static_cast<std::size_t>(INTEGER(dimensions)[1]);
+  if (samples != predictors.rows() || samples != responses.rows() ||
+      XLENGTH(inner_folds) != static_cast<R_xlen_t>(runs)) {
+    throw std::invalid_argument("nested regression fold plan is invalid");
+  }
+  const int maximum_component = *std::max_element(
+    INTEGER(component_values),
+    INTEGER(component_values) + XLENGTH(component_values)
+  );
+  fastpls::core::PlssvdControls base_plssvd;
+  base_plssvd.rsvd.oversample = oversample;
+  base_plssvd.rsvd.power = power;
+  base_plssvd.rsvd.seed = seed;
+  SEXP output = named_list(protect, {"results", "aggregate"});
+  SEXP run_results = protect.add(Rf_allocVector(VECSXP, runs));
+  SET_VECTOR_ELT(output, 0, run_results);
+  fastpls::core::Matrix<double> aggregate_prediction(
+    samples, responses.columns()
+  );
+  std::fill_n(
+    aggregate_prediction.data(), aggregate_prediction.size(), 0.0
+  );
+  std::vector<int> selected_components;
+  std::vector<double> q2_values(runs, NA_REAL);
+  std::vector<double> r2_values(runs, NA_REAL);
+  std::vector<double> rmsd_values(runs, NA_REAL);
+  selected_components.reserve(runs * 10);
+  for (std::size_t run = 0; run < runs; ++run) {
+    const int* outer = INTEGER(outer_folds) + run * samples;
+    int outer_count = 0;
+    for (std::size_t row = 0; row < samples; ++row) {
+      outer_count = std::max(outer_count, outer[row]);
+    }
+    SEXP run_inner = VECTOR_ELT(inner_folds, run);
+    if (TYPEOF(run_inner) != VECSXP || XLENGTH(run_inner) != outer_count) {
+      throw std::invalid_argument("nested regression inner folds are invalid");
+    }
+    fastpls::core::Matrix<T> prediction(samples, responses.columns());
+    std::vector<int> best_components(static_cast<std::size_t>(outer_count));
+    std::vector<double> fold_r2(static_cast<std::size_t>(outer_count), NA_REAL);
+    SEXP inner_objects = protect.add(Rf_allocVector(VECSXP, outer_count));
+    SEXP parameter_objects = protect.add(Rf_allocVector(VECSXP, outer_count));
+    for (int fold = 1; fold <= outer_count; ++fold) {
+      const auto inner_full = integer_vector(
+        VECTOR_ELT(run_inner, fold - 1), samples, "nested inner fold"
+      );
+      std::vector<std::size_t> training_rows;
+      training_rows.reserve(samples);
+      for (std::size_t row = 0; row < samples; ++row) {
+        if (outer[row] != fold) training_rows.push_back(row);
+      }
+      auto inner_predictors = fastpls::core::cv_detail::gather_rows<T>(
+        predictors, training_rows
+      );
+      auto inner_responses = fastpls::core::cv_detail::gather_rows<T>(
+        responses, training_rows
+      );
+      std::vector<int> inner(training_rows.size());
+      for (std::size_t index = 0; index < training_rows.size(); ++index) {
+        inner[index] = inner_full[training_rows[index]];
+      }
+      auto inner_plssvd = base_plssvd;
+      inner_plssvd.rsvd.seed = seed + 1000U * (run + 1U) +
+        static_cast<unsigned int>(fold);
+      auto inner_simpls = simpls_controls(
+        training_rows.size(), predictors.columns(), responses.columns(),
+        static_cast<std::size_t>(maximum_component), false,
+        oversample, power, inner_plssvd.rsvd.seed
+      );
+      const auto inner_result = fastpls::core::cross_validate_regression<T>(
+        inner_predictors.view(), inner_responses.view(), inner.data(),
+        INTEGER(component_values),
+        static_cast<std::size_t>(XLENGTH(component_values)),
+        static_cast<fastpls::core::PredictorScaling>(scaling),
+        static_cast<fastpls::core::LinearPlsFamily>(method),
+        static_cast<fastpls::core::RegressionMetric>(selection_metric),
+        inner_plssvd, inner_simpls, backend, false,
+        orthogonal_components, kernel_controls, false
+      );
+      const bool minimize = selection_metric == 4;
+      const std::size_t selected = fastpls::core::cv_detail::best_metric_index(
+        inner_result.metrics, minimize
+      );
+      const int selected_component = INTEGER(component_values)[selected];
+      best_components[static_cast<std::size_t>(fold - 1)] = selected_component;
+      selected_components.push_back(selected_component);
+      std::vector<int> holdout(samples, -1);
+      for (std::size_t row = 0; row < samples; ++row) {
+        if (outer[row] == fold) holdout[row] = 1;
+      }
+      auto outer_plssvd = base_plssvd;
+      outer_plssvd.rsvd.seed = seed + 2000U * (run + 1U) +
+        static_cast<unsigned int>(fold);
+      auto outer_simpls = simpls_controls(
+        training_rows.size(), predictors.columns(), responses.columns(),
+        static_cast<std::size_t>(selected_component), false,
+        oversample, power, outer_plssvd.rsvd.seed
+      );
+      const auto outer_result = fastpls::core::cross_validate_regression<T>(
+        predictors, responses, holdout.data(), &selected_component, 1,
+        static_cast<fastpls::core::PredictorScaling>(scaling),
+        static_cast<fastpls::core::LinearPlsFamily>(method),
+        static_cast<fastpls::core::RegressionMetric>(selection_metric),
+        outer_plssvd, outer_simpls, backend, true,
+        orthogonal_components, kernel_controls, true
+      );
+      for (std::size_t row = 0; row < samples; ++row) {
+        if (outer[row] != fold) continue;
+        for (std::size_t column = 0; column < responses.columns(); ++column) {
+          prediction(row, column) = outer_result.predictions[0](row, column);
+        }
+      }
+      if (outer_result.fold_training_r2.size() > 0) {
+        fold_r2[static_cast<std::size_t>(fold - 1)] =
+          outer_result.fold_training_r2(0, 0);
+      }
+      SEXP inner_object = named_list(protect, {
+        "ncomp", "metric_value", "Q2Y", "RMSD", "CV_R2",
+        "best_ncomp", "best_fitted", "selection_metric"
+      });
+      SET_VECTOR_ELT(inner_object, 0, component_values);
+      SET_VECTOR_ELT(inner_object, 1, numeric_vector(inner_result.metrics));
+      SET_VECTOR_ELT(inner_object, 2, numeric_vector(inner_result.q2));
+      SET_VECTOR_ELT(inner_object, 3, numeric_vector(inner_result.rmsd));
+      SET_VECTOR_ELT(inner_object, 4, numeric_vector(inner_result.observed_r2));
+      SET_VECTOR_ELT(inner_object, 5, Rf_ScalarInteger(selected_component));
+      SET_VECTOR_ELT(inner_object, 6, Rf_ScalarInteger(selected + 1));
+      const char* inner_metric_name = selection_metric == 4 ? "rmsd" :
+        selection_metric == 3 ? "q2" : "r2";
+      SET_VECTOR_ELT(inner_object, 7, Rf_mkString(inner_metric_name));
+      SET_VECTOR_ELT(inner_objects, fold - 1, inner_object);
+      SEXP parameters = named_list(protect, {"ncomp"});
+      SET_VECTOR_ELT(parameters, 0, Rf_ScalarInteger(selected_component));
+      SET_VECTOR_ELT(parameter_objects, fold - 1, parameters);
+    }
+    const double q2 = outer_regression_q2<T>(
+      responses, prediction.view(), outer
+    );
+    const auto evaluation = fastpls::core::regression_metrics<T>(
+      responses, prediction.view(), q2
+    );
+    const auto finite_mean = [](const std::vector<double>& values) {
+      long double total = 0.0L;
+      std::size_t count = 0;
+      for (const double value : values) {
+        if (std::isfinite(value)) {
+          total += value;
+          ++count;
+        }
+      }
+      return count > 0 ? static_cast<double>(total / count) : NA_REAL;
+    };
+    const double metric_value = selection_metric == 4 ? evaluation.values[3] :
+      selection_metric == 3 ? q2 : evaluation.values[1];
+    q2_values[run] = q2;
+    r2_values[run] = finite_mean(fold_r2);
+    rmsd_values[run] = evaluation.values[3];
+    for (std::size_t index = 0; index < prediction.size(); ++index) {
+      aggregate_prediction.data()[index] +=
+        static_cast<double>(prediction.data()[index]) /
+        static_cast<double>(runs);
+    }
+    SEXP run_object = named_list(protect, {
+      "Ypred", "pred", "fold", "best_ncomp", "best_parameters", "inner",
+      "metric_name", "metric_value", "Q2Y", "R2Y", "RMSD", "fold_R2Y"
+    });
+    SEXP prediction_object = protect.add(numeric_matrix_cast(prediction));
+    SET_VECTOR_ELT(run_object, 0, prediction_object);
+    SET_VECTOR_ELT(run_object, 1, prediction_object);
+    SET_VECTOR_ELT(run_object, 2, integer_predictions(
+      std::vector<int>(outer, outer + samples)
+    ));
+    SET_VECTOR_ELT(run_object, 3, integer_predictions(best_components));
+    SET_VECTOR_ELT(run_object, 4, parameter_objects);
+    SET_VECTOR_ELT(run_object, 5, inner_objects);
+    const char* metric_name = selection_metric == 4 ? "rmsd" :
+      selection_metric == 3 ? "q2" : "r2";
+    SET_VECTOR_ELT(run_object, 6, Rf_mkString(metric_name));
+    SET_VECTOR_ELT(run_object, 7, Rf_ScalarReal(metric_value));
+    SET_VECTOR_ELT(run_object, 8, Rf_ScalarReal(q2));
+    SET_VECTOR_ELT(run_object, 9, Rf_ScalarReal(finite_mean(fold_r2)));
+    SET_VECTOR_ELT(run_object, 10, Rf_ScalarReal(evaluation.values[3]));
+    SET_VECTOR_ELT(run_object, 11, numeric_vector(fold_r2));
+    SET_VECTOR_ELT(run_results, run, run_object);
+  }
+  SEXP aggregate = named_list(protect, {
+    "Ypred", "Q2Y", "R2Y", "RMSD", "metric_name", "bcomp",
+    "repeated_summary"
+  });
+  SET_VECTOR_ELT(aggregate, 0, numeric_matrix(aggregate_prediction));
+  SET_VECTOR_ELT(aggregate, 1, numeric_vector(q2_values));
+  SET_VECTOR_ELT(aggregate, 2, numeric_vector(r2_values));
+  SET_VECTOR_ELT(aggregate, 3, numeric_vector(rmsd_values));
+  SEXP metric_names = protect.add(Rf_allocVector(STRSXP, runs));
+  const char* aggregate_metric_name = selection_metric == 4 ? "rmsd" :
+    selection_metric == 3 ? "q2" : "r2";
+  for (std::size_t run = 0; run < runs; ++run) {
+    SET_STRING_ELT(
+      metric_names, static_cast<R_xlen_t>(run),
+      Rf_mkChar(aggregate_metric_name)
+    );
+  }
+  SET_VECTOR_ELT(aggregate, 4, metric_names);
+  SET_VECTOR_ELT(
+    aggregate, 5, Rf_ScalarInteger(modal_component(selected_components))
+  );
+  SET_VECTOR_ELT(
+    aggregate, 6, runs > 1 ? repeated_run_summary(
+      protect, r2_values, q2_values, rmsd_values
+    ) : R_NilValue
+  );
+  SET_VECTOR_ELT(output, 1, aggregate);
   return output;
 }
 
@@ -1779,6 +2430,16 @@ extern "C" SEXP _fastPLS_has_cuda() {
 
 extern "C" SEXP _fastPLS_has_metal() {
   return Rf_ScalarLogical(fastpls_svd::has_metal_backend());
+}
+
+extern "C" SEXP _fastPLS_blas_backend_cpp() {
+#if defined(FASTPLS_USE_ACCELERATE)
+  return Rf_mkString("Accelerate");
+#elif defined(FASTPLS_USE_OPENBLAS)
+  return Rf_mkString("OpenBLAS");
+#else
+  return Rf_mkString("R BLAS/LAPACK");
+#endif
 }
 
 extern "C" SEXP _fastPLS_simpls_cache_predictor_crossprod(
@@ -1992,6 +2653,136 @@ extern "C" SEXP _fastPLS_cv_folds_core_cpp(
     }
     PutRNGstate();
     return integer_predictions(result);
+  });
+}
+
+extern "C" SEXP _fastPLS_pls_double_cv_core_cpp(
+    SEXP predictors, SEXP response, SEXP class_count, SEXP outer_folds,
+    SEXP inner_folds, SEXP components, SEXP scaling, SEXP method,
+    SEXP classifier_metric, SEXP selection_metric, SEXP north, SEXP kernel,
+    SEXP gamma, SEXP degree, SEXP offset, SEXP oversample, SEXP power,
+    SEXP seed, SEXP backend, SEXP classification) {
+  return translate_exceptions("compiled nested cross-validation", [&] {
+    const int scaling_code = Rf_asInteger(scaling);
+    const int method_code = Rf_asInteger(method);
+    const int classifier_metric_code = Rf_asInteger(classifier_metric);
+    const int selection_code = Rf_asInteger(selection_metric);
+    const int backend_code = Rf_asInteger(backend);
+    const int classification_code = Rf_asLogical(classification);
+    const int orthogonal = method_code == 4 ? Rf_asInteger(north) : 0;
+    const int oversample_count = Rf_asInteger(oversample);
+    const int power_count = Rf_asInteger(power);
+    const int seed_value = Rf_asInteger(seed);
+    if (scaling_code < 1 || scaling_code > 3 ||
+        (method_code != 1 && method_code != 3 && method_code != 4 &&
+         method_code != 5) ||
+        (backend_code != 0 && backend_code != 2) ||
+        classification_code == NA_LOGICAL || oversample_count < 0 ||
+        power_count < 0 || seed_value == NA_INTEGER ||
+        (method_code == 4 && orthogonal < 1)) {
+      throw std::invalid_argument("compiled nested CV controls are invalid");
+    }
+    fastpls::core::KernelCvControls kernel_controls;
+    if (method_code == 5) {
+      kernel_controls = kernel_cv_controls(kernel, gamma, degree, offset);
+    }
+    const bool float32 = Rf_isS4(predictors);
+    if (backend_code == 2 && !fastpls_svd::has_metal_backend()) {
+      throw std::runtime_error(
+        "Metal is unavailable; no CPU fallback is performed"
+      );
+    }
+    if (classification_code == TRUE) {
+      const int classes = Rf_asInteger(class_count);
+      if (classes < 2 || classifier_metric_code < 0 ||
+          classifier_metric_code > 1 || selection_code < 1 ||
+          selection_code > 3) {
+        throw std::invalid_argument(
+          "compiled nested classification controls are invalid"
+        );
+      }
+      if (float32) {
+        const auto x = float_matrix_from_s4(predictors, "Xdata");
+        if (backend_code == 2) {
+          RoutedLinearAlgebraF32 linear_algebra(
+            2, x.rows(), x.columns(), static_cast<std::size_t>(classes)
+          );
+          return nested_classification_result<float>(
+            x.view(), response, static_cast<std::size_t>(classes),
+            outer_folds, inner_folds, components, scaling_code, method_code,
+            classifier_metric_code, selection_code, oversample_count,
+            power_count, static_cast<unsigned int>(seed_value),
+            static_cast<std::size_t>(orthogonal), kernel_controls,
+            linear_algebra
+          );
+        }
+        fastpls::runtime::CpuLinearAlgebraF32 linear_algebra;
+        return nested_classification_result<float>(
+          x.view(), response, static_cast<std::size_t>(classes),
+          outer_folds, inner_folds, components, scaling_code, method_code,
+          classifier_metric_code, selection_code, oversample_count,
+          power_count, static_cast<unsigned int>(seed_value),
+          static_cast<std::size_t>(orthogonal), kernel_controls,
+          linear_algebra
+        );
+      }
+      if (backend_code == 2) {
+        throw std::invalid_argument(
+          "Metal nested CV requires float32 input"
+        );
+      }
+      const auto x = numeric_matrix_view(predictors, "Xdata");
+      fastpls::runtime::CpuLinearAlgebraF64 linear_algebra;
+      return nested_classification_result<double>(
+        x, response, static_cast<std::size_t>(classes), outer_folds,
+        inner_folds, components, scaling_code, method_code,
+        classifier_metric_code, selection_code, oversample_count,
+        power_count, static_cast<unsigned int>(seed_value),
+        static_cast<std::size_t>(orthogonal), kernel_controls, linear_algebra
+      );
+    }
+    if (classifier_metric_code < 2 || classifier_metric_code > 4 ||
+        selection_code < 2 || selection_code > 4) {
+      throw std::invalid_argument(
+        "compiled nested regression controls are invalid"
+      );
+    }
+    if (float32) {
+      const auto x = float_matrix_from_s4(predictors, "Xdata");
+      const auto y = float_matrix_from_s4(response, "Ydata");
+      if (backend_code == 2) {
+        RoutedLinearAlgebraF32 linear_algebra(
+          2, x.rows(), x.columns(), y.columns()
+        );
+        return nested_regression_result<float>(
+          x.view(), y.view(), outer_folds, inner_folds, components,
+          scaling_code, method_code, selection_code, oversample_count,
+          power_count, static_cast<unsigned int>(seed_value),
+          static_cast<std::size_t>(orthogonal), kernel_controls,
+          linear_algebra
+        );
+      }
+      fastpls::runtime::CpuLinearAlgebraF32 linear_algebra;
+      return nested_regression_result<float>(
+        x.view(), y.view(), outer_folds, inner_folds, components,
+        scaling_code, method_code, selection_code, oversample_count,
+          power_count, static_cast<unsigned int>(seed_value),
+          static_cast<std::size_t>(orthogonal), kernel_controls,
+          linear_algebra
+      );
+    }
+    if (backend_code == 2) {
+      throw std::invalid_argument("Metal nested CV requires float32 input");
+    }
+    const auto x = numeric_matrix_view(predictors, "Xdata");
+    const auto y = numeric_matrix_view(response, "Ydata");
+    fastpls::runtime::CpuLinearAlgebraF64 linear_algebra;
+    return nested_regression_result<double>(
+      x, y, outer_folds, inner_folds, components, scaling_code,
+      method_code, selection_code, oversample_count, power_count,
+      static_cast<unsigned int>(seed_value),
+      static_cast<std::size_t>(orthogonal), kernel_controls, linear_algebra
+    );
   });
 }
 

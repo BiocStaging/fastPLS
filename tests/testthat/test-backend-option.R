@@ -323,6 +323,24 @@ test_that("model-aware prediction does not fall back from an unavailable backend
   )
 })
 
+test_that("omitted prediction backend follows the session configuration", {
+  old_option <- getOption("backend", NULL)
+  on.exit(options(backend = old_option), add = TRUE)
+  model <- list(predict_backend = "cpu_flash", ncomp = 1L, m = 1L)
+  X <- matrix(0, 1L, 1L)
+
+  options(backend = "cpu")
+  expect_identical(
+    fastPLS:::.prediction_route(model, X, NULL, NULL)$selected,
+    "cpu"
+  )
+
+  expect_identical(
+    fastPLS:::.prediction_route(model, X, "auto", NULL)$selected,
+    "cpu"
+  )
+})
+
 test_that("family prediction wrappers reject unavailable accelerators early", {
   unavailable <- if (!isTRUE(has_cuda())) {
     "cuda"

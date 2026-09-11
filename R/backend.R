@@ -8,9 +8,10 @@
 #' linked BLAS and OpenMP runtimes. Matrix operations can use those threads
 #' when the installed numerical library supports runtime thread control;
 #' sequential PLS deflation steps remain serial. macOS builds use Apple
-#' Accelerate by default. Linux and Windows builds require OpenBLAS, discovered
-#' through `OPENBLAS_ROOT`, `pkg-config`, or Rtools. Installation fails
-#' explicitly when OpenBLAS is unavailable.
+#' Accelerate by default. Linux and Windows builds prefer OpenBLAS when it is
+#' discovered through `OPENBLAS_ROOT`, `pkg-config`, or Rtools, and otherwise
+#' use the BLAS/LAPACK supplied by R. Setting `FASTPLS_USE_OPENBLAS=1` makes
+#' OpenBLAS mandatory for that installation.
 #'
 #' @param backend Optional backend: `"cpu"`, `"cuda"`, or `"metal"`. The
 #'   Metal route is a float32 Apple-silicon PLS route
@@ -45,6 +46,27 @@ fastPLS_backend <- function(backend = NULL) {
     old <- getOption("backend", NULL)
     options(backend = backend)
     invisible(old)
+}
+
+#' Report the numerical library selected when fastPLS was compiled
+#'
+#' This reports the CPU matrix library selected by the package configuration,
+#' rather than attempting to infer a library from the current R session.
+#' macOS builds normally report `"Accelerate"`. Linux and Windows builds report
+#' `"OpenBLAS"` when OpenBLAS was found or explicitly requested, and
+#' `"R BLAS/LAPACK"` when the package used R's portable fallback.
+#'
+#' For reproducible performance benchmarks on Linux or Windows, install with
+#' `FASTPLS_USE_OPENBLAS=1` and verify that this function returns
+#' `"OpenBLAS"` before running the analysis.
+#'
+#' @return A single character string: `"Accelerate"`, `"OpenBLAS"`, or
+#'   `"R BLAS/LAPACK"`.
+#' @examples
+#' fastPLS_blas()
+#' @export
+fastPLS_blas <- function() {
+    blas_backend_cpp()
 }
 
 .fastpls_validate_backend <- function(backend, label = "backend") {

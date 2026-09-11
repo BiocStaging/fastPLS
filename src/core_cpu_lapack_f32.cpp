@@ -13,8 +13,7 @@
 #include <string>
 #include <vector>
 
-#if defined(FASTPLS_USE_ACCELERATE) || defined(FASTPLS_USE_OPENBLAS) || \
-    (!defined(_WIN32) && !defined(__APPLE__))
+#if defined(FASTPLS_USE_ACCELERATE) || defined(FASTPLS_USE_OPENBLAS)
 #define FASTPLS_HAS_F32_LAPACK 1
 #endif
 

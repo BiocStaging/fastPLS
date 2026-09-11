@@ -83,6 +83,43 @@ test_that("double CV reports outer-fold-specific Q2", {
 
   expect_equal(unname(cv$Q2Y[[1L]]), expected, tolerance = 1e-10)
   expect_match(cv$metrics$definitions$Q2Y, "outer-training response mean")
+  expect_equal(
+    cv$metrics$cross_validated[[1L]]$metrics$Q2,
+    cv$Q2Y[[1L]],
+    tolerance = 1e-10
+  )
+  expect_equal(
+    cv$metrics$aggregate$metrics$Q2,
+    cv$Q2Y[[1L]],
+    tolerance = 1e-10
+  )
+})
+
+test_that("double CV response-wise Q2 uses fold-training means", {
+  set.seed(2114)
+  X <- matrix(rnorm(60 * 5), nrow = 60, ncol = 5)
+  Y <- cbind(
+    first = 0.6 * X[, 1] + rnorm(60, sd = 0.2),
+    second = -0.4 * X[, 2] + rnorm(60, sd = 0.3)
+  )
+  cv <- pls.double.cv(
+    X, Y, ncomp = 1:2, kfold_inner = 3, kfold_outer = 3,
+    method = "simpls", backend = "cpu", bycol = TRUE, seed = 19
+  )
+  run <- cv$results[[1L]]
+  expected <- vapply(seq_len(ncol(Y)), function(j) {
+    fastPLS:::.fastpls_fold_q2_path(
+      Y[, j, drop = FALSE],
+      run$Ypred[, j, drop = FALSE],
+      run$fold
+    )[[1L]]
+  }, numeric(1L))
+
+  expect_equal(
+    cv$metrics$cross_validated[[1L]]$per_response$Q2,
+    expected,
+    tolerance = 1e-10
+  )
 })
 
 test_that("internal Q2 calculation requires an explicit reference", {

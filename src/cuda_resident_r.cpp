@@ -8,8 +8,10 @@
 
 #include <algorithm>
 #include <climits>
+#include <cmath>
 #include <cstddef>
 #include <cstring>
+#include <limits>
 #include <new>
 #include <vector>
 
@@ -110,6 +112,78 @@ bool scalar_logical(SEXP value, const char* name) {
     Rf_error("%s must be TRUE or FALSE", name);
   }
   return result == TRUE;
+}
+
+int best_metric_index(const double* values, int size, bool minimize) {
+  int selected = 0;
+  bool found = false;
+  for (int index = 0; index < size; ++index) {
+    if (!std::isfinite(values[index])) continue;
+    if (!found || (minimize ? values[index] < values[selected] :
+                              values[index] > values[selected])) {
+      selected = index;
+      found = true;
+    }
+  }
+  return selected;
+}
+
+SEXP classification_q2_path(
+    SEXP labels, SEXP folds, SEXP score_array, int rows, int classes,
+    int prefixes) {
+  if (score_array == R_NilValue) return R_NilValue;
+  int fold_count = 0;
+  for (int row = 0; row < rows; ++row) {
+    fold_count = std::max(fold_count, INTEGER(folds)[row]);
+  }
+  std::vector<int> totals(classes, 0);
+  std::vector<int> fold_sizes(fold_count, 0);
+  std::vector<int> fold_counts(
+    static_cast<std::size_t>(fold_count) * classes, 0
+  );
+  for (int row = 0; row < rows; ++row) {
+    const int label = INTEGER(labels)[row] - 1;
+    const int fold = INTEGER(folds)[row] - 1;
+    ++totals[label];
+    ++fold_sizes[fold];
+    ++fold_counts[static_cast<std::size_t>(fold) * classes + label];
+  }
+  long double tss = 0.0L;
+  for (int row = 0; row < rows; ++row) {
+    const int observed = INTEGER(labels)[row] - 1;
+    const int fold = INTEGER(folds)[row] - 1;
+    const long double train_count = rows - fold_sizes[fold];
+    for (int class_index = 0; class_index < classes; ++class_index) {
+      const long double mean = (
+        totals[class_index] -
+        fold_counts[static_cast<std::size_t>(fold) * classes + class_index]
+      ) / train_count;
+      const long double value = class_index == observed ? 1.0L : 0.0L;
+      const long double centered = value - mean;
+      tss += centered * centered;
+    }
+  }
+  SEXP result = Rf_allocVector(REALSXP, prefixes);
+  for (int prefix = 0; prefix < prefixes; ++prefix) {
+    long double press = 0.0L;
+    const std::size_t prefix_offset =
+      static_cast<std::size_t>(rows) * classes * prefix;
+    for (int class_index = 0; class_index < classes; ++class_index) {
+      const std::size_t class_offset = prefix_offset +
+        static_cast<std::size_t>(rows) * class_index;
+      for (int row = 0; row < rows; ++row) {
+        const long double observed =
+          INTEGER(labels)[row] - 1 == class_index ? 1.0L : 0.0L;
+        const long double residual = observed -
+          static_cast<long double>(REAL(score_array)[class_offset + row]);
+        press += residual * residual;
+      }
+    }
+    REAL(result)[prefix] = tss > 0.0L ?
+      1.0 - static_cast<double>(press / tss) :
+      std::numeric_limits<double>::quiet_NaN();
+  }
+  return result;
 }
 
 ResidentRModel* checked_state(SEXP object) {
@@ -489,14 +563,23 @@ extern "C" SEXP _fastPLS_cuda_resident_simpls_cv_classification_cpp(
       [](float value) { return static_cast<double>(value); }
     );
   }
-  SEXP output = PROTECT(Rf_allocVector(VECSXP, 6));
+  SEXP q2_values = R_NilValue;
+  if (retain_scores) {
+    q2_values = PROTECT(classification_q2_path(
+      labels, folds, score_array, x.rows, classes, prefix_count
+    ));
+    ++protected_count;
+  }
+  const int selected = best_metric_index(REAL(metric), prefix_count, false);
+  SEXP output = PROTECT(Rf_allocVector(VECSXP, 9));
   ++protected_count;
-  SEXP names = PROTECT(Rf_allocVector(STRSXP, 6));
+  SEXP names = PROTECT(Rf_allocVector(STRSXP, 9));
   ++protected_count;
-  const char* const field_names[6] = {
-    "fold", "status", "ncomp", "metric_value", "class_pred", "Ypred"
+  const char* const field_names[9] = {
+    "fold", "status", "ncomp", "metric_value", "class_pred", "Ypred",
+    "Q2Y", "native_best_index", "native_best_ncomp"
   };
-  for (int index = 0; index < 6; ++index) {
+  for (int index = 0; index < 9; ++index) {
     SET_STRING_ELT(names, index, Rf_mkChar(field_names[index]));
   }
   SET_VECTOR_ELT(output, 0, folds);
@@ -505,6 +588,11 @@ extern "C" SEXP _fastPLS_cuda_resident_simpls_cv_classification_cpp(
   SET_VECTOR_ELT(output, 3, metric);
   SET_VECTOR_ELT(output, 4, predictions);
   SET_VECTOR_ELT(output, 5, score_array);
+  SET_VECTOR_ELT(output, 6, q2_values);
+  SET_VECTOR_ELT(output, 7, Rf_ScalarInteger(selected + 1));
+  SET_VECTOR_ELT(output, 8, Rf_ScalarInteger(
+    INTEGER(components)[selected]
+  ));
   Rf_setAttrib(output, R_NamesSymbol, names);
   UNPROTECT(protected_count);
   return output;
@@ -579,15 +667,18 @@ extern "C" SEXP _fastPLS_cuda_resident_simpls_cv_regression_cpp(
     UNPROTECT(protected_count);
     Rf_error("%s", error);
   }
-  SEXP output = PROTECT(Rf_allocVector(VECSXP, 8));
+  const int selected = best_metric_index(
+    REAL(metric_values), prefix_count, metric == 4
+  );
+  SEXP output = PROTECT(Rf_allocVector(VECSXP, 10));
   ++protected_count;
-  SEXP names = PROTECT(Rf_allocVector(STRSXP, 8));
+  SEXP names = PROTECT(Rf_allocVector(STRSXP, 10));
   ++protected_count;
-  const char* const field_names[8] = {
+  const char* const field_names[10] = {
     "fold", "status", "ncomp", "metric_value", "Ypred", "Q2Y", "RMSD",
-    "CV_R2"
+    "CV_R2", "native_best_index", "native_best_ncomp"
   };
-  for (int index = 0; index < 8; ++index) {
+  for (int index = 0; index < 10; ++index) {
     SET_STRING_ELT(names, index, Rf_mkChar(field_names[index]));
   }
   SET_VECTOR_ELT(output, 0, folds);
@@ -598,6 +689,10 @@ extern "C" SEXP _fastPLS_cuda_resident_simpls_cv_regression_cpp(
   SET_VECTOR_ELT(output, 5, q2_values);
   SET_VECTOR_ELT(output, 6, rmsd_values);
   SET_VECTOR_ELT(output, 7, observed_r2_values);
+  SET_VECTOR_ELT(output, 8, Rf_ScalarInteger(selected + 1));
+  SET_VECTOR_ELT(output, 9, Rf_ScalarInteger(
+    INTEGER(components)[selected]
+  ));
   Rf_setAttrib(output, R_NamesSymbol, names);
   UNPROTECT(protected_count);
   return output;
