@@ -164,8 +164,7 @@ test_that("compiled implicit CV preserves the public large-response path", {
     }
 })
 
-test_that("Apple sample-Gram centering preserves wide-response SIMPLS CV", {
-    skip_if_not(identical(Sys.info()[["sysname"]], "Darwin"))
+test_that("sample-Gram centering preserves wide-response SIMPLS CV", {
     set.seed(305)
     observations <- 20L
     predictors <- 9000L
@@ -209,4 +208,31 @@ test_that("Apple sample-Gram centering preserves wide-response SIMPLS CV", {
         5e-7
     )
     expect_equal(cached$Ypred, implicit$Ypred, tolerance = 3e-6)
+})
+
+test_that("CUDA CV honors padded float32 response strides", {
+    skip_if_not(isTRUE(fastPLS:::has_cuda()))
+    set.seed(306)
+    observations <- 18L
+    predictors <- 8L
+    responses <- 2500L
+    latent <- matrix(rnorm(observations * 2L), observations, 2L)
+    X <- float::fl(
+        latent %*% matrix(rnorm(2L * predictors), 2L, predictors)
+    )
+    Y <- float::fl(
+        latent %*% matrix(rnorm(2L * responses), 2L, responses)
+    )
+    common <- list(
+        Xdata = X, Ydata = Y, ncomp = c(1L, 2L), kfold = 2L,
+        method = "plssvd", scaling = "centering", svd.method = "rsvd",
+        rsvd_oversample = 32L, rsvd_power = 5L, seed = 37L, fit = FALSE
+    )
+
+    cpu <- do.call(pls.single.cv, c(common, list(backend = "cpu")))
+    cuda <- do.call(pls.single.cv, c(common, list(backend = "cuda")))
+    expect_identical(cuda$fold, cpu$fold)
+    expect_identical(cuda$best_ncomp, cpu$best_ncomp)
+    expect_equal(cuda$RMSD, cpu$RMSD, tolerance = 1e-3)
+    expect_equal(cuda$Ypred, cpu$Ypred, tolerance = 1e-2)
 })

@@ -1,3 +1,13 @@
+# fastPLS 0.99.60
+
+* Added a persistent float32 CUDA matrix workspace for compiled
+  cross-validation. Device buffers, the CUDA stream, and the cuBLAS handle are
+  reused across folds; strided padded matrices are transferred correctly with
+  two-dimensional copies. Sample-response Gram matrices use direct
+  `cublasSsyrk` and retain only the lower triangle when that is all the
+  downstream fold extractor consumes. The hybrid Metal route evaluates this
+  host-visible symmetric product with Accelerate SYRK.
+
 # fastPLS 0.99.59
 
 * Added precision- and shape-aware CPU dispatch between GEMM and direct

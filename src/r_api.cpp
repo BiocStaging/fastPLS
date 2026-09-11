@@ -422,6 +422,7 @@ class RoutedLinearAlgebraF32 {
   }
 
   ~RoutedLinearAlgebraF32() {
+    fastpls_svd::cuda_core_workspace_destroy_f32(cuda_workspace_);
     fastpls_svd::metal_sample_gram_workspace_destroy_f32(
       metal_sample_gram_workspace_
     );
@@ -474,6 +475,15 @@ class RoutedLinearAlgebraF32 {
       (vector_product || small_crosscovariance_product ||
        (!training_product && !response_product && !crosscovariance_product)) ?
       0 : backend_;
+    if (operation_backend == 1) {
+      ensure_cuda_workspace();
+      if (fastpls_svd::cuda_core_gemm_into_f32(
+            cuda_workspace_, left, right, transpose_left, transpose_right,
+            output
+          )) {
+        return;
+      }
+    }
     if (operation_backend == 2 && fastpls_svd::metal_core_gemm_into_f32(
           left, right, transpose_left, transpose_right, output
         )) {
@@ -492,6 +502,25 @@ class RoutedLinearAlgebraF32 {
         output.data() + column * output.leading_dimension()
       );
     }
+  }
+
+  void self_gram(fastpls::core::ConstMatrixView<float> input,
+                 bool transpose_input,
+                 fastpls::core::MatrixView<float> output,
+                 bool full_output) const {
+    if (backend_ == 1) {
+      ensure_cuda_workspace();
+      if (fastpls_svd::cuda_core_self_gram_into_f32(
+            cuda_workspace_, input, transpose_input, output, full_output
+          )) {
+        return;
+      }
+    }
+    // The public Metal route is hybrid. Accelerate's SYRK is faster for this
+    // host-visible symmetric product and avoids a Metal command round trip.
+    fastpls::runtime::cpu_self_gram_f32(
+      input, transpose_input, output, full_output
+    );
   }
 
   void gemm_accumulate(
@@ -602,10 +631,17 @@ class RoutedLinearAlgebraF32 {
   }
 
  private:
+  void ensure_cuda_workspace() const {
+    if (cuda_workspace_ == nullptr) {
+      cuda_workspace_ = fastpls_svd::cuda_core_workspace_create_f32();
+    }
+  }
+
   int backend_;
   std::size_t training_rows_;
   std::size_t training_columns_;
   std::size_t response_columns_;
+  mutable void* cuda_workspace_ = nullptr;
   mutable void* metal_sample_gram_workspace_ = nullptr;
   fastpls::runtime::CpuLinearAlgebraF32 host_;
 };
@@ -1420,8 +1456,7 @@ SEXP fit_dense_simpls_operator(
     SEXP components, bool fitted, bool store_scores,
     int oversample, int power,
     unsigned int seed, const char* xprod_mode, Backend& backend,
-    bool array_paths, bool rank_one_massive_operator = true,
-    bool use_sample_response_gram = false) {
+    bool array_paths, bool rank_one_massive_operator = true) {
   ProtectStack protect;
   int maximum_components = 1;
   SEXP effective = capped_simpls_components(
@@ -1453,35 +1488,9 @@ SEXP fit_dense_simpls_operator(
   > projected(initial, controls.components, backend);
   fastpls::core::SimplsWorkspace<T> workspace;
   fastpls::core::OperatorRsvdWorkspace<T> rsvd_workspace;
-  fastpls::core::Matrix<T> sample_gram;
-  if (use_sample_response_gram) {
-    sample_gram.resize(responses.rows(), responses.rows());
-    backend.gemm(
-      responses, responses, false, true, sample_gram.view()
-    );
-    fastpls::core::Matrix<T> response_mean(responses.columns(), 1);
-    T response_mean_square = T(0);
-    for (std::size_t response = 0;
-         response < responses.columns(); ++response) {
-      response_mean(response, 0) = prepared.response_mean[response];
-      response_mean_square += prepared.response_mean[response] *
-        prepared.response_mean[response];
-    }
-    fastpls::core::Matrix<T> response_mean_product(responses.rows(), 1);
-    backend.gemm(
-      responses, response_mean.view(), false, false,
-      response_mean_product.view()
-    );
-    for (std::size_t column = 0; column < sample_gram.columns(); ++column) {
-      for (std::size_t row = 0; row < sample_gram.rows(); ++row) {
-        sample_gram(row, column) -= response_mean_product(row, 0) +
-          response_mean_product(column, 0) - response_mean_square;
-      }
-    }
-  }
   const auto model = fastpls::core::fit_simpls_operator<T>(
     predictors, initial, projected, controls, backend, workspace,
-    rsvd_workspace, sample_gram.view()
+    rsvd_workspace
   );
   if (model.completed_components < controls.components) {
     throw std::runtime_error(

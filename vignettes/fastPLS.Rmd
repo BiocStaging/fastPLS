@@ -194,8 +194,18 @@ SYRK from the linked numerical library according to platform, precision, and
 matrix dimensions. SYRK computes one triangle; the other triangle is generated
 only when required by a later operation. Owned workspaces are aligned, and
 wide response matrices gathered for repeated fold computations use 64-byte
-column alignment. Classification routes operate on compact labels and class
-sums, so they do not allocate a dense one-hot response matrix.
+column alignment. Compiled classification fitting and cross-validation
+products operate on compact labels and class sums, so they do not allocate a
+dense one-hot training-response matrix.
+
+For eligible wide-response SIMPLS cross-validation, the compiled engine forms
+the uncentred sample-response Gram matrix once before the fold loop. Each
+training-fold Gram matrix is recovered from its principal submatrix and exactly
+double-centred, avoiding a materialized centred response matrix. CPU execution
+uses direct `SSYRK` or `DSYRK`; float32 CUDA uses `cublasSsyrk`; and the hybrid
+Metal route uses Accelerate SYRK for this host-visible operation. The raw Gram
+matrix retains only its lower triangle, and fold, output, and device workspaces
+are reused across the cross-validation call.
 
 `backend = "cuda"` uses CUDA-native routines when the package is compiled with
 CUDA and a compatible NVIDIA runtime is available. After input transfer, CUDA

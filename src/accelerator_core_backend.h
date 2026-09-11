@@ -14,6 +14,27 @@ fastpls::core::Matrix<float> cuda_core_gemm_f32(
   bool transpose_right
 );
 
+void* cuda_core_workspace_create_f32();
+
+void cuda_core_workspace_destroy_f32(void* workspace) noexcept;
+
+bool cuda_core_gemm_into_f32(
+  void* workspace,
+  fastpls::core::ConstMatrixView<float> left,
+  fastpls::core::ConstMatrixView<float> right,
+  bool transpose_left,
+  bool transpose_right,
+  fastpls::core::MatrixView<float> output
+);
+
+bool cuda_core_self_gram_into_f32(
+  void* workspace,
+  fastpls::core::ConstMatrixView<float> input,
+  bool transpose_input,
+  fastpls::core::MatrixView<float> output,
+  bool full_output
+);
+
 fastpls::core::Matrix<float> metal_core_gemm_f32(
   fastpls::core::ConstMatrixView<float> left,
   fastpls::core::ConstMatrixView<float> right,

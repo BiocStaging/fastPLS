@@ -21,6 +21,31 @@ fastpls::core::Matrix<float> cuda_core_gemm_f32(
     "CUDA backend requested but this fastPLS build has no CUDA support"
   );
 }
+
+void* cuda_core_workspace_create_f32() {
+  throw std::runtime_error(
+    "CUDA backend requested but this fastPLS build has no CUDA support"
+  );
+}
+
+void cuda_core_workspace_destroy_f32(void*) noexcept {}
+
+bool cuda_core_gemm_into_f32(
+    void*, fastpls::core::ConstMatrixView<float>,
+    fastpls::core::ConstMatrixView<float>, bool, bool,
+    fastpls::core::MatrixView<float>) {
+  throw std::runtime_error(
+    "CUDA backend requested but this fastPLS build has no CUDA support"
+  );
+}
+
+bool cuda_core_self_gram_into_f32(
+    void*, fastpls::core::ConstMatrixView<float>, bool,
+    fastpls::core::MatrixView<float>, bool) {
+  throw std::runtime_error(
+    "CUDA backend requested but this fastPLS build has no CUDA support"
+  );
+}
 #endif
 
 #ifndef FASTPLS_HAS_METAL

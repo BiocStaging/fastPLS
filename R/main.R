@@ -1360,11 +1360,11 @@ if (is.null(trainer) || is.null(model$R_predict) || is.null(model$R_offset)) {
     if (is.array(x) && length(dim(x)) == 3L && dim(x)[3L] >= index) {
         if (length(ncomp) == 1L && index == 1L && dim(x)[3L] == 1L) {
             out <- x
-            dimensions <- dim(x)[1:2]
+            dimensions <- dim(x)[seq_len(2L)]
             dimension_names <- dimnames(x)
             dim(out) <- dimensions
             if (!is.null(dimension_names)) {
-                dimnames(out) <- dimension_names[1:2]
+                dimnames(out) <- dimension_names[seq_len(2L)]
             }
             return(out)
         }
