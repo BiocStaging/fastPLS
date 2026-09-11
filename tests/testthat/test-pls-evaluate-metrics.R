@@ -174,3 +174,45 @@ test_that("single-split permutation p-values are calculated per component", {
   expect_true(all(fit$pval > 0))
   expect_identical(names(fit$pval), names(fit$Q2Y))
 })
+
+test_that("compiled aggregate regression evaluation matches reference formulas", {
+  set.seed(219)
+  observed <- matrix(rnorm(105), 21, 5)
+  predicted <- observed + matrix(rnorm(105, sd = 0.2), 21, 5)
+  training <- matrix(rnorm(155), 31, 5)
+  observed[2, 3] <- NA_real_
+  predicted[5, 4] <- Inf
+
+  keep <- is.finite(observed) & is.finite(predicted)
+  observed_complete <- observed[keep]
+  predicted_complete <- predicted[keep]
+  error <- predicted_complete - observed_complete
+  relative <- abs(error / observed_complete) * 100
+  sse <- sum(error^2)
+  observed_tss <- sum(vapply(seq_len(ncol(observed)), function(column) {
+    column_keep <- keep[, column]
+    values <- observed[column_keep, column]
+    sum((values - mean(values))^2)
+  }, numeric(1)))
+  training_tss <- sum(vapply(seq_len(ncol(observed)), function(column) {
+    column_keep <- keep[, column]
+    sum((observed[column_keep, column] - mean(training[, column]))^2)
+  }, numeric(1)))
+  rmsd <- sqrt(mean(error^2))
+  expected <- c(
+    n = length(error), R2 = 1 - sse / observed_tss,
+    Q2 = 1 - sse / training_tss, RMSD = rmsd, RMSE = rmsd,
+    MAE = mean(abs(error)), bias = mean(error),
+    MRE_percent = median(relative), MAPE_percent = mean(relative),
+    RPD = stats::sd(observed_complete) / rmsd,
+    Pearson_r = stats::cor(observed_complete, predicted_complete),
+    Spearman_r = stats::cor(
+      observed_complete, predicted_complete, method = "spearman"
+    )
+  )
+  actual <- unlist(evaluate(
+    observed, predicted, ytrain = training, bycol = FALSE
+  )$metrics[1, ], use.names = TRUE)
+
+  expect_equal(actual, expected, tolerance = 1e-12)
+})

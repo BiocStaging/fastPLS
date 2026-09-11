@@ -6,14 +6,17 @@
 #include <fastpls/core/classification.hpp>
 #include <fastpls/core/kernels.hpp>
 #include <fastpls/core/lda.hpp>
+#include <fastpls/core/operators.hpp>
 #include <fastpls/core/opls.hpp>
 #include <fastpls/core/plssvd.hpp>
 #include <fastpls/core/simpls.hpp>
+#include <fastpls/core/statistics.hpp>
 #include <fastpls/core/supervised.hpp>
 
 #include <algorithm>
 #include <cmath>
 #include <cstddef>
+#include <cstdlib>
 #include <limits>
 #include <stdexcept>
 #include <vector>
@@ -60,6 +63,10 @@ struct RegressionCvResult {
   std::vector<int> folds;
   std::vector<int> status;
   std::vector<double> metrics;
+  std::vector<double> q2;
+  std::vector<double> rmsd;
+  std::vector<double> observed_r2;
+  std::vector<RegressionMetrics> evaluation;
   std::vector<Matrix<T>> predictions;
 };
 
@@ -69,6 +76,655 @@ struct FoldPartition {
   std::vector<std::size_t> train;
   std::vector<std::size_t> test;
 };
+
+template<class Backend>
+auto configure_backend_problem(Backend& backend, std::size_t rows,
+                               std::size_t predictors,
+                               std::size_t responses, int)
+    -> decltype(
+      backend.configure_problem(rows, predictors, responses), void()
+    ) {
+  backend.configure_problem(rows, predictors, responses);
+}
+
+template<class Backend>
+void configure_backend_problem(Backend&, std::size_t, std::size_t,
+                               std::size_t, long) {}
+
+template<class T>
+void standardize(MatrixView<T> values, const std::vector<T>& center,
+                 const std::vector<T>& scale);
+
+template<class T>
+struct LabelSufficientStatistics {
+  std::vector<long double> predictor_sum;
+  std::vector<long double> predictor_sum_squares;
+  std::vector<long double> class_count;
+  std::vector<long double> class_predictor_sum;
+  std::size_t predictors = 0;
+  std::size_t classes = 0;
+};
+
+template<class T>
+struct DenseSufficientStatistics {
+  std::vector<long double> predictor_sum;
+  std::vector<long double> predictor_sum_squares;
+  std::vector<long double> response_sum;
+  Matrix<T> predictor_response;
+};
+
+inline bool fold_label_statistics_enabled() {
+  const char* value = std::getenv("FASTPLS_CV_CLASS_SUM_CACHE");
+  return value == nullptr || value[0] != '0' || value[1] != '\0';
+}
+
+template<class T>
+bool fold_dense_statistics_enabled(std::size_t predictors,
+                                   std::size_t responses) {
+  const char* value = std::getenv("FASTPLS_CV_FOLD_CROSSCOV_CACHE");
+  if (value != nullptr && value[0] == '0' && value[1] == '\0') {
+    return false;
+  }
+  constexpr std::size_t maximum_bytes = 256ULL * 1024ULL * 1024ULL;
+  if (predictors == 0 || responses == 0 ||
+      predictors > std::numeric_limits<std::size_t>::max() / responses) {
+    return false;
+  }
+  const std::size_t elements = predictors * responses;
+  return elements <= maximum_bytes / sizeof(T);
+}
+
+template<class T>
+bool fold_predictor_gram_enabled(std::size_t predictors) {
+  const char* value = std::getenv("FASTPLS_CV_FOLD_GRAM_CACHE");
+  if (value != nullptr && value[0] == '0' && value[1] == '\0') {
+    return false;
+  }
+  constexpr std::size_t maximum_bytes = 256ULL * 1024ULL * 1024ULL;
+  if (predictors == 0 ||
+      predictors > std::numeric_limits<std::size_t>::max() / predictors) {
+    return false;
+  }
+  return predictors * predictors <= maximum_bytes / sizeof(T);
+}
+
+template<class T>
+bool fold_sample_response_gram_enabled(
+    std::size_t samples, std::size_t responses, std::size_t components,
+    int power, std::size_t folds) {
+#if !defined(FASTPLS_USE_ACCELERATE)
+  // The one-off symmetric product is beneficial with Apple Accelerate for the
+  // wide-response workloads measured here. OpenBLAS and CUDA retain the
+  // faster repeated implicit/resident path rather than paying this setup cost.
+  (void)samples;
+  (void)responses;
+  (void)components;
+  (void)power;
+  (void)folds;
+  return false;
+#else
+  const char* value = std::getenv("FASTPLS_CV_SAMPLE_RESPONSE_GRAM");
+  if (value != nullptr && value[0] == '0' && value[1] == '\0') {
+    return false;
+  }
+  constexpr std::size_t maximum_bytes = 256ULL * 1024ULL * 1024ULL;
+  if (samples < 2 || responses <= samples || components == 0 || folds < 2 ||
+      samples > std::numeric_limits<std::size_t>::max() / samples ||
+      samples * samples > maximum_bytes / sizeof(T)) {
+    return false;
+  }
+
+  // Compare the response-side work of repeated implicit products with one
+  // full response Gram matrix plus fold-local sample-space products. Predictor
+  // products occur in both formulations and therefore cancel from the test.
+  const long double n = static_cast<long double>(samples);
+  const long double q = static_cast<long double>(responses);
+  const long double k = static_cast<long double>(folds);
+  const long double a = static_cast<long double>(components);
+  const long double iterations = static_cast<long double>(std::max(power, 1));
+  const long double training_rows = n * (k - 1.0L) / k;
+  const long double repeated_operator =
+    2.0L * k * a * iterations * training_rows * q;
+  const long double cached_sample_gram =
+    n * n * q + k * a * iterations * training_rows * training_rows;
+  return cached_sample_gram < repeated_operator;
+#endif
+}
+
+inline bool fold_simpls_moments_enabled(
+    std::size_t samples, std::size_t predictors, std::size_t components) {
+  return components >= 20 && predictors <= 2048 && predictors <= samples &&
+    samples >= predictors * 8;
+}
+
+template<class T, class Backend>
+void predictor_gram(ConstMatrixView<T> predictors, Backend& backend,
+                    Matrix<T>& result) {
+  result.resize(predictors.columns(), predictors.columns());
+  backend.gemm(predictors, predictors, true, false, result.view());
+}
+
+template<class T, class Backend>
+Matrix<T> predictor_gram(ConstMatrixView<T> predictors, Backend& backend) {
+  Matrix<T> result;
+  predictor_gram(predictors, backend, result);
+  return result;
+}
+
+template<class T, class Backend>
+Matrix<T> response_gram(ConstMatrixView<T> responses, Backend& backend) {
+  Matrix<T> result(responses.rows(), responses.rows());
+  backend.gemm(responses, responses, false, true, result.view());
+  return result;
+}
+
+template<class T>
+void prepare_centered_training_response_gram(
+    ConstMatrixView<T> full_gram,
+    const std::vector<std::size_t>& training_rows,
+    Matrix<T>& centered_gram) {
+  const std::size_t n = training_rows.size();
+  if (full_gram.rows() != full_gram.columns() || n == 0) {
+    throw std::invalid_argument(
+      "fold response-Gram dimensions are invalid"
+    );
+  }
+
+  centered_gram.resize(n, n);
+  std::vector<long double> row_means(n, 0.0L);
+  for (std::size_t column = 0; column < n; ++column) {
+    const std::size_t source_column = training_rows[column];
+    for (std::size_t row = 0; row < n; ++row) {
+      const T value = full_gram(training_rows[row], source_column);
+      centered_gram(row, column) = value;
+      row_means[row] += static_cast<long double>(value);
+    }
+  }
+  long double grand_mean = 0.0L;
+  for (long double& value : row_means) {
+    value /= static_cast<long double>(n);
+    grand_mean += value;
+  }
+  grand_mean /= static_cast<long double>(n);
+  for (std::size_t column = 0; column < n; ++column) {
+    for (std::size_t row = 0; row < n; ++row) {
+      centered_gram(row, column) = static_cast<T>(
+        static_cast<long double>(centered_gram(row, column)) -
+        row_means[row] - row_means[column] + grand_mean
+      );
+    }
+  }
+}
+
+template<class T>
+void preload_standardized_predictor_gram(
+    ConstMatrixView<T> full_gram, ConstMatrixView<T> heldout_gram,
+    const std::vector<T>& center, const std::vector<T>& scale,
+    std::size_t training_rows, SimplsWorkspace<T>& workspace) {
+  const std::size_t p = full_gram.rows();
+  if (p == 0 || full_gram.columns() != p || heldout_gram.rows() != p ||
+      heldout_gram.columns() != p || center.size() != p ||
+      scale.size() != p || training_rows == 0) {
+    throw std::invalid_argument(
+      "fold predictor-Gram dimensions are invalid"
+    );
+  }
+  workspace.predictor_crossprod.resize(p, p);
+  for (std::size_t column = 0; column < p; ++column) {
+    if (!std::isfinite(scale[column]) || scale[column] <= T(0)) {
+      throw std::runtime_error("fold predictor scale is invalid");
+    }
+    for (std::size_t row = 0; row < p; ++row) {
+      if (!std::isfinite(scale[row]) || scale[row] <= T(0)) {
+        throw std::runtime_error("fold predictor scale is invalid");
+      }
+      const long double raw =
+        static_cast<long double>(full_gram(row, column)) -
+        static_cast<long double>(heldout_gram(row, column));
+      const long double centered = raw -
+        static_cast<long double>(training_rows) *
+        static_cast<long double>(center[row]) *
+        static_cast<long double>(center[column]);
+      workspace.predictor_crossprod(row, column) = static_cast<T>(
+        centered /
+        (static_cast<long double>(scale[row]) *
+         static_cast<long double>(scale[column]))
+      );
+    }
+  }
+  workspace.predictor_crossprod_preloaded = true;
+}
+
+template<class T, class Backend>
+DenseSufficientStatistics<T> dense_sufficient_statistics(
+    ConstMatrixView<T> predictors, ConstMatrixView<T> responses,
+    Backend& backend) {
+  if (predictors.empty() || responses.empty() ||
+      predictors.rows() != responses.rows()) {
+    throw std::invalid_argument(
+      "dense cross-validation sufficient-statistic dimensions are invalid"
+    );
+  }
+  DenseSufficientStatistics<T> result;
+  result.predictor_sum.assign(predictors.columns(), 0.0L);
+  result.predictor_sum_squares.assign(predictors.columns(), 0.0L);
+  result.response_sum.assign(responses.columns(), 0.0L);
+  for (std::size_t predictor = 0;
+       predictor < predictors.columns(); ++predictor) {
+    for (std::size_t sample = 0; sample < predictors.rows(); ++sample) {
+      const long double value = predictors(sample, predictor);
+      result.predictor_sum[predictor] += value;
+      result.predictor_sum_squares[predictor] += value * value;
+    }
+  }
+  for (std::size_t response = 0;
+       response < responses.columns(); ++response) {
+    for (std::size_t sample = 0; sample < responses.rows(); ++sample) {
+      result.response_sum[response] += responses(sample, response);
+    }
+  }
+  result.predictor_response.resize(
+    predictors.columns(), responses.columns()
+  );
+  backend.gemm(
+    predictors, responses, true, false, result.predictor_response.view()
+  );
+  return result;
+}
+
+// Marginal moments are inexpensive to retain even when the predictor-response
+// cross-covariance is too large to materialize.  Computing them once and
+// subtracting each held-out fold avoids rescanning every 90% training response
+// matrix merely to recover fold-specific centering constants.
+template<class T>
+DenseSufficientStatistics<T> dense_marginal_statistics(
+    ConstMatrixView<T> predictors, ConstMatrixView<T> responses) {
+  if (predictors.empty() || responses.empty() ||
+      predictors.rows() != responses.rows()) {
+    throw std::invalid_argument(
+      "dense cross-validation marginal-statistic dimensions are invalid"
+    );
+  }
+  DenseSufficientStatistics<T> result;
+  result.predictor_sum.assign(predictors.columns(), 0.0L);
+  result.predictor_sum_squares.assign(predictors.columns(), 0.0L);
+  result.response_sum.assign(responses.columns(), 0.0L);
+  for (std::size_t predictor = 0;
+       predictor < predictors.columns(); ++predictor) {
+    for (std::size_t sample = 0; sample < predictors.rows(); ++sample) {
+      const long double value = predictors(sample, predictor);
+      result.predictor_sum[predictor] += value;
+      result.predictor_sum_squares[predictor] += value * value;
+    }
+  }
+  for (std::size_t response = 0;
+       response < responses.columns(); ++response) {
+    for (std::size_t sample = 0; sample < responses.rows(); ++sample) {
+      result.response_sum[response] += responses(sample, response);
+    }
+  }
+  return result;
+}
+
+template<class T>
+LabelSufficientStatistics<T> label_sufficient_statistics(
+    ConstMatrixView<T> predictors, const int* labels,
+    std::size_t class_count) {
+  LabelSufficientStatistics<T> result;
+  result.predictors = predictors.columns();
+  result.classes = class_count;
+  result.predictor_sum.assign(result.predictors, 0.0L);
+  result.predictor_sum_squares.assign(result.predictors, 0.0L);
+  result.class_count.assign(class_count, 0.0L);
+  result.class_predictor_sum.assign(
+    result.predictors * class_count, 0.0L
+  );
+  for (std::size_t sample = 0; sample < predictors.rows(); ++sample) {
+    const int encoded = labels[sample];
+    if (encoded < 1 || static_cast<std::size_t>(encoded) > class_count) {
+      throw std::invalid_argument(
+        "cross-validation labels must be encoded as 1..n_classes"
+      );
+    }
+    const std::size_t label = static_cast<std::size_t>(encoded - 1);
+    result.class_count[label] += 1.0L;
+    for (std::size_t predictor = 0;
+         predictor < result.predictors; ++predictor) {
+      const long double value = predictors(sample, predictor);
+      result.predictor_sum[predictor] += value;
+      result.predictor_sum_squares[predictor] += value * value;
+      result.class_predictor_sum[predictor + label * result.predictors] +=
+        value;
+    }
+  }
+  return result;
+}
+
+template<class T>
+LabelCrossprodResult<T> prepare_label_fold_from_statistics(
+    MatrixView<T> train, MatrixView<T> test,
+    ConstMatrixView<T> all_predictors, const int* labels,
+    const std::vector<std::size_t>& test_rows,
+    const std::vector<int>& active, PredictorScaling scaling,
+    const LabelSufficientStatistics<T>& full,
+    std::size_t training_rows_override = 0) {
+  const std::size_t p = all_predictors.columns();
+  const std::size_t classes = active.size();
+  const std::size_t ntrain = train.empty() ?
+    training_rows_override : train.rows();
+  if (p != full.predictors ||
+      (!train.empty() && train.columns() != p) || test.columns() != p ||
+      classes < 2 || ntrain < 1) {
+    throw std::invalid_argument(
+      "fold label sufficient-statistic dimensions are invalid"
+    );
+  }
+
+  std::vector<long double> predictor_sum = full.predictor_sum;
+  std::vector<long double> predictor_sum_squares =
+    full.predictor_sum_squares;
+  std::vector<long double> class_count(classes, 0.0L);
+  std::vector<long double> class_predictor_sum(p * classes, 0.0L);
+  std::vector<int> active_map(full.classes, -1);
+  for (std::size_t index = 0; index < classes; ++index) {
+    const std::size_t label = static_cast<std::size_t>(active[index] - 1);
+    active_map[label] = static_cast<int>(index);
+    class_count[index] = full.class_count[label];
+    for (std::size_t predictor = 0; predictor < p; ++predictor) {
+      class_predictor_sum[predictor + index * p] =
+        full.class_predictor_sum[predictor + label * p];
+    }
+  }
+  for (const std::size_t sample : test_rows) {
+    const std::size_t label = static_cast<std::size_t>(labels[sample] - 1);
+    const int compact = label < active_map.size() ? active_map[label] : -1;
+    for (std::size_t predictor = 0; predictor < p; ++predictor) {
+      const long double value = all_predictors(sample, predictor);
+      predictor_sum[predictor] -= value;
+      predictor_sum_squares[predictor] -= value * value;
+      if (compact >= 0) {
+        class_predictor_sum[
+          predictor + static_cast<std::size_t>(compact) * p
+        ] -= value;
+      }
+    }
+    if (compact >= 0) class_count[static_cast<std::size_t>(compact)] -= 1.0L;
+  }
+
+  LabelCrossprodResult<T> result;
+  result.crossprod.resize(p, classes);
+  result.class_predictor_sums.resize(p, classes);
+  result.predictor_center.assign(p, T(0));
+  result.predictor_scale.assign(p, T(1));
+  result.response_mean.resize(classes);
+  result.class_counts.resize(classes);
+  for (std::size_t response = 0; response < classes; ++response) {
+    if (class_count[response] <= 0.0L) {
+      throw std::invalid_argument(
+        "fold label sufficient statistics contain an empty class"
+      );
+    }
+    result.class_counts[response] = static_cast<T>(class_count[response]);
+    result.response_mean[response] = static_cast<T>(
+      class_count[response] / static_cast<long double>(ntrain)
+    );
+  }
+
+  for (std::size_t predictor = 0; predictor < p; ++predictor) {
+    long double center = 0.0L;
+    long double scale = 1.0L;
+    if (scaling != PredictorScaling::none) {
+      center = predictor_sum[predictor] /
+        static_cast<long double>(ntrain);
+      if (scaling == PredictorScaling::autoscaling) {
+        const long double centered_ss = std::max(
+          0.0L, predictor_sum_squares[predictor] -
+            static_cast<long double>(ntrain) * center * center
+        );
+        scale = std::sqrt(
+          centered_ss /
+          static_cast<long double>(std::max<std::size_t>(ntrain - 1, 1))
+        );
+        if (!std::isfinite(static_cast<double>(scale)) || scale <= 0.0L) {
+          scale = 1.0L;
+        }
+      }
+    }
+    result.predictor_center[predictor] = static_cast<T>(center);
+    result.predictor_scale[predictor] = static_cast<T>(scale);
+    const long double standardized_total =
+      (predictor_sum[predictor] -
+       static_cast<long double>(ntrain) * center) / scale;
+    for (std::size_t response = 0; response < classes; ++response) {
+      const long double standardized_class = (
+        class_predictor_sum[predictor + response * p] -
+        class_count[response] * center
+      ) / scale;
+      result.class_predictor_sums(predictor, response) =
+        static_cast<T>(standardized_class);
+      result.crossprod(predictor, response) = static_cast<T>(
+        standardized_class - standardized_total *
+          static_cast<long double>(result.response_mean[response])
+      );
+    }
+  }
+  if (!train.empty()) {
+    standardize(train, result.predictor_center, result.predictor_scale);
+  }
+  standardize(test, result.predictor_center, result.predictor_scale);
+  return result;
+}
+
+template<class T, class Model, class Backend>
+std::vector<LdaModel<T>> train_lda_from_predictor_moments(
+    const Model& model, ConstMatrixView<T> predictor_gram,
+    ConstMatrixView<T> class_predictor_sums,
+    const std::vector<T>& class_counts, std::size_t sample_count,
+    const int* components, std::size_t prefix_count, Backend& backend) {
+  const std::size_t retained = model.completed_components;
+  if (retained == 0 || predictor_gram.rows() != predictor_gram.columns() ||
+      predictor_gram.rows() != model.weights.rows() ||
+      class_predictor_sums.rows() != model.weights.rows() ||
+      class_predictor_sums.columns() != class_counts.size()) {
+    throw std::invalid_argument(
+      "cross-validation LDA predictor moments are inconsistent"
+    );
+  }
+  ConstMatrixView<T> projection(
+    model.weights.data(), model.weights.rows(), retained,
+    model.weights.view().leading_dimension()
+  );
+  Matrix<T> gram_projection(predictor_gram.rows(), retained);
+  backend.gemm(
+    predictor_gram, projection, false, false, gram_projection.view()
+  );
+  Matrix<T> score_gram(retained, retained);
+  backend.gemm(
+    projection, gram_projection.view(), true, false, score_gram.view()
+  );
+  Matrix<T> class_score_sums(class_counts.size(), retained);
+  backend.gemm(
+    class_predictor_sums, projection, true, false,
+    class_score_sums.view()
+  );
+  return train_lda_prefixes_from_moments<T>(
+    score_gram.view(), class_score_sums.view(), class_counts.data(),
+    class_counts.size(), sample_count, components, prefix_count
+  );
+}
+
+template<class T, class Backend>
+DensePreprocessingResult<T> prepare_dense_fold_from_statistics(
+    MatrixView<T> train, MatrixView<T> test,
+    ConstMatrixView<T> test_responses,
+    const DenseSufficientStatistics<T>& full, PredictorScaling scaling,
+    Backend& backend) {
+  const std::size_t p = train.columns();
+  const std::size_t q = test_responses.columns();
+  const std::size_t ntrain = train.rows();
+  if (p == 0 || q == 0 || ntrain == 0 || test.rows() == 0 ||
+      test.rows() != test_responses.rows() || test.columns() != p ||
+      full.predictor_sum.size() != p ||
+      full.predictor_sum_squares.size() != p ||
+      full.response_sum.size() != q ||
+      full.predictor_response.rows() != p ||
+      full.predictor_response.columns() != q) {
+    throw std::invalid_argument(
+      "fold dense sufficient-statistic dimensions are invalid"
+    );
+  }
+
+  std::vector<long double> predictor_sum = full.predictor_sum;
+  std::vector<long double> predictor_sum_squares =
+    full.predictor_sum_squares;
+  std::vector<long double> response_sum = full.response_sum;
+  for (std::size_t predictor = 0; predictor < p; ++predictor) {
+    for (std::size_t sample = 0; sample < test.rows(); ++sample) {
+      const long double value = test(sample, predictor);
+      predictor_sum[predictor] -= value;
+      predictor_sum_squares[predictor] -= value * value;
+    }
+  }
+  for (std::size_t response = 0; response < q; ++response) {
+    for (std::size_t sample = 0; sample < test_responses.rows(); ++sample) {
+      response_sum[response] -= test_responses(sample, response);
+    }
+  }
+
+  Matrix<T> heldout_product(p, q);
+  backend.gemm(
+    ConstMatrixView<T>(test), test_responses, true, false,
+    heldout_product.view()
+  );
+  DensePreprocessingResult<T> result;
+  result.crossprod.resize(p, q);
+  result.predictor_center.assign(p, T(0));
+  result.predictor_scale.assign(p, T(1));
+  result.response_mean.resize(q);
+  for (std::size_t response = 0; response < q; ++response) {
+    result.response_mean[response] = static_cast<T>(
+      response_sum[response] / static_cast<long double>(ntrain)
+    );
+  }
+
+  for (std::size_t predictor = 0; predictor < p; ++predictor) {
+    long double center = 0.0L;
+    long double scale = 1.0L;
+    if (scaling != PredictorScaling::none) {
+      center = predictor_sum[predictor] /
+        static_cast<long double>(ntrain);
+      if (scaling == PredictorScaling::autoscaling) {
+        const long double centered_ss = std::max(
+          0.0L, predictor_sum_squares[predictor] -
+            static_cast<long double>(ntrain) * center * center
+        );
+        scale = std::sqrt(
+          centered_ss /
+          static_cast<long double>(std::max<std::size_t>(ntrain - 1, 1))
+        );
+        if (!std::isfinite(static_cast<double>(scale)) || scale <= 0.0L) {
+          scale = 1.0L;
+        }
+      }
+    }
+    result.predictor_center[predictor] = static_cast<T>(center);
+    result.predictor_scale[predictor] = static_cast<T>(scale);
+    const long double standardized_sum =
+      (predictor_sum[predictor] -
+       static_cast<long double>(ntrain) * center) / scale;
+    for (std::size_t response = 0; response < q; ++response) {
+      const long double raw_product =
+        static_cast<long double>(full.predictor_response(
+          predictor, response
+        )) - static_cast<long double>(heldout_product(predictor, response));
+      const long double standardized_product =
+        (raw_product - center * response_sum[response]) / scale;
+      result.crossprod(predictor, response) = static_cast<T>(
+        standardized_product - standardized_sum *
+          static_cast<long double>(result.response_mean[response])
+      );
+    }
+  }
+  standardize(train, result.predictor_center, result.predictor_scale);
+  standardize(test, result.predictor_center, result.predictor_scale);
+  return result;
+}
+
+template<class T>
+DensePreprocessingResult<T> prepare_dense_fold_from_marginals(
+    MatrixView<T> train, MatrixView<T> test,
+    ConstMatrixView<T> all_predictors,
+    ConstMatrixView<T> all_responses,
+    const std::vector<std::size_t>& test_rows,
+    const DenseSufficientStatistics<T>& full, PredictorScaling scaling) {
+  const std::size_t p = all_predictors.columns();
+  const std::size_t q = all_responses.columns();
+  const std::size_t ntrain = train.rows();
+  if (p == 0 || q == 0 || ntrain == 0 || test.rows() == 0 ||
+      all_predictors.rows() != all_responses.rows() ||
+      train.columns() != p || test.columns() != p ||
+      test.rows() != test_rows.size() ||
+      full.predictor_sum.size() != p ||
+      full.predictor_sum_squares.size() != p ||
+      full.response_sum.size() != q) {
+    throw std::invalid_argument(
+      "fold dense marginal-statistic dimensions are invalid"
+    );
+  }
+
+  std::vector<long double> predictor_sum = full.predictor_sum;
+  std::vector<long double> predictor_sum_squares =
+    full.predictor_sum_squares;
+  std::vector<long double> response_sum = full.response_sum;
+  for (std::size_t predictor = 0; predictor < p; ++predictor) {
+    for (const std::size_t sample : test_rows) {
+      const long double value = all_predictors(sample, predictor);
+      predictor_sum[predictor] -= value;
+      predictor_sum_squares[predictor] -= value * value;
+    }
+  }
+  for (std::size_t response = 0; response < q; ++response) {
+    for (const std::size_t sample : test_rows) {
+      response_sum[response] -= all_responses(sample, response);
+    }
+  }
+
+  DensePreprocessingResult<T> result;
+  result.predictor_center.assign(p, T(0));
+  result.predictor_scale.assign(p, T(1));
+  result.response_mean.resize(q);
+  for (std::size_t response = 0; response < q; ++response) {
+    result.response_mean[response] = static_cast<T>(
+      response_sum[response] / static_cast<long double>(ntrain)
+    );
+  }
+  for (std::size_t predictor = 0; predictor < p; ++predictor) {
+    long double center = 0.0L;
+    long double scale = 1.0L;
+    if (scaling != PredictorScaling::none) {
+      center = predictor_sum[predictor] /
+        static_cast<long double>(ntrain);
+      if (scaling == PredictorScaling::autoscaling) {
+        const long double centered_ss = std::max(
+          0.0L, predictor_sum_squares[predictor] -
+            static_cast<long double>(ntrain) * center * center
+        );
+        scale = std::sqrt(
+          centered_ss /
+          static_cast<long double>(std::max<std::size_t>(ntrain - 1, 1))
+        );
+        if (!std::isfinite(static_cast<double>(scale)) || scale <= 0.0L) {
+          scale = 1.0L;
+        }
+      }
+    }
+    result.predictor_center[predictor] = static_cast<T>(center);
+    result.predictor_scale[predictor] = static_cast<T>(scale);
+  }
+  standardize(train, result.predictor_center, result.predictor_scale);
+  standardize(test, result.predictor_center, result.predictor_scale);
+  return result;
+}
 
 inline std::vector<FoldPartition> fold_partitions(
     const int* folds, std::size_t sample_count) {
@@ -97,14 +753,22 @@ inline std::vector<FoldPartition> fold_partitions(
 }
 
 template<class T>
-Matrix<T> gather_rows(ConstMatrixView<T> source,
-                      const std::vector<std::size_t>& rows) {
-  Matrix<T> output(rows.size(), source.columns());
+void gather_rows(ConstMatrixView<T> source,
+                 const std::vector<std::size_t>& rows,
+                 Matrix<T>& output) {
+  output.resize(rows.size(), source.columns());
   for (std::size_t column = 0; column < source.columns(); ++column) {
     for (std::size_t row = 0; row < rows.size(); ++row) {
       output(row, column) = source(rows[row], column);
     }
   }
+}
+
+template<class T>
+Matrix<T> gather_rows(ConstMatrixView<T> source,
+                      const std::vector<std::size_t>& rows) {
+  Matrix<T> output;
+  gather_rows(source, rows, output);
   return output;
 }
 
@@ -177,11 +841,10 @@ Matrix<T> project_scores(ConstMatrixView<T> predictors,
 }
 
 template<class T, class Backend>
-Matrix<T> predict_plssvd(const PlssvdModel<T>& model,
-                         ConstMatrixView<T> predictors,
-                         std::size_t prefix_index,
-                         const std::vector<T>& response_mean,
-                         Backend& backend) {
+Matrix<T> predict_plssvd_from_scores(
+    const PlssvdModel<T>& model, ConstMatrixView<T> scores,
+    std::size_t prefix_index, const std::vector<T>& response_mean,
+    Backend& backend) {
   if (prefix_index >= model.components.size() ||
       prefix_index >= model.prediction_weights.size()) {
     throw std::invalid_argument("PLS-SVD prediction prefix is invalid");
@@ -189,12 +852,15 @@ Matrix<T> predict_plssvd(const PlssvdModel<T>& model,
   const std::size_t components = static_cast<std::size_t>(
     model.components[prefix_index]
   );
-  Matrix<T> scores = project_scores(
-    predictors, model.weights.view(), components, backend
+  if (scores.columns() < components) {
+    throw std::invalid_argument("PLS-SVD projected score path is incomplete");
+  }
+  ConstMatrixView<T> score_prefix(
+    scores.data(), scores.rows(), components, scores.leading_dimension()
   );
-  Matrix<T> prediction(predictors.rows(), response_mean.size());
+  Matrix<T> prediction(scores.rows(), response_mean.size());
   backend.gemm(
-    scores.view(), model.prediction_weights[prefix_index].view(),
+    score_prefix, model.prediction_weights[prefix_index].view(),
     false, false, prediction.view()
   );
   for (std::size_t column = 0; column < prediction.columns(); ++column) {
@@ -206,6 +872,151 @@ Matrix<T> predict_plssvd(const PlssvdModel<T>& model,
 }
 
 template<class T, class Backend>
+Matrix<T> predict_plssvd(const PlssvdModel<T>& model,
+                         ConstMatrixView<T> predictors,
+                         std::size_t prefix_index,
+                         const std::vector<T>& response_mean,
+                         Backend& backend) {
+  if (prefix_index >= model.components.size()) {
+    throw std::invalid_argument("PLS-SVD prediction prefix is invalid");
+  }
+  const std::size_t components = static_cast<std::size_t>(
+    model.components[prefix_index]
+  );
+  Matrix<T> scores = project_scores(
+    predictors, model.weights.view(), components, backend
+  );
+  return predict_plssvd_from_scores(
+    model, scores.view(), prefix_index, response_mean, backend
+  );
+}
+
+template<class T>
+Matrix<T> prediction_with_response_mean(
+    ConstMatrixView<T> centered_prediction,
+    const std::vector<T>& response_mean) {
+  if (centered_prediction.columns() != response_mean.size()) {
+    throw std::invalid_argument(
+      "prediction response mean dimensions are invalid"
+    );
+  }
+  Matrix<T> prediction(
+    centered_prediction.rows(), centered_prediction.columns()
+  );
+  for (std::size_t column = 0; column < prediction.columns(); ++column) {
+    for (std::size_t row = 0; row < prediction.rows(); ++row) {
+      prediction(row, column) =
+        centered_prediction(row, column) + response_mean[column];
+    }
+  }
+  return prediction;
+}
+
+template<class T, class Backend>
+Matrix<T> predict_simpls_from_scores(
+    const SimplsModel<T>& model, ConstMatrixView<T> scores,
+    std::size_t components, const std::vector<T>& response_mean,
+    Backend& backend) {
+  if (components == 0 || components > model.completed_components ||
+      components > scores.columns()) {
+    throw std::invalid_argument(
+      "SIMPLS projected prediction dimensions are invalid"
+    );
+  }
+  ConstMatrixView<T> score_prefix(
+    scores.data(), scores.rows(), components, scores.leading_dimension()
+  );
+  ConstMatrixView<T> loading_prefix(
+    model.response_loadings.data(), model.response_loadings.rows(),
+    components, model.response_loadings.rows()
+  );
+  Matrix<T> centered_prediction(scores.rows(), response_mean.size());
+  backend.gemm(
+    score_prefix, loading_prefix, false, true,
+    centered_prediction.view()
+  );
+  return prediction_with_response_mean<T>(
+    centered_prediction.view(), response_mean
+  );
+}
+
+template<class T>
+Matrix<T> initialize_simpls_prediction(
+    std::size_t rows, const std::vector<T>& response_mean) {
+  Matrix<T> prediction(rows, response_mean.size());
+  for (std::size_t column = 0; column < prediction.columns(); ++column) {
+    std::fill_n(
+      prediction.data() + column * prediction.rows(), prediction.rows(),
+      response_mean[column]
+    );
+  }
+  return prediction;
+}
+
+template<class T, class Backend>
+auto accumulate_matrix_product(
+    Backend& backend, ConstMatrixView<T> left, ConstMatrixView<T> right,
+    bool transpose_left, bool transpose_right, MatrixView<T> output, int)
+    -> decltype(
+      backend.gemm_accumulate(
+        left, right, transpose_left, transpose_right, output
+      ),
+      bool()) {
+  backend.gemm_accumulate(
+    left, right, transpose_left, transpose_right, output
+  );
+  return true;
+}
+
+template<class T, class Backend>
+bool accumulate_matrix_product(
+    Backend&, ConstMatrixView<T>, ConstMatrixView<T>, bool, bool,
+    MatrixView<T>, long) {
+  return false;
+}
+
+template<class T, class Backend>
+void update_simpls_prediction_from_scores(
+    const SimplsModel<T>& model, ConstMatrixView<T> scores,
+    std::size_t first_component, std::size_t component_count,
+    MatrixView<T> prediction, Matrix<T>& contribution, Backend& backend) {
+  if (component_count <= first_component ||
+      component_count > model.completed_components ||
+      component_count > scores.columns() ||
+      prediction.rows() != scores.rows() ||
+      prediction.columns() != model.response_loadings.rows()) {
+    throw std::invalid_argument(
+      "SIMPLS incremental prediction dimensions are invalid"
+    );
+  }
+  const std::size_t added = component_count - first_component;
+  ConstMatrixView<T> score_delta(
+    scores.data() + first_component * scores.leading_dimension(),
+    scores.rows(), added, scores.leading_dimension()
+  );
+  ConstMatrixView<T> loading_delta(
+    model.response_loadings.data() +
+      first_component * model.response_loadings.rows(),
+    model.response_loadings.rows(), added,
+    model.response_loadings.view().leading_dimension()
+  );
+  if (accumulate_matrix_product<T>(
+        backend, score_delta, loading_delta, false, true, prediction, 0
+      )) {
+    return;
+  }
+  contribution.resize(prediction.rows(), prediction.columns());
+  backend.gemm(
+    score_delta, loading_delta, false, true, contribution.view()
+  );
+  for (std::size_t column = 0; column < prediction.columns(); ++column) {
+    for (std::size_t row = 0; row < prediction.rows(); ++row) {
+      prediction(row, column) += contribution(row, column);
+    }
+  }
+}
+
+template<class T, class Backend>
 Matrix<T> predict_simpls(const SimplsModel<T>& model,
                          ConstMatrixView<T> predictors,
                          std::size_t components,
@@ -214,12 +1025,9 @@ Matrix<T> predict_simpls(const SimplsModel<T>& model,
   Matrix<T> prediction = predict_simpls_preprocessed(
     predictors, model, components, backend
   );
-  for (std::size_t column = 0; column < prediction.columns(); ++column) {
-    for (std::size_t row = 0; row < prediction.rows(); ++row) {
-      prediction(row, column) += response_mean[column];
-    }
-  }
-  return prediction;
+  return prediction_with_response_mean<T>(
+    prediction.view(), response_mean
+  );
 }
 
 template<class T>
@@ -308,20 +1116,35 @@ void store_classes(Matrix<int>& destination,
 }
 
 template<class T>
-void store_values(Matrix<T>& destination,
-                  const std::vector<std::size_t>& rows,
-                  ConstMatrixView<T> values) {
+double accumulate_regression_error(
+    Matrix<T>* destination, const std::vector<std::size_t>& rows,
+    ConstMatrixView<T> values, ConstMatrixView<T> observed) {
   if (rows.size() != values.rows() ||
-      destination.columns() != values.columns()) {
+      observed.columns() != values.columns() ||
+      (destination != nullptr &&
+       destination->columns() != values.columns())) {
     throw std::invalid_argument(
       "cross-validation response prediction size is invalid"
     );
   }
+  long double sum_squares = 0.0L;
   for (std::size_t column = 0; column < values.columns(); ++column) {
     for (std::size_t index = 0; index < rows.size(); ++index) {
-      destination(rows[index], column) = values(index, column);
+      const std::size_t row = rows[index];
+      if (row >= observed.rows() ||
+          (destination != nullptr && row >= destination->rows())) {
+        throw std::invalid_argument(
+          "cross-validation response prediction row is invalid"
+        );
+      }
+      const long double error = values(index, column) - observed(row, column);
+      sum_squares += error * error;
+      if (destination != nullptr) {
+        (*destination)(row, column) = values(index, column);
+      }
     }
   }
+  return static_cast<double>(sum_squares);
 }
 
 template<class T>
@@ -385,6 +1208,31 @@ ClassificationCvResult<T> cross_validate_classification(
     }
   }
   std::vector<double> totals(prefix_count, 0.0);
+  const bool reuse_label_statistics =
+    cv_detail::fold_label_statistics_enabled() &&
+    (family == LinearPlsFamily::plssvd ||
+     family == LinearPlsFamily::simpls);
+  const auto full_label_statistics = reuse_label_statistics ?
+    cv_detail::label_sufficient_statistics(
+      predictors, labels, class_count
+    ) : cv_detail::LabelSufficientStatistics<T>();
+  const std::size_t maximum_component = static_cast<std::size_t>(
+    *std::max_element(components, components + prefix_count)
+  );
+  const bool reuse_predictor_gram =
+    (family == LinearPlsFamily::plssvd ||
+     family == LinearPlsFamily::simpls) &&
+    cv_detail::fold_predictor_gram_enabled<T>(predictors.columns()) &&
+    (simpls_controls.cache_predictor_crossprod ||
+     cv_detail::fold_simpls_moments_enabled(
+       predictors.rows(), predictors.columns(), maximum_component
+     ));
+  const auto full_predictor_gram = reuse_predictor_gram ?
+    cv_detail::predictor_gram(predictors, backend) : Matrix<T>();
+  SimplsWorkspace<T> shared_simpls_workspace;
+  Matrix<T> heldout_predictor_gram;
+  Matrix<T> train;
+  Matrix<T> test;
 
   for (std::size_t fold = 0; fold < partitions.size(); ++fold) {
     const auto& partition = partitions[fold];
@@ -392,6 +1240,9 @@ ClassificationCvResult<T> cross_validate_classification(
       result.status[fold] = 2;
       continue;
     }
+    cv_detail::configure_backend_problem(
+      backend, partition.train.size(), predictors.columns(), class_count, 0
+    );
     const auto active = cv_detail::active_classes<T>(
       labels, partition.train, class_count
     );
@@ -420,8 +1271,25 @@ ClassificationCvResult<T> cross_validate_classification(
       continue;
     }
 
-    Matrix<T> train = cv_detail::gather_rows(predictors, partition.train);
-    Matrix<T> test = cv_detail::gather_rows(predictors, partition.test);
+    const bool moments_only = reuse_label_statistics &&
+      reuse_predictor_gram &&
+      (family == LinearPlsFamily::plssvd ||
+       family == LinearPlsFamily::simpls);
+    const bool moments_only_simpls = moments_only &&
+      family == LinearPlsFamily::simpls;
+    const bool moments_only_plssvd = moments_only &&
+      family == LinearPlsFamily::plssvd;
+    if (moments_only) {
+      train.resize(0, 0);
+    } else {
+      cv_detail::gather_rows(predictors, partition.train, train);
+    }
+    cv_detail::gather_rows(predictors, partition.test, test);
+    if (reuse_predictor_gram) {
+      cv_detail::predictor_gram(
+        ConstMatrixView<T>(test.view()), backend, heldout_predictor_gram
+      );
+    }
     const auto compact = cv_detail::compact_labels(
       labels, partition.train, active
     );
@@ -463,6 +1331,12 @@ ClassificationCvResult<T> cross_validate_classification(
         train.view(), compact.data(), compact.size(), active.size(),
         PredictorScaling::none, backend
       );
+    } else if (reuse_label_statistics) {
+      prepared = cv_detail::prepare_label_fold_from_statistics(
+        train.view(), test.view(), predictors, labels, partition.test,
+        active, scaling, full_label_statistics,
+        moments_only ? partition.train.size() : 0
+      );
     } else {
       prepared = prepare_scaled_label_crossprod(
         train.view(), compact.data(), compact.size(), active.size(),
@@ -473,29 +1347,49 @@ ClassificationCvResult<T> cross_validate_classification(
       );
     }
 
+    if (reuse_predictor_gram) {
+      cv_detail::preload_standardized_predictor_gram<T>(
+        full_predictor_gram.view(), heldout_predictor_gram.view(),
+        prepared.predictor_center, prepared.predictor_scale,
+        partition.train.size(), shared_simpls_workspace
+      );
+    }
+
     if (family == LinearPlsFamily::plssvd) {
       PlssvdControls controls = plssvd_controls;
       controls.rsvd.seed += static_cast<unsigned int>(fold);
-      auto model = fit_plssvd_preprocessed<T>(
-        train.view(), prepared.crossprod.view(), components, prefix_count,
-        controls, backend
-      );
+      auto model = moments_only_plssvd ?
+        fit_plssvd_from_moments<T>(
+          shared_simpls_workspace.predictor_crossprod.view(),
+          prepared.crossprod.view(), components, prefix_count,
+          controls, backend
+        ) : fit_plssvd_preprocessed<T>(
+          train.view(), prepared.crossprod.view(), components, prefix_count,
+          controls, backend
+        );
       std::vector<LdaModel<T>> lda_models;
-      Matrix<T> test_scores;
+      Matrix<T> test_scores = cv_detail::project_scores<T>(
+        ConstMatrixView<T>(test.view()),
+        ConstMatrixView<T>(model.weights.view()),
+        model.completed_components, backend
+      );
       if (head == ClassificationHead::lda) {
-        std::vector<int> lda_labels(compact.size());
-        for (std::size_t i = 0; i < compact.size(); ++i) {
-          lda_labels[i] = static_cast<int>(compact[i]) + 1;
+        if (moments_only_plssvd) {
+          lda_models = cv_detail::train_lda_from_predictor_moments<T>(
+            model, shared_simpls_workspace.predictor_crossprod.view(),
+            prepared.class_predictor_sums.view(), prepared.class_counts,
+            partition.train.size(), components, prefix_count, backend
+          );
+        } else {
+          std::vector<int> lda_labels(compact.size());
+          for (std::size_t i = 0; i < compact.size(); ++i) {
+            lda_labels[i] = static_cast<int>(compact[i]) + 1;
+          }
+          lda_models = train_lda_prefixes(
+            model.scores.view(), lda_labels.data(), lda_labels.size(),
+            active.size(), components, prefix_count
+          );
         }
-        lda_models = train_lda_prefixes(
-          model.scores.view(), lda_labels.data(), lda_labels.size(),
-          active.size(), components, prefix_count
-        );
-        test_scores = cv_detail::project_scores<T>(
-          ConstMatrixView<T>(test.view()),
-          ConstMatrixView<T>(model.weights.view()),
-          model.completed_components, backend
-        );
       }
       for (std::size_t prefix = 0; prefix < prefix_count; ++prefix) {
         std::vector<int> predicted;
@@ -508,8 +1402,8 @@ ClassificationCvResult<T> cross_validate_classification(
             score_prefix, lda_models[prefix], active
           );
         } else {
-          const auto scores = cv_detail::predict_plssvd<T>(
-            model, ConstMatrixView<T>(test.view()), prefix,
+          const auto scores = cv_detail::predict_plssvd_from_scores<T>(
+            model, test_scores.view(), prefix,
             prepared.response_mean, backend
           );
           predicted = cv_detail::predicted_classes<T>(
@@ -523,8 +1417,8 @@ ClassificationCvResult<T> cross_validate_classification(
           }
         }
         if (head == ClassificationHead::lda && store_scores) {
-          const auto scores = cv_detail::predict_plssvd<T>(
-            model, ConstMatrixView<T>(test.view()), prefix,
+          const auto scores = cv_detail::predict_plssvd_from_scores<T>(
+            model, test_scores.view(), prefix,
             prepared.response_mean, backend
           );
           cv_detail::store_active_scores<T>(
@@ -548,14 +1442,29 @@ ClassificationCvResult<T> cross_validate_classification(
                family == LinearPlsFamily::kernelpls) {
       SimplsControls controls = simpls_controls;
       controls.rsvd.seed += static_cast<unsigned int>(fold);
-      controls.store_scores = head == ClassificationHead::lda;
-      SimplsWorkspace<T> workspace;
+      controls.cache_predictor_crossprod = reuse_predictor_gram;
+      controls.store_scores =
+        head == ClassificationHead::lda && !moments_only_simpls;
       auto model = fit_simpls_preprocessed<T>(
-        train.view(), prepared.crossprod.view(), controls, backend, workspace
+        moments_only_simpls ? ConstMatrixView<T>() :
+          ConstMatrixView<T>(train.view()),
+        prepared.crossprod.view(), controls, backend,
+        shared_simpls_workspace,
+        moments_only_simpls ? partition.train.size() : 0
       );
       std::vector<LdaModel<T>> lda_models;
-      Matrix<T> test_scores;
-      if (head == ClassificationHead::lda) {
+      Matrix<T> test_scores = cv_detail::project_scores<T>(
+        ConstMatrixView<T>(test.view()),
+        ConstMatrixView<T>(model.weights.view()),
+        model.completed_components, backend
+      );
+      if (head == ClassificationHead::lda && moments_only_simpls) {
+        lda_models = cv_detail::train_lda_from_predictor_moments<T>(
+          model, shared_simpls_workspace.predictor_crossprod.view(),
+          prepared.class_predictor_sums.view(), prepared.class_counts,
+          partition.train.size(), components, prefix_count, backend
+        );
+      } else if (head == ClassificationHead::lda) {
         std::vector<int> lda_labels(compact.size());
         for (std::size_t i = 0; i < compact.size(); ++i) {
           lda_labels[i] = static_cast<int>(compact[i]) + 1;
@@ -564,47 +1473,50 @@ ClassificationCvResult<T> cross_validate_classification(
           model.scores.view(), lda_labels.data(), lda_labels.size(),
           active.size(), components, prefix_count
         );
-        test_scores = cv_detail::project_scores<T>(
-          ConstMatrixView<T>(test.view()),
-          ConstMatrixView<T>(model.weights.view()),
-          model.completed_components, backend
-        );
       }
+      const bool need_response_scores =
+        head == ClassificationHead::argmax || store_scores;
+      Matrix<T> response_scores = need_response_scores ?
+        cv_detail::initialize_simpls_prediction<T>(
+          test_scores.rows(), prepared.response_mean
+        ) : Matrix<T>();
+      Matrix<T> prediction_contribution;
+      std::size_t previous_component = 0;
       for (std::size_t prefix = 0; prefix < prefix_count; ++prefix) {
+        const std::size_t requested = static_cast<std::size_t>(
+          components[prefix]
+        );
+        if (need_response_scores) {
+          cv_detail::update_simpls_prediction_from_scores<T>(
+            model, test_scores.view(), previous_component, requested,
+            response_scores.view(), prediction_contribution, backend
+          );
+          previous_component = requested;
+        }
         std::vector<int> predicted;
         if (head == ClassificationHead::lda) {
           ConstMatrixView<T> score_prefix(
             test_scores.data(), test_scores.rows(),
-            static_cast<std::size_t>(components[prefix]), test_scores.rows()
+            requested, test_scores.rows()
           );
           predicted = cv_detail::lda_predictions<T>(
             score_prefix, lda_models[prefix], active
           );
         } else {
-          const auto scores = cv_detail::predict_simpls<T>(
-            model, ConstMatrixView<T>(test.view()),
-            static_cast<std::size_t>(components[prefix]),
-            prepared.response_mean, backend
-          );
           predicted = cv_detail::predicted_classes<T>(
-            ConstMatrixView<T>(scores.view()), active
+            ConstMatrixView<T>(response_scores.view()), active
           );
           if (store_scores) {
             cv_detail::store_active_scores<T>(
               result.scores[prefix], partition.test,
-              ConstMatrixView<T>(scores.view()), active
+              ConstMatrixView<T>(response_scores.view()), active
             );
           }
         }
         if (head == ClassificationHead::lda && store_scores) {
-          const auto scores = cv_detail::predict_simpls<T>(
-            model, ConstMatrixView<T>(test.view()),
-            static_cast<std::size_t>(components[prefix]),
-            prepared.response_mean, backend
-          );
           cv_detail::store_active_scores<T>(
             result.scores[prefix], partition.test,
-            ConstMatrixView<T>(scores.view()), active
+            ConstMatrixView<T>(response_scores.view()), active
           );
         }
         if (store_predictions) {
@@ -650,10 +1562,16 @@ RegressionCvResult<T> cross_validate_regression(
   const auto partitions = cv_detail::fold_partitions(
     folds, predictors.rows()
   );
+  const std::size_t maximum_component = static_cast<std::size_t>(
+    *std::max_element(components, components + prefix_count)
+  );
   RegressionCvResult<T> result;
   result.folds.assign(folds, folds + predictors.rows());
   result.status.assign(partitions.size(), 0);
   result.metrics.assign(prefix_count, 0.0);
+  result.q2.assign(prefix_count, 0.0);
+  result.rmsd.assign(prefix_count, 0.0);
+  result.observed_r2.assign(prefix_count, 0.0);
   std::vector<double> counts(prefix_count, 0.0);
   if (store_predictions) {
     result.predictions.reserve(prefix_count);
@@ -661,20 +1579,62 @@ RegressionCvResult<T> cross_validate_regression(
       result.predictions.emplace_back(predictors.rows(), responses.columns());
     }
   }
-  long double total_sum = 0.0L;
-  long double total_square = 0.0L;
+  long double observed_total_ss = 0.0L;
   for (std::size_t column = 0; column < responses.columns(); ++column) {
+    long double total_sum = 0.0L;
+    long double total_square = 0.0L;
     for (std::size_t row = 0; row < responses.rows(); ++row) {
       const long double value = responses(row, column);
       total_sum += value;
       total_square += value * value;
     }
+    observed_total_ss += total_square -
+      total_sum * total_sum / static_cast<long double>(responses.rows());
   }
-  const long double observation_count = static_cast<long double>(
-    responses.rows() * responses.columns()
-  );
-  const long double total_ss = total_square -
-    total_sum * total_sum / observation_count;
+  long double fold_training_total_ss = 0.0L;
+  const bool reuse_dense_statistics =
+    (family == LinearPlsFamily::plssvd ||
+     family == LinearPlsFamily::simpls) &&
+    cv_detail::fold_dense_statistics_enabled<T>(
+      predictors.columns(), responses.columns()
+    );
+  const long double crosscovariance_bytes =
+    static_cast<long double>(predictors.columns()) *
+    static_cast<long double>(responses.columns()) * sizeof(T);
+  const bool use_implicit_crosscovariance =
+    (family == LinearPlsFamily::plssvd ||
+     family == LinearPlsFamily::simpls) &&
+    crosscovariance_bytes > 512.0L * 1024.0L * 1024.0L;
+  const bool reuse_sample_response_gram =
+    family == LinearPlsFamily::simpls && use_implicit_crosscovariance &&
+    cv_detail::fold_sample_response_gram_enabled<T>(
+      predictors.rows(), responses.columns(), maximum_component,
+      simpls_controls.rsvd.power, partitions.size()
+    );
+  const auto full_dense_statistics = reuse_dense_statistics ?
+    cv_detail::dense_sufficient_statistics(
+      predictors, responses, backend
+    ) : cv_detail::DenseSufficientStatistics<T>();
+  const auto full_dense_marginals =
+    use_implicit_crosscovariance && !reuse_dense_statistics ?
+      cv_detail::dense_marginal_statistics(predictors, responses) :
+      cv_detail::DenseSufficientStatistics<T>();
+  const bool reuse_predictor_gram =
+    family == LinearPlsFamily::simpls &&
+    simpls_controls.cache_predictor_crossprod &&
+    cv_detail::fold_predictor_gram_enabled<T>(predictors.columns());
+  const auto full_predictor_gram = reuse_predictor_gram ?
+    cv_detail::predictor_gram(predictors, backend) : Matrix<T>();
+  const auto full_response_gram = reuse_sample_response_gram ?
+    cv_detail::response_gram(responses, backend) : Matrix<T>();
+  SimplsWorkspace<T> shared_simpls_workspace;
+  OperatorRsvdWorkspace<T> shared_operator_workspace;
+  Matrix<T> fold_response_gram;
+  Matrix<T> heldout_predictor_gram;
+  Matrix<T> train;
+  Matrix<T> test;
+  Matrix<T> train_response;
+  Matrix<T> test_response;
 
   for (std::size_t fold = 0; fold < partitions.size(); ++fold) {
     const auto& partition = partitions[fold];
@@ -682,11 +1642,21 @@ RegressionCvResult<T> cross_validate_regression(
       result.status[fold] = 2;
       continue;
     }
-    Matrix<T> train = cv_detail::gather_rows(predictors, partition.train);
-    Matrix<T> test = cv_detail::gather_rows(predictors, partition.test);
-    Matrix<T> train_response = cv_detail::gather_rows(
-      responses, partition.train
+    cv_detail::configure_backend_problem(
+      backend, partition.train.size(), predictors.columns(),
+      responses.columns(), 0
     );
+    cv_detail::gather_rows(predictors, partition.train, train);
+    cv_detail::gather_rows(predictors, partition.test, test);
+    if (reuse_predictor_gram) {
+      cv_detail::predictor_gram(
+        ConstMatrixView<T>(test.view()), backend, heldout_predictor_gram
+      );
+    }
+    cv_detail::gather_rows(responses, partition.train, train_response);
+    if (reuse_dense_statistics) {
+      cv_detail::gather_rows(responses, partition.test, test_response);
+    }
     DensePreprocessingResult<T> prepared;
     if (family == LinearPlsFamily::opls) {
       if (orthogonal_components < 1) {
@@ -722,6 +1692,16 @@ RegressionCvResult<T> cross_validate_regression(
       prepared = prepare_scaled_dense_crossprod(
         train.view(), train_response.view(), PredictorScaling::none, backend
       );
+    } else if (use_implicit_crosscovariance) {
+      prepared = cv_detail::prepare_dense_fold_from_marginals<T>(
+        train.view(), test.view(), predictors, responses, partition.test,
+        full_dense_marginals, scaling
+      );
+    } else if (reuse_dense_statistics) {
+      prepared = cv_detail::prepare_dense_fold_from_statistics<T>(
+        train.view(), test.view(), ConstMatrixView<T>(test_response.view()),
+        full_dense_statistics, scaling, backend
+      );
     } else {
       prepared = prepare_scaled_dense_crossprod(
         train.view(), train_response.view(), scaling, backend
@@ -730,32 +1710,50 @@ RegressionCvResult<T> cross_validate_regression(
         test.view(), prepared.predictor_center, prepared.predictor_scale
       );
     }
+    for (std::size_t column = 0; column < responses.columns(); ++column) {
+      const long double training_mean = prepared.response_mean[column];
+      for (const std::size_t row : partition.test) {
+        const long double centered = responses(row, column) - training_mean;
+        fold_training_total_ss += centered * centered;
+      }
+    }
 
     if (family == LinearPlsFamily::plssvd) {
       PlssvdControls controls = plssvd_controls;
       controls.rsvd.seed += static_cast<unsigned int>(fold);
-      auto model = fit_plssvd_preprocessed<T>(
-        train.view(), prepared.crossprod.view(), components, prefix_count,
-        controls, backend
+      PlssvdModel<T> model;
+      if (use_implicit_crosscovariance) {
+        CenteredCrosscovOperator<T, Backend> crosscovariance(
+          train.view(), train_response.view(), prepared.response_mean.data(),
+          prepared.response_mean.size(), backend
+        );
+        model = fit_plssvd_operator<T>(
+          train.view(), crosscovariance, components, prefix_count, controls,
+          backend, shared_operator_workspace
+        );
+      } else {
+        model = fit_plssvd_preprocessed<T>(
+          train.view(), prepared.crossprod.view(), components, prefix_count,
+          controls, backend
+        );
+      }
+      Matrix<T> test_scores = cv_detail::project_scores<T>(
+        ConstMatrixView<T>(test.view()),
+        ConstMatrixView<T>(model.weights.view()),
+        model.completed_components, backend
       );
       for (std::size_t prefix = 0; prefix < prefix_count; ++prefix) {
-        const auto prediction = cv_detail::predict_plssvd<T>(
-          model, ConstMatrixView<T>(test.view()), prefix,
+        const auto prediction = cv_detail::predict_plssvd_from_scores<T>(
+          model, test_scores.view(), prefix,
           prepared.response_mean, backend
         );
-        for (std::size_t column = 0; column < prediction.columns(); ++column) {
-          for (std::size_t index = 0; index < partition.test.size(); ++index) {
-            const long double error = prediction(index, column) -
-              responses(partition.test[index], column);
-            result.metrics[prefix] += static_cast<double>(error * error);
-            counts[prefix] += 1.0;
-          }
-        }
-        if (store_predictions) {
-          cv_detail::store_values(
-            result.predictions[prefix], partition.test, prediction.view()
-          );
-        }
+        Matrix<T>* stored = store_predictions ?
+          &result.predictions[prefix] : nullptr;
+        result.metrics[prefix] += cv_detail::accumulate_regression_error<T>(
+          stored, partition.test, ConstMatrixView<T>(prediction.view()),
+          responses
+        );
+        counts[prefix] += static_cast<double>(prediction.size());
       }
     } else if (family == LinearPlsFamily::simpls ||
                family == LinearPlsFamily::opls ||
@@ -763,29 +1761,71 @@ RegressionCvResult<T> cross_validate_regression(
       SimplsControls controls = simpls_controls;
       controls.rsvd.seed += static_cast<unsigned int>(fold);
       controls.store_scores = false;
-      SimplsWorkspace<T> workspace;
-      auto model = fit_simpls_preprocessed<T>(
-        train.view(), prepared.crossprod.view(), controls, backend, workspace
-      );
-      for (std::size_t prefix = 0; prefix < prefix_count; ++prefix) {
-        const auto prediction = cv_detail::predict_simpls<T>(
-          model, ConstMatrixView<T>(test.view()),
-          static_cast<std::size_t>(components[prefix]),
-          prepared.response_mean, backend
+      if (reuse_predictor_gram) {
+        cv_detail::preload_standardized_predictor_gram<T>(
+          full_predictor_gram.view(), heldout_predictor_gram.view(),
+          prepared.predictor_center, prepared.predictor_scale,
+          partition.train.size(), shared_simpls_workspace
         );
-        for (std::size_t column = 0; column < prediction.columns(); ++column) {
-          for (std::size_t index = 0; index < partition.test.size(); ++index) {
-            const long double error = prediction(index, column) -
-              responses(partition.test[index], column);
-            result.metrics[prefix] += static_cast<double>(error * error);
-            counts[prefix] += 1.0;
-          }
-        }
-        if (store_predictions) {
-          cv_detail::store_values(
-            result.predictions[prefix], partition.test, prediction.view()
+      }
+      SimplsModel<T> model;
+      if (use_implicit_crosscovariance) {
+        controls.rank_one_operator_direction = controls.maximum_block == 1;
+        controls.reorthogonalize = true;
+        CenteredCrosscovOperator<T, Backend> initial_crosscovariance(
+          train.view(), train_response.view(), prepared.response_mean.data(),
+          prepared.response_mean.size(), backend
+        );
+        ProjectedOperator<
+          T, CenteredCrosscovOperator<T, Backend>, Backend
+        > projected_crosscovariance(
+          initial_crosscovariance, controls.components, backend
+        );
+        if (reuse_sample_response_gram) {
+          cv_detail::prepare_centered_training_response_gram<T>(
+            full_response_gram.view(), partition.train, fold_response_gram
           );
         }
+        model = fit_simpls_operator<T>(
+          train.view(), initial_crosscovariance, projected_crosscovariance,
+          controls, backend, shared_simpls_workspace,
+          shared_operator_workspace,
+          reuse_sample_response_gram ?
+            ConstMatrixView<T>(fold_response_gram.view()) :
+            ConstMatrixView<T>()
+        );
+      } else {
+        model = fit_simpls_preprocessed<T>(
+          train.view(), prepared.crossprod.view(), controls, backend,
+          shared_simpls_workspace
+        );
+      }
+      Matrix<T> test_scores = cv_detail::project_scores<T>(
+        ConstMatrixView<T>(test.view()),
+        ConstMatrixView<T>(model.weights.view()),
+        model.completed_components, backend
+      );
+      Matrix<T> prediction = cv_detail::initialize_simpls_prediction<T>(
+        test_scores.rows(), prepared.response_mean
+      );
+      Matrix<T> prediction_contribution;
+      std::size_t previous_component = 0;
+      for (std::size_t prefix = 0; prefix < prefix_count; ++prefix) {
+        const std::size_t requested = static_cast<std::size_t>(
+          components[prefix]
+        );
+        cv_detail::update_simpls_prediction_from_scores<T>(
+          model, test_scores.view(), previous_component, requested,
+          prediction.view(), prediction_contribution, backend
+        );
+        previous_component = requested;
+        Matrix<T>* stored = store_predictions ?
+          &result.predictions[prefix] : nullptr;
+        result.metrics[prefix] += cv_detail::accumulate_regression_error<T>(
+          stored, partition.test, ConstMatrixView<T>(prediction.view()),
+          responses
+        );
+        counts[prefix] += static_cast<double>(prediction.size());
       }
     } else {
       throw std::invalid_argument(
@@ -796,14 +1836,27 @@ RegressionCvResult<T> cross_validate_regression(
   }
 
   for (std::size_t prefix = 0; prefix < prefix_count; ++prefix) {
-    if (metric == RegressionMetric::rmsd) {
-      result.metrics[prefix] = counts[prefix] > 0.0 ?
-        std::sqrt(result.metrics[prefix] / counts[prefix]) :
-        std::numeric_limits<double>::quiet_NaN();
-    } else {
-      result.metrics[prefix] = total_ss > 0.0L ?
-        1.0 - result.metrics[prefix] / static_cast<double>(total_ss) :
-        std::numeric_limits<double>::quiet_NaN();
+    const double sse = result.metrics[prefix];
+    result.rmsd[prefix] = counts[prefix] > 0.0 ?
+      std::sqrt(sse / counts[prefix]) :
+      std::numeric_limits<double>::quiet_NaN();
+    result.q2[prefix] = fold_training_total_ss > 0.0L ?
+      1.0 - sse / static_cast<double>(fold_training_total_ss) :
+      std::numeric_limits<double>::quiet_NaN();
+    result.observed_r2[prefix] = observed_total_ss > 0.0L ?
+      1.0 - sse / static_cast<double>(observed_total_ss) :
+      std::numeric_limits<double>::quiet_NaN();
+    result.metrics[prefix] = metric == RegressionMetric::rmsd ?
+      result.rmsd[prefix] : metric == RegressionMetric::q2 ?
+      result.q2[prefix] : result.observed_r2[prefix];
+  }
+  if (store_predictions) {
+    result.evaluation.reserve(prefix_count);
+    for (std::size_t prefix = 0; prefix < prefix_count; ++prefix) {
+      result.evaluation.push_back(regression_metrics<T>(
+        responses, ConstMatrixView<T>(result.predictions[prefix].view()),
+        result.q2[prefix]
+      ));
     }
   }
   return result;

@@ -838,7 +838,25 @@ fixed-component CV or a vector of candidates when the number of components
 should be selected from a grid. Use `pls.double.cv()` for nested validation,
 where an inner CV chooses the number of components and an outer CV estimates
 predictive performance. Both helpers support regression and classification and
-dispatch to the same compiled CPU/CUDA core when available.
+dispatch to compiled CPU or accelerator routes when available. CUDA SIMPLS CV
+keeps task data and fold workspaces on the device. CUDA library handles are
+created once per CV call and reused across folds rather than reconstructed for
+every fit. CUDA PLS-SVD CV also uses a resident route for large multivariate
+regression responses, while
+classification and smaller-response tasks retain the faster fold-local CUDA
+route. This choice is automatic and does not change fold assignment,
+fold-specific preprocessing, requested components, or prediction semantics.
+For large multivariate responses, predictor and response marginal moments are
+computed once. Each training fold obtains its own moments by subtracting the
+held-out contribution before fold-specific centering and scaling. The large
+cross-covariance remains matrix-free, so this reuse does not introduce a dense
+predictor-by-response cache. On Apple Accelerate, the compiled engine can also
+form a bounded response Gram matrix once for wide-response SIMPLS problems and
+extract a separately centered training submatrix for each fold. OpenBLAS and
+CUDA retain their faster implicit or resident route. Fold-specific
+preprocessing, seeds, and model fitting remain unchanged. Aggregate regression
+metrics are computed directly from the native out-of-fold predictions before
+those predictions are formatted for R.
 
 ### Ordinary k-fold CV
 
@@ -930,6 +948,20 @@ fold. fastPLS fits LDA to the classes represented in that fold and maps the
 predictions back to the original factor levels. Held-out observations from an
 absent class are retained in the accuracy and balanced-accuracy calculations,
 although that class cannot be predicted by a model that did not observe it.
+When otherwise identical argmax and LDA configurations are requested together,
+fastPLS calculates the PLS component path and fold projection once. The two
+classification heads retain separate predictions, metric paths, and selected
+component counts. For sufficiently tall SIMPLS classification problems,
+full-data predictor and class moments are also computed once. Each training
+fold obtains its moments by subtracting the held-out contribution before
+applying fold-specific centering and scaling; the PLS model, LDA model, and
+predictions are still fitted independently within every fold. This avoids
+repeatedly materializing large training-score matrices without leaking
+held-out information into model fitting. The same sufficient statistics can
+assemble eligible PLS-SVD folds through the fold-specific predictor Gram and
+class cross-product, without materializing the training-score matrix. On the
+Metal route, small reduced products are evaluated with Accelerate while the
+large sample-matrix products assigned to Metal remain on the GPU.
 
 ```{r chunk-026}
 cv_opt <- pls.single.cv(
@@ -1320,8 +1352,10 @@ standard VIP interpretation used for PLS variable ranking (Wold, Sjostrom, and
 Eriksson, 2001; Chong and Jun, 2005). VIP is most useful when the columns of
 `X` are interpretable predictors, such as genes, metabolites, spectral bins, or
 clinical variables; larger values indicate stronger contribution to the fitted
-latent predictive model. These functions are ordinary R-level helpers and are
-independent of CUDA or Metal availability.
+latent predictive model. Their matrix calculations, like the metrics returned
+by `evaluate()`, are implemented in the dependency-free C++ core and are
+independent of CUDA or Metal availability; the R functions validate inputs and
+format the returned objects.
 
 ```{r chunk-041}
 C <- fastcor(Xtrain, byrow = FALSE, diag = FALSE)
@@ -1384,11 +1418,15 @@ paths when they are unnecessary.
 In ordinary use, leave `xprod = NULL`; fastPLS then chooses the matrix-free
 route automatically only when the cross-product is large enough to justify it.
 
-For `pls.single.cv()` and `pls.double.cv()`, fold construction, loop control,
-and final metric assembly remain host-side. Each supported fold uses the
-selected backend: CUDA executes the fold model and prediction on device,
-whereas Metal applies the same fixed CPU/Metal operation split used by `pls()`.
-Unsupported accelerator combinations stop rather than falling back to a CPU fit.
+For `pls.single.cv()` and `pls.double.cv()`, seeded grouped fold construction is
+implemented in C++, while final R object assembly remains host-side. CUDA
+SIMPLS CV uploads the task once and
+keeps fold gathering, training-only standardization, fitting, prediction, and
+metric reduction on the device. CUDA PLS-SVD uses the same resident strategy
+for large multivariate regression responses; classification and smaller
+responses use a fold-local CUDA route because it is faster for those workloads.
+Metal applies the fixed CPU/Metal operation split used by `pls()`. Unsupported
+accelerator combinations stop rather than falling back to a CPU fit.
 
 ### PLS-SVD
 
@@ -1401,6 +1439,10 @@ requested component path.
 The maximum meaningful number of PLS-SVD components is capped by
 `min(nrow(X), ncol(X), ncol(Y))`; if a larger value is requested, the package
 uses the valid internal rank and records the capped component count.
+For an implicit cross-covariance, numerical rank is determined on the same
+singular-value scale as the direct decomposition. When a reduced Gram shortcut
+does not contain the complete requested retained rank, PLS-SVD uses the direct
+reduced decomposition rather than silently returning fewer directions.
 
 The main innovation relative to a simple textbook PLS-SVD implementation is the
 execution strategy. fastPLS combines randomized SVD, compact
@@ -1417,16 +1459,12 @@ appended at a time, the score and loading vectors are computed, an orthogonal
 loading direction is constructed, and the cross-covariance is deflated before
 the next component.
 
-At each refresh, fastPLS extracts candidates from the current deflated
-cross-covariance. Component-wise CPU, Metal, and CUDA routes use one candidate
-before refreshing again. When the explicit predictor-response cross-covariance would exceed
-512 MiB, CPU, Metal, and CUDA float64 use a fresh seeded rank-one randomized
-direction for every component. CUDA float32 can refresh up to eight fresh
-candidate directions at a time through component 64 and then returns to
-component-wise calculations; CUDA keeps the SIMPLS state on the device.
-For eligible large classification workloads, CPU, CUDA, and Metal can generate a small block of
-fresh candidates and apply accepted directions one at a time through the
-standard SIMPLS orthogonalization and deflation equations. PLS-SVD uses 32
+At each refresh, fastPLS extracts fresh candidates from the current deflated
+cross-covariance. Depending on the active compiled route, a refresh produces
+one direction or a small candidate block. Accepted candidates are always
+applied one at a time through the standard SIMPLS orthogonalization and
+deflation equations, and the next refresh uses the resulting deflated
+operator. CUDA keeps the SIMPLS state on the device. PLS-SVD uses 32
 oversampling directions and five power iterations. Accelerated SIMPLS, OPLS,
 and kernel-PLS use 32 directions and five iterations for ordinary matrix shapes;
 when the explicit cross-covariance would exceed 512 MiB, their automatic

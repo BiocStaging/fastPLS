@@ -6,10 +6,12 @@
 
 #include <R_ext/Error.h>
 
+#include <algorithm>
 #include <climits>
 #include <cstddef>
 #include <cstring>
 #include <new>
+#include <vector>
 
 namespace {
 
@@ -402,6 +404,207 @@ extern "C" SEXP _fastPLS_cuda_resident_simpls_fit_cpp(
          scaling, oversample, power, seed, retain_scores, method_value, north,
          kernel, gamma, degree, coefficient);
   unavailable("fitting");
+#endif
+}
+
+extern "C" SEXP _fastPLS_cuda_resident_simpls_cv_classification_cpp(
+    SEXP predictors, SEXP labels, SEXP class_count, SEXP folds,
+    SEXP components, SEXP scaling, SEXP classifier, SEXP oversample,
+    SEXP power, SEXP seed, SEXP store_predictions, SEXP store_scores,
+    SEXP method_value) {
+#ifdef FASTPLS_HAS_CUDA
+  const int precision = TYPEOF(predictors) == INTSXP ? 32 : 64;
+  MatrixInput x = matrix_input(predictors, precision, "Xdata");
+  if (TYPEOF(labels) != INTSXP || TYPEOF(folds) != INTSXP ||
+      TYPEOF(components) != INTSXP || XLENGTH(labels) != x.rows ||
+      XLENGTH(folds) != x.rows || XLENGTH(components) < 1 ||
+      XLENGTH(components) > INT_MAX) {
+    Rf_error("invalid resident CUDA classification CV dimensions");
+  }
+  const int classes = scalar_integer(class_count, "class_count");
+  const int scale = scalar_integer(scaling, "scaling");
+  const int lda = scalar_integer(classifier, "classifier");
+  const int extra = scalar_integer(oversample, "oversample");
+  const int iterations = scalar_integer(power, "power");
+  const int method = scalar_integer(method_value, "method");
+  const unsigned long long random_seed =
+    static_cast<unsigned int>(scalar_integer(seed, "seed"));
+  const bool retain_predictions =
+    scalar_logical(store_predictions, "store_predictions");
+  const bool retain_scores = scalar_logical(store_scores, "store_scores");
+  int fold_count = 0;
+  for (int row = 0; row < x.rows; ++row) {
+    fold_count = std::max(fold_count, INTEGER(folds)[row]);
+  }
+  if (classes < 2 || fold_count < 2 || scale < 1 || scale > 3 ||
+      (method != 1 && method != 3) ||
+      (lda != 0 && lda != 1)) {
+    Rf_error("invalid resident CUDA classification CV controls");
+  }
+  const int prefix_count = static_cast<int>(XLENGTH(components));
+  int protected_count = 0;
+  SEXP status = PROTECT(Rf_allocVector(INTSXP, fold_count));
+  ++protected_count;
+  SEXP metric = PROTECT(Rf_allocVector(REALSXP, prefix_count));
+  ++protected_count;
+  SEXP predictions = R_NilValue;
+  if (retain_predictions) {
+    predictions = PROTECT(Rf_allocMatrix(INTSXP, x.rows, prefix_count));
+    ++protected_count;
+  }
+  SEXP score_array = R_NilValue;
+  std::vector<float> float_scores;
+  void* score_output = nullptr;
+  if (retain_scores) {
+    score_array = PROTECT(allocate_array3(
+      REALSXP, x.rows, classes, prefix_count
+    ));
+    ++protected_count;
+    if (precision == 32) {
+      float_scores.resize(
+        static_cast<std::size_t>(x.rows) * classes * prefix_count
+      );
+      score_output = float_scores.data();
+    } else {
+      score_output = REAL(score_array);
+    }
+  }
+  char error[1024] = {};
+  const auto runner = method == 1 ?
+    fastpls_resident_plssvd_cv_classification :
+    fastpls_resident_simpls_cv_classification;
+  if (runner(
+      x.values, INTEGER(labels), INTEGER(folds), precision, x.rows,
+      x.columns, classes, INTEGER(components), prefix_count, scale, lda,
+      extra, iterations, random_seed, retain_predictions ? 1 : 0,
+      retain_scores ? 1 : 0,
+      retain_predictions ? INTEGER(predictions) : nullptr, score_output,
+      INTEGER(status), REAL(metric), error, sizeof(error))) {
+    UNPROTECT(protected_count);
+    Rf_error("%s", error);
+  }
+  if (retain_scores && precision == 32) {
+    std::transform(
+      float_scores.begin(), float_scores.end(), REAL(score_array),
+      [](float value) { return static_cast<double>(value); }
+    );
+  }
+  SEXP output = PROTECT(Rf_allocVector(VECSXP, 6));
+  ++protected_count;
+  SEXP names = PROTECT(Rf_allocVector(STRSXP, 6));
+  ++protected_count;
+  const char* const field_names[6] = {
+    "fold", "status", "ncomp", "metric_value", "class_pred", "Ypred"
+  };
+  for (int index = 0; index < 6; ++index) {
+    SET_STRING_ELT(names, index, Rf_mkChar(field_names[index]));
+  }
+  SET_VECTOR_ELT(output, 0, folds);
+  SET_VECTOR_ELT(output, 1, status);
+  SET_VECTOR_ELT(output, 2, components);
+  SET_VECTOR_ELT(output, 3, metric);
+  SET_VECTOR_ELT(output, 4, predictions);
+  SET_VECTOR_ELT(output, 5, score_array);
+  Rf_setAttrib(output, R_NamesSymbol, names);
+  UNPROTECT(protected_count);
+  return output;
+#else
+  ignore(predictors, labels, class_count, folds, components, scaling,
+         classifier, oversample, power, seed, store_predictions,
+         store_scores, method_value);
+  unavailable("resident classification cross-validation");
+#endif
+}
+
+extern "C" SEXP _fastPLS_cuda_resident_simpls_cv_regression_cpp(
+    SEXP predictors, SEXP responses, SEXP folds, SEXP components,
+    SEXP scaling, SEXP metric_code, SEXP oversample, SEXP power, SEXP seed,
+    SEXP store_predictions, SEXP method_value) {
+#ifdef FASTPLS_HAS_CUDA
+  const int precision = TYPEOF(predictors) == INTSXP ? 32 : 64;
+  MatrixInput x = matrix_input(predictors, precision, "Xdata");
+  MatrixInput y = matrix_input(responses, precision, "Ydata");
+  if (TYPEOF(folds) != INTSXP || TYPEOF(components) != INTSXP ||
+      x.rows != y.rows || XLENGTH(folds) != x.rows ||
+      XLENGTH(components) < 1 || XLENGTH(components) > INT_MAX) {
+    Rf_error("invalid resident CUDA regression CV dimensions");
+  }
+  const int scale = scalar_integer(scaling, "scaling");
+  const int metric = scalar_integer(metric_code, "metric");
+  const int extra = scalar_integer(oversample, "oversample");
+  const int iterations = scalar_integer(power, "power");
+  const int method = scalar_integer(method_value, "method");
+  const unsigned long long random_seed =
+    static_cast<unsigned int>(scalar_integer(seed, "seed"));
+  const bool retain_predictions =
+    scalar_logical(store_predictions, "store_predictions");
+  int fold_count = 0;
+  for (int row = 0; row < x.rows; ++row) {
+    fold_count = std::max(fold_count, INTEGER(folds)[row]);
+  }
+  if (fold_count < 2 || scale < 1 || scale > 3 || metric < 2 || metric > 4 ||
+      (method != 1 && method != 3)) {
+    Rf_error("invalid resident CUDA regression CV controls");
+  }
+  const int prefix_count = static_cast<int>(XLENGTH(components));
+  int protected_count = 0;
+  SEXP status = PROTECT(Rf_allocVector(INTSXP, fold_count));
+  ++protected_count;
+  SEXP metric_values = PROTECT(Rf_allocVector(REALSXP, prefix_count));
+  ++protected_count;
+  SEXP q2_values = PROTECT(Rf_allocVector(REALSXP, prefix_count));
+  ++protected_count;
+  SEXP rmsd_values = PROTECT(Rf_allocVector(REALSXP, prefix_count));
+  ++protected_count;
+  SEXP observed_r2_values = PROTECT(Rf_allocVector(REALSXP, prefix_count));
+  ++protected_count;
+  SEXP predictions = R_NilValue;
+  if (retain_predictions) {
+    predictions = PROTECT(allocate_array3(
+      REALSXP, x.rows, y.columns, prefix_count
+    ));
+    ++protected_count;
+  }
+  char error[1024] = {};
+  const auto runner = method == 1 ?
+    fastpls_resident_plssvd_cv_regression :
+    fastpls_resident_simpls_cv_regression;
+  if (runner(
+      x.values, y.values, INTEGER(folds), precision, x.rows, x.columns,
+      y.columns, INTEGER(components), prefix_count, scale, metric, extra,
+      iterations, random_seed, retain_predictions ? 1 : 0,
+      retain_predictions ? REAL(predictions) : nullptr, INTEGER(status),
+      REAL(metric_values), REAL(q2_values), REAL(rmsd_values),
+      REAL(observed_r2_values), error, sizeof(error))) {
+    UNPROTECT(protected_count);
+    Rf_error("%s", error);
+  }
+  SEXP output = PROTECT(Rf_allocVector(VECSXP, 8));
+  ++protected_count;
+  SEXP names = PROTECT(Rf_allocVector(STRSXP, 8));
+  ++protected_count;
+  const char* const field_names[8] = {
+    "fold", "status", "ncomp", "metric_value", "Ypred", "Q2Y", "RMSD",
+    "CV_R2"
+  };
+  for (int index = 0; index < 8; ++index) {
+    SET_STRING_ELT(names, index, Rf_mkChar(field_names[index]));
+  }
+  SET_VECTOR_ELT(output, 0, folds);
+  SET_VECTOR_ELT(output, 1, status);
+  SET_VECTOR_ELT(output, 2, components);
+  SET_VECTOR_ELT(output, 3, metric_values);
+  SET_VECTOR_ELT(output, 4, predictions);
+  SET_VECTOR_ELT(output, 5, q2_values);
+  SET_VECTOR_ELT(output, 6, rmsd_values);
+  SET_VECTOR_ELT(output, 7, observed_r2_values);
+  Rf_setAttrib(output, R_NamesSymbol, names);
+  UNPROTECT(protected_count);
+  return output;
+#else
+  ignore(predictors, responses, folds, components, scaling, metric_code,
+         oversample, power, seed, store_predictions, method_value);
+  unavailable("resident regression cross-validation");
 #endif
 }
 

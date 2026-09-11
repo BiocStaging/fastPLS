@@ -32,6 +32,15 @@ struct OperatorRsvdWorkspace {
 
 namespace detail {
 
+template<class Operator, class T>
+auto stabilize_operator_direction(Operator& input, Matrix<T>& direction, int)
+    -> decltype(input.stabilize(direction), void()) {
+  input.stabilize(direction);
+}
+
+template<class Operator, class T>
+void stabilize_operator_direction(Operator&, Matrix<T>&, long) {}
+
 template<class T>
 bool normalize_column(Matrix<T>& values) {
   if (values.columns() != 1 || values.rows() == 0) return false;
@@ -71,17 +80,24 @@ SingularTriplets<T> finalize_operator_sample(
     );
     std::vector<T> eigenvalues;
     if (backend.symmetric_eigen(workspace.gram, eigenvalues)) {
-      const T largest = eigenvalues.empty() ? T(1) :
-        std::max(eigenvalues.back(), T(1));
-      const T tolerance = std::numeric_limits<T>::epsilon() *
-        static_cast<T>(std::max(projected.rows(), projected.columns())) *
-        largest;
+      const T largest = eigenvalues.empty() ? T(0) : eigenvalues.back();
+      const T dimension = static_cast<T>(
+        std::max(projected.rows(), projected.columns())
+      );
+      const T relative_tolerance =
+        std::numeric_limits<T>::epsilon() * dimension;
+      // Eigenvalues of B B' are squared singular values, so the usual
+      // singular-value rank tolerance must also be squared. Do not impose a
+      // unit-scale floor: cross-covariance operators can be well-conditioned
+      // while all singular values are much smaller than one.
+      const T tolerance = largest > T(0) ?
+        relative_tolerance * relative_tolerance * largest : T(0);
       std::size_t usable = 0;
       for (std::size_t index = eigenvalues.size(); index > 0; --index) {
         if (eigenvalues[index - 1] <= tolerance || usable == retained) break;
         ++usable;
       }
-      if (usable > 0) {
+      if (usable == retained) {
         small_left.resize(projected.rows(), usable);
         singular_values.resize(usable);
         for (std::size_t column = 0; column < usable; ++column) {
@@ -170,6 +186,7 @@ bool randomized_dominant_operator_direction(
   for (std::size_t row = 0; row < direction.rows(); ++row) {
     direction(row, 0) = normal(generator);
   }
+  detail::stabilize_operator_direction(input, direction, 0);
   if (!detail::normalize_column(direction)) return false;
 
   const int iterations = std::max(controls.power, 1);
@@ -177,6 +194,7 @@ bool randomized_dominant_operator_direction(
     input.multiply(direction.view(), true, workspace.reverse);
     if (!detail::normalize_column(workspace.reverse)) return false;
     input.multiply(workspace.reverse.view(), false, workspace.sample);
+    detail::stabilize_operator_direction(input, workspace.sample, 0);
     if (!detail::normalize_column(workspace.sample)) return false;
     direction = std::move(workspace.sample);
   }

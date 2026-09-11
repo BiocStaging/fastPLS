@@ -291,12 +291,18 @@ SEXP core_matrix_cube(
   INTEGER(dimensions)[1] = static_cast<int>(columns);
   INTEGER(dimensions)[2] = static_cast<int>(values.size());
   Rf_setAttrib(output, R_DimSymbol, dimensions);
-  if (type == INTSXP) {
-    std::fill(INTEGER(output), INTEGER(output) + XLENGTH(output), 0);
-  } else {
-    std::fill(REAL(output), REAL(output) + XLENGTH(output), 0.0);
-  }
   const std::size_t slice_size = rows * columns;
+  const bool complete_slices = !variable_columns &&
+    std::all_of(values.begin(), values.end(), [=](const auto& value) {
+      return value.rows() == rows && value.columns() == columns;
+    });
+  if (!complete_slices) {
+    if (type == INTSXP) {
+      std::fill(INTEGER(output), INTEGER(output) + XLENGTH(output), 0);
+    } else {
+      std::fill(REAL(output), REAL(output) + XLENGTH(output), 0.0);
+    }
+  }
   for (std::size_t slice = 0; slice < values.size(); ++slice) {
     if (values[slice].rows() > rows ||
         (variable_columns ? values[slice].columns() > columns :
@@ -305,6 +311,26 @@ SEXP core_matrix_cube(
       throw std::invalid_argument(
         "fastPLS core matrix path has inconsistent dimensions"
       );
+    }
+    if (complete_slices) {
+      const std::size_t destination = slice * slice_size;
+      if (type == INTSXP) {
+        std::memcpy(
+          INTEGER(output) + destination, values[slice].data(),
+          slice_size * sizeof(float)
+        );
+      } else if constexpr (std::is_same<T, double>::value) {
+        std::copy_n(
+          values[slice].data(), slice_size, REAL(output) + destination
+        );
+      } else {
+        std::transform(
+          values[slice].data(), values[slice].data() + slice_size,
+          REAL(output) + destination,
+          [](const T value) { return static_cast<double>(value); }
+        );
+      }
+      continue;
     }
     for (std::size_t column = 0;
          column < values[slice].columns(); ++column) {
@@ -385,12 +411,40 @@ class RoutedLinearAlgebraF32 {
  public:
   explicit RoutedLinearAlgebraF32(
       const int backend, const std::size_t training_rows = 0,
-      const std::size_t training_columns = 0)
+      const std::size_t training_columns = 0,
+      const std::size_t response_columns = 0)
       : backend_(backend), training_rows_(training_rows),
-        training_columns_(training_columns) {
+        training_columns_(training_columns),
+        response_columns_(response_columns) {
     if (backend_ < 0 || backend_ > 2) {
       throw std::invalid_argument("float32 backend must be 0, 1, or 2");
     }
+  }
+
+  ~RoutedLinearAlgebraF32() {
+    fastpls_svd::metal_sample_gram_workspace_destroy_f32(
+      metal_sample_gram_workspace_
+    );
+  }
+
+  RoutedLinearAlgebraF32(const RoutedLinearAlgebraF32&) = delete;
+  RoutedLinearAlgebraF32& operator=(const RoutedLinearAlgebraF32&) = delete;
+
+  void configure_problem(const std::size_t training_rows,
+                         const std::size_t training_columns,
+                         const std::size_t response_columns) {
+    if (training_rows_ == training_rows &&
+        training_columns_ == training_columns &&
+        response_columns_ == response_columns) {
+      return;
+    }
+    fastpls_svd::metal_sample_gram_workspace_destroy_f32(
+      metal_sample_gram_workspace_
+    );
+    metal_sample_gram_workspace_ = nullptr;
+    training_rows_ = training_rows;
+    training_columns_ = training_columns;
+    response_columns_ = response_columns;
   }
 
   void gemm(fastpls::core::ConstMatrixView<float> left,
@@ -400,8 +454,31 @@ class RoutedLinearAlgebraF32 {
     const bool training_product = training_rows_ > 0 &&
       left.rows() == training_rows_ &&
       left.columns() == training_columns_;
-    const int operation_backend = backend_ == 2 && !training_product ?
+    const auto is_crosscovariance = [&](const auto& value) {
+      return response_columns_ > 0 &&
+        value.rows() == training_columns_ &&
+        value.columns() == response_columns_;
+    };
+    const bool crosscovariance_product =
+      is_crosscovariance(left) || is_crosscovariance(right);
+    const bool response_product = response_columns_ > 0 &&
+      left.rows() == training_rows_ &&
+      left.columns() == response_columns_;
+    const bool vector_product = output.rows() == 1 || output.columns() == 1;
+    const std::size_t inner = transpose_left ? left.rows() : left.columns();
+    const long double operation_size =
+      static_cast<long double>(output.rows()) * output.columns() * inner;
+    const bool small_crosscovariance_product =
+      crosscovariance_product && operation_size < 1.0e8L;
+    const int operation_backend = backend_ == 2 &&
+      (vector_product || small_crosscovariance_product ||
+       (!training_product && !response_product && !crosscovariance_product)) ?
       0 : backend_;
+    if (operation_backend == 2 && fastpls_svd::metal_core_gemm_into_f32(
+          left, right, transpose_left, transpose_right, output
+        )) {
+      return;
+    }
     const auto product = backend_gemm_f32(
       left, right, transpose_left, transpose_right, operation_backend
     );
@@ -414,6 +491,60 @@ class RoutedLinearAlgebraF32 {
         product.data() + column * product.rows(), product.rows(),
         output.data() + column * output.leading_dimension()
       );
+    }
+  }
+
+  void gemm_accumulate(
+      fastpls::core::ConstMatrixView<float> left,
+      fastpls::core::ConstMatrixView<float> right,
+      bool transpose_left, bool transpose_right,
+      fastpls::core::MatrixView<float> output) const {
+    const bool training_product = training_rows_ > 0 &&
+      left.rows() == training_rows_ &&
+      left.columns() == training_columns_;
+    const auto is_crosscovariance = [&](const auto& value) {
+      return response_columns_ > 0 &&
+        value.rows() == training_columns_ &&
+        value.columns() == response_columns_;
+    };
+    const bool crosscovariance_product =
+      is_crosscovariance(left) || is_crosscovariance(right);
+    const bool response_product = response_columns_ > 0 &&
+      left.rows() == training_rows_ &&
+      left.columns() == response_columns_;
+    const bool vector_product = output.rows() == 1 || output.columns() == 1;
+    const std::size_t inner = transpose_left ? left.rows() : left.columns();
+    const long double operation_size =
+      static_cast<long double>(output.rows()) * output.columns() * inner;
+    const bool small_crosscovariance_product =
+      crosscovariance_product && operation_size < 1.0e8L;
+    const int operation_backend = backend_ == 2 &&
+      (vector_product || small_crosscovariance_product ||
+       (!training_product && !response_product && !crosscovariance_product)) ?
+      0 : backend_;
+    if (operation_backend == 2 &&
+        fastpls_svd::metal_core_gemm_accumulate_into_f32(
+          left, right, transpose_left, transpose_right, output
+        )) {
+      return;
+    }
+    if (operation_backend == 0) {
+      fastpls::runtime::cpu_gemm_f32(
+        left, right, transpose_left, transpose_right, output, true
+      );
+      return;
+    }
+    const auto product = backend_gemm_f32(
+      left, right, transpose_left, transpose_right, operation_backend
+    );
+    if (product.rows() != output.rows() ||
+        product.columns() != output.columns()) {
+      throw std::runtime_error("float32 backend returned an invalid product");
+    }
+    for (std::size_t column = 0; column < output.columns(); ++column) {
+      for (std::size_t row = 0; row < output.rows(); ++row) {
+        output(row, column) += product(row, column);
+      }
     }
   }
 
@@ -434,10 +565,48 @@ class RoutedLinearAlgebraF32 {
     return host_.svd_economy(input, left_only, u, singular_values, vt);
   }
 
+  bool rank1_subtract(
+      fastpls::core::MatrixView<float> target,
+      fastpls::core::ConstMatrixView<float> column,
+      fastpls::core::ConstMatrixView<float> row) const {
+    // Sequential rank-one updates are latency-bound on Metal. The core can
+    // update the shared host matrix directly without command submission.
+    return false;
+  }
+
+  bool sample_gram_apply(
+      fastpls::core::ConstMatrixView<float> predictors,
+      fastpls::core::ConstMatrixView<float> sample_gram,
+      fastpls::core::ConstMatrixView<float> direction,
+      fastpls::core::MatrixView<float> output) const {
+    if (backend_ != 2) return false;
+    if (metal_sample_gram_workspace_ == nullptr) {
+      metal_sample_gram_workspace_ =
+        fastpls_svd::metal_sample_gram_workspace_create_f32(
+          predictors, sample_gram
+        );
+    }
+    return fastpls_svd::metal_sample_gram_apply_f32(
+      metal_sample_gram_workspace_, direction, output
+    );
+  }
+
+  bool sample_geometry(
+      fastpls::core::ConstMatrixView<float>,
+      fastpls::core::ConstMatrixView<float>,
+      fastpls::core::MatrixView<float>,
+      fastpls::core::MatrixView<float>) const {
+    // These vector products are faster on the CPU and avoid a second Metal
+    // synchronization for every sequential SIMPLS component.
+    return false;
+  }
+
  private:
   int backend_;
   std::size_t training_rows_;
   std::size_t training_columns_;
+  std::size_t response_columns_;
+  mutable void* metal_sample_gram_workspace_ = nullptr;
   fastpls::runtime::CpuLinearAlgebraF32 host_;
 };
 
@@ -941,7 +1110,7 @@ fastpls::core::SimplsControls simpls_controls(
   );
   const int maximum_predictors = environment_integer(
     "FASTPLS_FAST_CROSSPROD_MAX_P",
-#ifdef FASTPLS_USE_ACCELERATE
+#if defined(FASTPLS_USE_ACCELERATE)
     2048,
 #else
     512,
@@ -1251,7 +1420,8 @@ SEXP fit_dense_simpls_operator(
     SEXP components, bool fitted, bool store_scores,
     int oversample, int power,
     unsigned int seed, const char* xprod_mode, Backend& backend,
-    bool array_paths) {
+    bool array_paths, bool rank_one_massive_operator = true,
+    bool use_sample_response_gram = false) {
   ProtectStack protect;
   int maximum_components = 1;
   SEXP effective = capped_simpls_components(
@@ -1267,10 +1437,12 @@ SEXP fit_dense_simpls_operator(
   const long double crosscov_bytes =
     static_cast<long double>(predictors.columns()) *
     static_cast<long double>(responses.columns()) * sizeof(T);
-  if (crosscov_bytes > 512.0L * 1024.0L * 1024.0L) {
+  if (rank_one_massive_operator &&
+      crosscov_bytes > 512.0L * 1024.0L * 1024.0L) {
     controls.maximum_block = 1;
     controls.batch_candidate_geometry = false;
     controls.rank_one_operator_direction = true;
+    controls.reorthogonalize = true;
   }
   fastpls::core::CenteredCrosscovOperator<T, Backend> initial(
     predictors, responses, prepared.response_mean.data(),
@@ -1281,9 +1453,35 @@ SEXP fit_dense_simpls_operator(
   > projected(initial, controls.components, backend);
   fastpls::core::SimplsWorkspace<T> workspace;
   fastpls::core::OperatorRsvdWorkspace<T> rsvd_workspace;
+  fastpls::core::Matrix<T> sample_gram;
+  if (use_sample_response_gram) {
+    sample_gram.resize(responses.rows(), responses.rows());
+    backend.gemm(
+      responses, responses, false, true, sample_gram.view()
+    );
+    fastpls::core::Matrix<T> response_mean(responses.columns(), 1);
+    T response_mean_square = T(0);
+    for (std::size_t response = 0;
+         response < responses.columns(); ++response) {
+      response_mean(response, 0) = prepared.response_mean[response];
+      response_mean_square += prepared.response_mean[response] *
+        prepared.response_mean[response];
+    }
+    fastpls::core::Matrix<T> response_mean_product(responses.rows(), 1);
+    backend.gemm(
+      responses, response_mean.view(), false, false,
+      response_mean_product.view()
+    );
+    for (std::size_t column = 0; column < sample_gram.columns(); ++column) {
+      for (std::size_t row = 0; row < sample_gram.rows(); ++row) {
+        sample_gram(row, column) -= response_mean_product(row, 0) +
+          response_mean_product(column, 0) - response_mean_square;
+      }
+    }
+  }
   const auto model = fastpls::core::fit_simpls_operator<T>(
     predictors, initial, projected, controls, backend, workspace,
-    rsvd_workspace
+    rsvd_workspace, sample_gram.view()
   );
   if (model.completed_components < controls.components) {
     throw std::runtime_error(
@@ -1525,12 +1723,13 @@ SEXP regression_cv_result(
     kernel_controls
   );
 
-  SEXP output = protect.add(Rf_allocVector(VECSXP, 5));
-  SEXP names = protect.add(Rf_allocVector(STRSXP, 5));
-  const char* field_names[5] = {
-    "fold", "status", "ncomp", "metric_value", "Ypred"
+  SEXP output = protect.add(Rf_allocVector(VECSXP, 9));
+  SEXP names = protect.add(Rf_allocVector(STRSXP, 9));
+  const char* field_names[9] = {
+    "fold", "status", "ncomp", "metric_value", "Ypred", "Q2Y", "RMSD",
+    "CV_R2", "native_evaluation"
   };
-  for (int index = 0; index < 5; ++index) {
+  for (int index = 0; index < 9; ++index) {
     SET_STRING_ELT(names, index, Rf_mkChar(field_names[index]));
   }
   SET_VECTOR_ELT(output, 0, integer_predictions(result.folds));
@@ -1542,6 +1741,23 @@ SEXP regression_cv_result(
       result.predictions, predictors.rows(), responses.columns(), false, false
     ) : R_NilValue
   );
+  SET_VECTOR_ELT(output, 5, numeric_vector(result.q2));
+  SET_VECTOR_ELT(output, 6, numeric_vector(result.rmsd));
+  SET_VECTOR_ELT(output, 7, numeric_vector(result.observed_r2));
+  if (result.evaluation.empty()) {
+    SET_VECTOR_ELT(output, 8, R_NilValue);
+  } else {
+    SEXP evaluation = protect.add(Rf_allocMatrix(
+      REALSXP, static_cast<int>(result.evaluation.size()), 12
+    ));
+    for (std::size_t row = 0; row < result.evaluation.size(); ++row) {
+      for (std::size_t column = 0; column < 12; ++column) {
+        REAL(evaluation)[row + column * result.evaluation.size()] =
+          result.evaluation[row].values[column];
+      }
+    }
+    SET_VECTOR_ELT(output, 8, evaluation);
+  }
   Rf_setAttrib(output, R_NamesSymbol, names);
   return output;
 }
@@ -1554,6 +1770,21 @@ extern "C" SEXP _fastPLS_has_cuda() {
 
 extern "C" SEXP _fastPLS_has_metal() {
   return Rf_ScalarLogical(fastpls_svd::has_metal_backend());
+}
+
+extern "C" SEXP _fastPLS_simpls_cache_predictor_crossprod(
+    SEXP samples, SEXP predictors, SEXP components) {
+  const int n = Rf_asInteger(samples);
+  const int p = Rf_asInteger(predictors);
+  const int a = Rf_asInteger(components);
+  if (n < 1 || p < 1 || a < 1) {
+    Rf_error("SIMPLS cache dimensions must be positive integers");
+  }
+  const fastpls::core::SimplsControls controls = simpls_controls(
+    static_cast<std::size_t>(n), static_cast<std::size_t>(p), 1,
+    static_cast<std::size_t>(a), false, 1, 0, 1
+  );
+  return Rf_ScalarLogical(controls.cache_predictor_crossprod);
 }
 
 extern "C" SEXP _fastPLS_set_cpu_threads(SEXP threads) {
@@ -1743,9 +1974,7 @@ extern "C" SEXP _fastPLS_cv_folds_core_cpp(
         INTEGER(group_values), samples, label_data,
         static_cast<std::size_t>(std::max(classes, 0)), Rf_asInteger(folds),
         [](std::size_t remaining) {
-          return static_cast<std::size_t>(
-            unif_rand() * static_cast<double>(remaining)
-          );
+          return static_cast<std::size_t>(R_unif_index(remaining));
         }
       );
     } catch (...) {
@@ -1785,6 +2014,47 @@ extern "C" SEXP _fastPLS_pls_cv_classification_float32_core_cpp(
         x.view(), labels, class_count, folds, components, scaling, method,
         classifier, oversample, power, seed, store_predictions, store_scores,
         backend
+      );
+    }
+  );
+}
+
+extern "C" SEXP _fastPLS_pls_cv_classification_float32_metal_core_cpp(
+    SEXP predictors, SEXP labels, SEXP class_count, SEXP folds,
+    SEXP components, SEXP scaling, SEXP method, SEXP classifier,
+    SEXP north, SEXP kernel, SEXP gamma, SEXP degree, SEXP offset,
+    SEXP oversample, SEXP power, SEXP seed, SEXP store_predictions,
+    SEXP store_scores) {
+  return translate_exceptions(
+    "Metal float32 classification cross-validation", [&] {
+      if (!fastpls_svd::has_metal_backend()) {
+        throw std::runtime_error(
+          "Metal is unavailable; no CPU fallback is performed"
+        );
+      }
+      const auto x = float_matrix_from_s4(predictors, "Xdata");
+      const int classes = Rf_asInteger(class_count);
+      const int method_code = Rf_asInteger(method);
+      const int orthogonal = method_code == 4 ? Rf_asInteger(north) : 0;
+      if (classes < 2 || (method_code == 4 && orthogonal < 1)) {
+        throw std::invalid_argument(
+          "Metal classification CV controls are invalid"
+        );
+      }
+      fastpls::core::KernelCvControls kernel_controls;
+      if (method_code == 5) {
+        kernel_controls = kernel_cv_controls(
+          kernel, gamma, degree, offset
+        );
+      }
+      RoutedLinearAlgebraF32 backend(
+        2, x.rows(), x.columns(), static_cast<std::size_t>(classes)
+      );
+      return classification_cv_result<float>(
+        x.view(), labels, class_count, folds, components, scaling, method,
+        classifier, oversample, power, seed, store_predictions,
+        store_scores, backend, static_cast<std::size_t>(orthogonal),
+        kernel_controls
       );
     }
   );
@@ -1902,6 +2172,45 @@ extern "C" SEXP _fastPLS_pls_cv_regression_float32_core_cpp(
       oversample, power, seed, store_predictions, backend
     );
   });
+}
+
+extern "C" SEXP _fastPLS_pls_cv_regression_float32_metal_core_cpp(
+    SEXP predictors, SEXP responses, SEXP folds, SEXP components,
+    SEXP scaling, SEXP method, SEXP metric, SEXP north, SEXP kernel,
+    SEXP gamma, SEXP degree, SEXP offset, SEXP oversample, SEXP power,
+    SEXP seed, SEXP store_predictions) {
+  return translate_exceptions(
+    "Metal float32 regression cross-validation", [&] {
+      if (!fastpls_svd::has_metal_backend()) {
+        throw std::runtime_error(
+          "Metal is unavailable; no CPU fallback is performed"
+        );
+      }
+      const auto x = float_matrix_from_s4(predictors, "Xdata");
+      const auto y = float_matrix_from_s4(responses, "Ydata");
+      const int method_code = Rf_asInteger(method);
+      const int orthogonal = method_code == 4 ? Rf_asInteger(north) : 0;
+      if (x.rows() != y.rows() || (method_code == 4 && orthogonal < 1)) {
+        throw std::invalid_argument(
+          "Metal regression CV controls are invalid"
+        );
+      }
+      fastpls::core::KernelCvControls kernel_controls;
+      if (method_code == 5) {
+        kernel_controls = kernel_cv_controls(
+          kernel, gamma, degree, offset
+        );
+      }
+      RoutedLinearAlgebraF32 backend(
+        2, x.rows(), x.columns(), y.columns()
+      );
+      return regression_cv_result<float>(
+        x.view(), y.view(), folds, components, scaling, method, metric,
+        oversample, power, seed, store_predictions, backend,
+        static_cast<std::size_t>(orthogonal), kernel_controls
+      );
+    }
+  );
 }
 
 extern "C" SEXP _fastPLS_pls_cv_opls_regression_core_cpp(
@@ -2207,6 +2516,803 @@ extern "C" SEXP _fastPLS_spearman_correlation_cpp(SEXP observed,
     Rf_error("Unknown error in Spearman correlation");
   }
   return R_NilValue;
+}
+
+extern "C" SEXP _fastPLS_evaluate_regression_core_cpp(
+    SEXP observed, SEXP predicted, SEXP training, SEXP relative_epsilon,
+    SEXP na_rm) {
+  return translate_exceptions("compiled regression evaluation", [&] {
+    if (!Rf_isMatrix(observed) || !Rf_isMatrix(predicted)) {
+      throw std::invalid_argument(
+        "compiled regression evaluation requires two matrices"
+      );
+    }
+    ProtectStack protect;
+    SEXP observed_real = protect.add(Rf_coerceVector(observed, REALSXP));
+    SEXP predicted_real = protect.add(Rf_coerceVector(predicted, REALSXP));
+    const SEXP dimensions = Rf_getAttrib(observed, R_DimSymbol);
+    const SEXP predicted_dimensions = Rf_getAttrib(predicted, R_DimSymbol);
+    if (TYPEOF(dimensions) != INTSXP || XLENGTH(dimensions) != 2 ||
+        TYPEOF(predicted_dimensions) != INTSXP ||
+        XLENGTH(predicted_dimensions) != 2 ||
+        INTEGER(dimensions)[0] != INTEGER(predicted_dimensions)[0] ||
+        INTEGER(dimensions)[1] != INTEGER(predicted_dimensions)[1]) {
+      throw std::invalid_argument(
+        "observed and predicted must have the same dimensions"
+      );
+    }
+    const std::size_t rows = static_cast<std::size_t>(INTEGER(dimensions)[0]);
+    const std::size_t columns = static_cast<std::size_t>(INTEGER(dimensions)[1]);
+    const std::size_t size = rows * columns;
+    const double* observed_data = REAL(observed_real);
+    const double* predicted_data = REAL(predicted_real);
+    const double epsilon = Rf_asReal(relative_epsilon);
+    if (!std::isfinite(epsilon) || epsilon < 0.0) {
+      throw std::invalid_argument("relative_epsilon must be finite and non-negative");
+    }
+
+    SEXP training_real = R_NilValue;
+    const double* training_data = nullptr;
+    std::size_t training_rows = 0;
+    if (training != R_NilValue) {
+      if (!Rf_isMatrix(training)) {
+        throw std::invalid_argument("training responses must be a matrix");
+      }
+      const SEXP training_dimensions = Rf_getAttrib(training, R_DimSymbol);
+      if (TYPEOF(training_dimensions) != INTSXP ||
+          XLENGTH(training_dimensions) != 2 ||
+          INTEGER(training_dimensions)[1] != static_cast<int>(columns)) {
+        throw std::invalid_argument(
+          "training responses must have the same number of columns"
+        );
+      }
+      training_rows = static_cast<std::size_t>(INTEGER(training_dimensions)[0]);
+      training_real = protect.add(Rf_coerceVector(training, REALSXP));
+      training_data = REAL(training_real);
+    }
+
+    std::vector<long double> observed_sums(columns, 0.0L);
+    std::vector<std::size_t> observed_counts(columns, 0);
+    std::vector<long double> training_sums(columns, 0.0L);
+    std::vector<std::size_t> training_counts(columns, 0);
+    bool all_complete = true;
+    std::size_t relative_pairs = 0;
+    for (std::size_t column = 0; column < columns; ++column) {
+      for (std::size_t row = 0; row < rows; ++row) {
+        const std::size_t index = column * rows + row;
+        if (std::isfinite(observed_data[index]) &&
+            std::isfinite(predicted_data[index])) {
+          observed_sums[column] += observed_data[index];
+          ++observed_counts[column];
+          if (std::abs(observed_data[index]) > epsilon) ++relative_pairs;
+        } else {
+          all_complete = false;
+        }
+      }
+      if (training_data) {
+        for (std::size_t row = 0; row < training_rows; ++row) {
+          const double value = training_data[column * training_rows + row];
+          if (std::isfinite(value)) {
+            training_sums[column] += value;
+            ++training_counts[column];
+          }
+        }
+      }
+    }
+
+    long double sse = 0.0L, absolute_error = 0.0L, error_sum = 0.0L;
+    long double observed_tss = 0.0L, training_tss = 0.0L;
+    long double observed_sum = 0.0L, observed_square = 0.0L;
+    long double predicted_sum = 0.0L, predicted_square = 0.0L;
+    long double cross_sum = 0.0L, relative_sum = 0.0L;
+    std::size_t complete = 0, relative_count = 0;
+    std::vector<double> relative_values;
+    relative_values.reserve(relative_pairs);
+    std::vector<double> complete_observed, complete_predicted;
+    if (!all_complete) {
+      complete_observed.reserve(size);
+      complete_predicted.reserve(size);
+    }
+    for (std::size_t column = 0; column < columns; ++column) {
+      const long double observed_mean = observed_counts[column] ?
+        observed_sums[column] / observed_counts[column] : NAN;
+      const long double training_mean = training_data && training_counts[column] ?
+        training_sums[column] / training_counts[column] : NAN;
+      for (std::size_t row = 0; row < rows; ++row) {
+        const std::size_t index = column * rows + row;
+        const double y = observed_data[index];
+        const double estimate = predicted_data[index];
+        if (!std::isfinite(y) || !std::isfinite(estimate)) continue;
+        const long double error = estimate - y;
+        sse += error * error;
+        absolute_error += std::abs(error);
+        error_sum += error;
+        observed_tss += (y - observed_mean) * (y - observed_mean);
+        if (training_data && std::isfinite(static_cast<double>(training_mean))) {
+          training_tss += (y - training_mean) * (y - training_mean);
+        }
+        observed_sum += y;
+        observed_square += static_cast<long double>(y) * y;
+        predicted_sum += estimate;
+        predicted_square += static_cast<long double>(estimate) * estimate;
+        cross_sum += static_cast<long double>(y) * estimate;
+        if (std::abs(y) > epsilon) {
+          const double relative = std::abs(static_cast<double>(error) / y) * 100.0;
+          relative_sum += relative;
+          relative_values.push_back(relative);
+          ++relative_count;
+        }
+        if (!all_complete) {
+          complete_observed.push_back(y);
+          complete_predicted.push_back(estimate);
+        }
+        ++complete;
+      }
+    }
+    if (!complete) {
+      throw std::invalid_argument("no complete regression pairs");
+    }
+    const long double count = static_cast<long double>(complete);
+    const double rmsd = std::sqrt(static_cast<double>(sse / count));
+    double median_relative = NA_REAL;
+    if (!relative_values.empty()) {
+      const std::size_t middle = relative_values.size() / 2;
+      std::nth_element(
+        relative_values.begin(), relative_values.begin() + middle,
+        relative_values.end()
+      );
+      median_relative = relative_values[middle];
+      if (relative_values.size() % 2 == 0) {
+        const double lower = *std::max_element(
+          relative_values.begin(), relative_values.begin() + middle
+        );
+        median_relative = (lower + median_relative) / 2.0;
+      }
+    }
+    const long double pearson_left = observed_square -
+      observed_sum * observed_sum / count;
+    const long double pearson_right = predicted_square -
+      predicted_sum * predicted_sum / count;
+    const long double pearson_cross = cross_sum -
+      observed_sum * predicted_sum / count;
+    const long double pearson_denominator = std::sqrt(
+      pearson_left * pearson_right
+    );
+    const double pearson = pearson_denominator > 0.0L ?
+      static_cast<double>(pearson_cross / pearson_denominator) : NA_REAL;
+    const double* spearman_observed = all_complete ? observed_data :
+      complete_observed.data();
+    const double* spearman_predicted = all_complete ? predicted_data :
+      complete_predicted.data();
+    const auto spearman_result = fastpls::core::spearman_correlation(
+      spearman_observed, spearman_predicted, complete
+    );
+    const double spearman =
+      spearman_result.status == fastpls::core::CorrelationStatus::success ?
+      spearman_result.value : NA_REAL;
+    const long double flattened_tss = observed_square -
+      observed_sum * observed_sum / count;
+    const double observed_sd = complete > 1 && flattened_tss >= 0.0L ?
+      std::sqrt(static_cast<double>(flattened_tss / (count - 1.0L))) : NA_REAL;
+
+    SEXP output = protect.add(Rf_allocVector(REALSXP, 12));
+    const bool remove_missing = Rf_asLogical(na_rm) != FALSE;
+    const double values[12] = {
+      remove_missing ? static_cast<double>(complete) : static_cast<double>(size),
+      observed_tss > 0.0L ? 1.0 - static_cast<double>(sse / observed_tss) : NA_REAL,
+      training_data && training_tss > 0.0L ?
+        1.0 - static_cast<double>(sse / training_tss) : NA_REAL,
+      rmsd, rmsd, static_cast<double>(absolute_error / count),
+      static_cast<double>(error_sum / count), median_relative,
+      relative_count ? static_cast<double>(relative_sum / relative_count) : NA_REAL,
+      std::isfinite(observed_sd) && rmsd > 0.0 ? observed_sd / rmsd : NA_REAL,
+      pearson, spearman
+    };
+    std::copy(values, values + 12, REAL(output));
+    SEXP names = protect.add(Rf_allocVector(STRSXP, 12));
+    const char* labels[12] = {
+      "n", "R2", "Q2", "RMSD", "RMSE", "MAE", "bias",
+      "MRE_percent", "MAPE_percent", "RPD", "Pearson_r", "Spearman_r"
+    };
+    for (int index = 0; index < 12; ++index) {
+      SET_STRING_ELT(names, index, Rf_mkChar(labels[index]));
+    }
+    Rf_setAttrib(output, R_NamesSymbol, names);
+    return output;
+  });
+}
+
+extern "C" SEXP _fastPLS_evaluate_regression_by_column_cpp(
+    SEXP observed, SEXP predicted, SEXP training, SEXP relative_epsilon,
+    SEXP na_rm) {
+  return translate_exceptions("response-wise regression evaluation", [&] {
+    if (!Rf_isMatrix(observed) || !Rf_isMatrix(predicted)) {
+      throw std::invalid_argument(
+        "regression evaluation requires two numeric matrices"
+      );
+    }
+    ProtectStack protect;
+    SEXP observed_real = protect.add(Rf_coerceVector(observed, REALSXP));
+    SEXP predicted_real = protect.add(Rf_coerceVector(predicted, REALSXP));
+    const SEXP dimensions = Rf_getAttrib(observed, R_DimSymbol);
+    const SEXP predicted_dimensions = Rf_getAttrib(predicted, R_DimSymbol);
+    if (TYPEOF(dimensions) != INTSXP || XLENGTH(dimensions) != 2 ||
+        TYPEOF(predicted_dimensions) != INTSXP ||
+        XLENGTH(predicted_dimensions) != 2 ||
+        INTEGER(dimensions)[0] != INTEGER(predicted_dimensions)[0] ||
+        INTEGER(dimensions)[1] != INTEGER(predicted_dimensions)[1]) {
+      throw std::invalid_argument(
+        "observed and predicted must have the same dimensions"
+      );
+    }
+    const int rows = INTEGER(dimensions)[0];
+    const int columns = INTEGER(dimensions)[1];
+    SEXP training_real = R_NilValue;
+    int training_rows = 0;
+    if (training != R_NilValue) {
+      if (!Rf_isMatrix(training)) {
+        throw std::invalid_argument("training responses must be a matrix");
+      }
+      const SEXP training_dimensions = Rf_getAttrib(training, R_DimSymbol);
+      if (TYPEOF(training_dimensions) != INTSXP ||
+          XLENGTH(training_dimensions) != 2 ||
+          INTEGER(training_dimensions)[1] != columns) {
+        throw std::invalid_argument(
+          "training responses must have the same number of columns"
+        );
+      }
+      training_rows = INTEGER(training_dimensions)[0];
+      training_real = protect.add(Rf_coerceVector(training, REALSXP));
+    }
+
+    SEXP output = protect.add(Rf_allocMatrix(REALSXP, columns, 12));
+    std::fill(REAL(output), REAL(output) + static_cast<std::size_t>(columns) * 12,
+              NA_REAL);
+    const bool remove_missing = Rf_asLogical(na_rm) != FALSE;
+    for (int column = 0; column < columns; ++column) {
+      std::size_t complete = 0;
+      for (int row = 0; row < rows; ++row) {
+        const double y = REAL(observed_real)[column * rows + row];
+        const double estimate = REAL(predicted_real)[column * rows + row];
+        if (std::isfinite(y) && std::isfinite(estimate)) ++complete;
+      }
+      if (!complete) {
+        REAL(output)[column] = remove_missing ? 0.0 : static_cast<double>(rows);
+        continue;
+      }
+      int temporary_protects = 0;
+      SEXP observed_column = PROTECT(Rf_allocMatrix(REALSXP, rows, 1));
+      ++temporary_protects;
+      SEXP predicted_column = PROTECT(Rf_allocMatrix(REALSXP, rows, 1));
+      ++temporary_protects;
+      std::copy_n(
+        REAL(observed_real) + static_cast<std::size_t>(column) * rows, rows,
+        REAL(observed_column)
+      );
+      std::copy_n(
+        REAL(predicted_real) + static_cast<std::size_t>(column) * rows, rows,
+        REAL(predicted_column)
+      );
+      SEXP training_column = R_NilValue;
+      if (training_real != R_NilValue) {
+        training_column = PROTECT(Rf_allocMatrix(REALSXP, training_rows, 1));
+        ++temporary_protects;
+        std::copy_n(
+          REAL(training_real) + static_cast<std::size_t>(column) * training_rows,
+          training_rows, REAL(training_column)
+        );
+      }
+      SEXP values = PROTECT(_fastPLS_evaluate_regression_core_cpp(
+        observed_column, predicted_column, training_column, relative_epsilon,
+        na_rm
+      ));
+      ++temporary_protects;
+      for (int metric = 0; metric < 12; ++metric) {
+        REAL(output)[column + metric * columns] = REAL(values)[metric];
+      }
+      if (!remove_missing) {
+        REAL(output)[column] = static_cast<double>(rows);
+      }
+      UNPROTECT(temporary_protects);
+    }
+    SEXP column_names = protect.add(Rf_allocVector(STRSXP, 12));
+    const char* labels[12] = {
+      "n", "R2", "Q2", "RMSD", "RMSE", "MAE", "bias",
+      "MRE_percent", "MAPE_percent", "RPD", "Pearson_r", "Spearman_r"
+    };
+    for (int index = 0; index < 12; ++index) {
+      SET_STRING_ELT(column_names, index, Rf_mkChar(labels[index]));
+    }
+    SEXP dimnames = protect.add(Rf_allocVector(VECSXP, 2));
+    SET_VECTOR_ELT(dimnames, 1, column_names);
+    Rf_setAttrib(output, R_DimNamesSymbol, dimnames);
+    return output;
+  });
+}
+
+extern "C" SEXP _fastPLS_evaluate_is_onehot_cpp(SEXP values) {
+  if (!Rf_isMatrix(values) ||
+      (TYPEOF(values) != REALSXP && TYPEOF(values) != INTSXP)) {
+    return Rf_ScalarLogical(FALSE);
+  }
+  const SEXP dimensions = Rf_getAttrib(values, R_DimSymbol);
+  const int rows = INTEGER(dimensions)[0];
+  const int columns = INTEGER(dimensions)[1];
+  if (columns <= 1) return Rf_ScalarLogical(FALSE);
+  for (int row = 0; row < rows; ++row) {
+    double sum = 0.0;
+    for (int column = 0; column < columns; ++column) {
+      const std::size_t index = row + static_cast<std::size_t>(column) * rows;
+      const double value = TYPEOF(values) == REALSXP ? REAL(values)[index] :
+        (INTEGER(values)[index] == NA_INTEGER ? NA_REAL :
+          static_cast<double>(INTEGER(values)[index]));
+      if (std::isnan(value)) continue;
+      if (!std::isfinite(value) || (value != 0.0 && value != 1.0)) {
+        return Rf_ScalarLogical(FALSE);
+      }
+      sum += value;
+    }
+    if (std::abs(sum - 1.0) >= 1e-8) return Rf_ScalarLogical(FALSE);
+  }
+  return Rf_ScalarLogical(TRUE);
+}
+
+extern "C" SEXP _fastPLS_evaluate_class_labels_cpp(
+    SEXP values, SEXP reference_levels) {
+  return translate_exceptions("classification label decoding", [&] {
+    ProtectStack protect;
+    if (Rf_isFactor(values)) {
+      const SEXP levels = Rf_getAttrib(values, R_LevelsSymbol);
+      SEXP output = protect.add(Rf_allocVector(STRSXP, XLENGTH(values)));
+      for (R_xlen_t index = 0; index < XLENGTH(values); ++index) {
+        const int code = INTEGER(values)[index];
+        SET_STRING_ELT(
+          output, index,
+          code == NA_INTEGER || code < 1 || code > XLENGTH(levels) ?
+            NA_STRING : STRING_ELT(levels, code - 1)
+        );
+      }
+      return output;
+    }
+    if (TYPEOF(values) == STRSXP && !Rf_isMatrix(values)) return values;
+    if (Rf_inherits(values, "data.frame")) {
+      if (XLENGTH(values) < 1) {
+        throw std::invalid_argument("classification data frame is empty");
+      }
+      return _fastPLS_evaluate_class_labels_cpp(
+        VECTOR_ELT(values, 0), reference_levels
+      );
+    }
+    if (!Rf_isMatrix(values)) {
+      return protect.add(Rf_coerceVector(values, STRSXP));
+    }
+    const SEXP dimensions = Rf_getAttrib(values, R_DimSymbol);
+    const int rows = INTEGER(dimensions)[0];
+    const int columns = INTEGER(dimensions)[1];
+    if (TYPEOF(values) != REALSXP && TYPEOF(values) != INTSXP) {
+      SEXP strings = protect.add(Rf_coerceVector(values, STRSXP));
+      SEXP output = protect.add(Rf_allocVector(STRSXP, rows));
+      for (int row = 0; row < rows; ++row) {
+        SET_STRING_ELT(output, row, STRING_ELT(strings, row));
+      }
+      return output;
+    }
+    SEXP labels = R_NilValue;
+    const SEXP dimnames = Rf_getAttrib(values, R_DimNamesSymbol);
+    if (TYPEOF(dimnames) == VECSXP && XLENGTH(dimnames) == 2 &&
+        TYPEOF(VECTOR_ELT(dimnames, 1)) == STRSXP) {
+      labels = VECTOR_ELT(dimnames, 1);
+    } else if (TYPEOF(reference_levels) == STRSXP &&
+               XLENGTH(reference_levels) == columns) {
+      labels = reference_levels;
+    } else {
+      labels = protect.add(Rf_allocVector(STRSXP, columns));
+      for (int column = 0; column < columns; ++column) {
+        SET_STRING_ELT(
+          labels, column, Rf_mkChar(std::to_string(column + 1).c_str())
+        );
+      }
+    }
+    SEXP output = protect.add(Rf_allocVector(STRSXP, rows));
+    for (int row = 0; row < rows; ++row) {
+      int best = 0;
+      double best_value = -std::numeric_limits<double>::infinity();
+      for (int column = 0; column < columns; ++column) {
+        const std::size_t index = row + static_cast<std::size_t>(column) * rows;
+        const double value = TYPEOF(values) == REALSXP ? REAL(values)[index] :
+          (INTEGER(values)[index] == NA_INTEGER ? NA_REAL :
+            static_cast<double>(INTEGER(values)[index]));
+        if (column == 0 || value > best_value) {
+          best = column;
+          best_value = value;
+        }
+      }
+      SET_STRING_ELT(output, row, STRING_ELT(labels, best));
+    }
+    return output;
+  });
+}
+
+extern "C" SEXP _fastPLS_evaluate_classification_core_cpp(
+    SEXP observed, SEXP predicted, SEXP class_count, SEXP scores,
+    SEXP score_observed, SEXP top_k) {
+  return translate_exceptions("classification evaluation", [&] {
+    ProtectStack protect;
+    SEXP observed_integer = protect.add(Rf_coerceVector(observed, INTSXP));
+    SEXP predicted_integer = protect.add(Rf_coerceVector(predicted, INTSXP));
+    const int classes = Rf_asInteger(class_count);
+    const R_xlen_t samples = XLENGTH(observed_integer);
+    if (classes < 1 || XLENGTH(predicted_integer) != samples) {
+      throw std::invalid_argument(
+        "classification labels must have matching lengths and classes"
+      );
+    }
+    std::vector<double> confusion(
+      static_cast<std::size_t>(classes) * classes, 0.0
+    );
+    std::size_t complete = 0;
+    for (R_xlen_t sample = 0; sample < samples; ++sample) {
+      const int truth = INTEGER(observed_integer)[sample];
+      const int estimate = INTEGER(predicted_integer)[sample];
+      if (truth == NA_INTEGER || estimate == NA_INTEGER) continue;
+      if (truth < 1 || truth > classes || estimate < 1 || estimate > classes) {
+        throw std::invalid_argument("classification labels are out of range");
+      }
+      confusion[static_cast<std::size_t>(estimate - 1) +
+        static_cast<std::size_t>(truth - 1) * classes] += 1.0;
+      ++complete;
+    }
+    std::vector<double> support(classes, 0.0), predicted_support(classes, 0.0);
+    std::vector<double> precision(classes, NA_REAL), recall(classes, NA_REAL);
+    std::vector<double> f1(classes, NA_REAL);
+    double correct = 0.0;
+    for (int truth = 0; truth < classes; ++truth) {
+      for (int estimate = 0; estimate < classes; ++estimate) {
+        const double count = confusion[estimate + truth * classes];
+        support[truth] += count;
+        predicted_support[estimate] += count;
+      }
+      correct += confusion[truth + truth * classes];
+    }
+    double recall_sum = 0.0, precision_sum = 0.0, f1_sum = 0.0;
+    std::size_t recall_count = 0, precision_count = 0, f1_count = 0;
+    for (int cls = 0; cls < classes; ++cls) {
+      const double tp = confusion[cls + cls * classes];
+      if (support[cls] > 0.0) {
+        recall[cls] = tp / support[cls];
+        recall_sum += recall[cls];
+        ++recall_count;
+      }
+      if (predicted_support[cls] > 0.0) {
+        precision[cls] = tp / predicted_support[cls];
+        precision_sum += precision[cls];
+        ++precision_count;
+      }
+      if (std::isfinite(recall[cls]) && std::isfinite(precision[cls]) &&
+          recall[cls] + precision[cls] > 0.0) {
+        f1[cls] = 2.0 * recall[cls] * precision[cls] /
+          (recall[cls] + precision[cls]);
+        f1_sum += f1[cls];
+        ++f1_count;
+      }
+    }
+    const double n = static_cast<double>(complete);
+    const double accuracy = complete ? correct / n : NA_REAL;
+    const double null_rate = complete ?
+      *std::max_element(support.begin(), support.end()) / n : NA_REAL;
+    const double lift = std::isfinite(null_rate) && null_rate > 0.0 ?
+      accuracy / null_rate : NA_REAL;
+    double expected = 0.0;
+    if (complete) {
+      for (int cls = 0; cls < classes; ++cls) {
+        expected += predicted_support[cls] * support[cls];
+      }
+      expected /= n * n;
+    } else {
+      expected = NA_REAL;
+    }
+    const double kappa = std::isfinite(expected) && expected < 1.0 ?
+      (accuracy - expected) / (1.0 - expected) : NA_REAL;
+
+    SEXP metrics = protect.add(Rf_allocVector(REALSXP, 9));
+    const double metric_values[9] = {
+      n, accuracy, null_rate, lift,
+      recall_count ? recall_sum / recall_count : NA_REAL,
+      precision_count ? precision_sum / precision_count : NA_REAL,
+      recall_count ? recall_sum / recall_count : NA_REAL,
+      f1_count ? f1_sum / f1_count : NA_REAL, kappa
+    };
+    std::copy(metric_values, metric_values + 9, REAL(metrics));
+    SEXP metric_names = protect.add(Rf_allocVector(STRSXP, 9));
+    const char* metric_labels[9] = {
+      "n", "accuracy", "no_information_rate", "lift_accuracy",
+      "balanced_accuracy", "macro_precision", "macro_recall",
+      "macro_f1", "kappa"
+    };
+    for (int index = 0; index < 9; ++index) {
+      SET_STRING_ELT(metric_names, index, Rf_mkChar(metric_labels[index]));
+    }
+    Rf_setAttrib(metrics, R_NamesSymbol, metric_names);
+
+    SEXP per_class = protect.add(Rf_allocMatrix(REALSXP, classes, 4));
+    for (int cls = 0; cls < classes; ++cls) {
+      REAL(per_class)[cls] = support[cls];
+      REAL(per_class)[cls + classes] = precision[cls];
+      REAL(per_class)[cls + 2 * classes] = recall[cls];
+      REAL(per_class)[cls + 3 * classes] = f1[cls];
+    }
+    SEXP per_class_names = protect.add(Rf_allocVector(STRSXP, 4));
+    const char* class_labels[4] = {"support", "precision", "recall", "f1"};
+    for (int index = 0; index < 4; ++index) {
+      SET_STRING_ELT(per_class_names, index, Rf_mkChar(class_labels[index]));
+    }
+    SEXP per_class_dimnames = protect.add(Rf_allocVector(VECSXP, 2));
+    SET_VECTOR_ELT(per_class_dimnames, 1, per_class_names);
+    Rf_setAttrib(per_class, R_DimNamesSymbol, per_class_dimnames);
+
+    SEXP confusion_matrix = protect.add(Rf_allocMatrix(INTSXP, classes, classes));
+    for (std::size_t index = 0; index < confusion.size(); ++index) {
+      INTEGER(confusion_matrix)[index] = static_cast<int>(confusion[index]);
+    }
+
+    SEXP top_accuracy = R_NilValue;
+    if (scores != R_NilValue && XLENGTH(top_k) > 0) {
+      if (!Rf_isMatrix(scores) ||
+          (TYPEOF(scores) != REALSXP && TYPEOF(scores) != INTSXP)) {
+        throw std::invalid_argument("classification scores must be numeric");
+      }
+      SEXP score_real = protect.add(Rf_coerceVector(scores, REALSXP));
+      SEXP score_truth = protect.add(Rf_coerceVector(score_observed, INTSXP));
+      const SEXP score_dimensions = Rf_getAttrib(scores, R_DimSymbol);
+      const int score_rows = INTEGER(score_dimensions)[0];
+      const int score_columns = INTEGER(score_dimensions)[1];
+      if (XLENGTH(score_truth) != score_rows) {
+        throw std::invalid_argument("top-k labels must match score rows");
+      }
+      top_accuracy = protect.add(Rf_allocVector(REALSXP, XLENGTH(top_k)));
+      std::vector<int> order(static_cast<std::size_t>(score_columns));
+      for (R_xlen_t request = 0; request < XLENGTH(top_k); ++request) {
+        const int requested = INTEGER(top_k)[request];
+        if (requested == NA_INTEGER) {
+          REAL(top_accuracy)[request] = NA_REAL;
+          continue;
+        }
+        const int keep = std::min(std::max(requested, 1), score_columns);
+        std::size_t valid = 0, hits = 0;
+        for (int row = 0; row < score_rows; ++row) {
+          const int truth = INTEGER(score_truth)[row];
+          if (truth == NA_INTEGER || truth < 1 || truth > score_columns) continue;
+          for (int column = 0; column < score_columns; ++column) {
+            order[column] = column;
+          }
+          std::partial_sort(
+            order.begin(), order.begin() + keep, order.end(),
+            [&](int left, int right) {
+              const double l = REAL(score_real)[row + left * score_rows];
+              const double r = REAL(score_real)[row + right * score_rows];
+              if (l == r) return left < right;
+              return l > r;
+            }
+          );
+          ++valid;
+          if (std::find(order.begin(), order.begin() + keep, truth - 1) !=
+              order.begin() + keep) ++hits;
+        }
+        REAL(top_accuracy)[request] = valid ?
+          static_cast<double>(hits) / valid : NA_REAL;
+      }
+    }
+
+    SEXP output = protect.add(Rf_allocVector(VECSXP, 4));
+    SET_VECTOR_ELT(output, 0, metrics);
+    SET_VECTOR_ELT(output, 1, per_class);
+    SET_VECTOR_ELT(output, 2, confusion_matrix);
+    SET_VECTOR_ELT(output, 3, top_accuracy);
+    SEXP names = protect.add(Rf_allocVector(STRSXP, 4));
+    const char* output_labels[4] = {
+      "metrics", "per_class", "confusion", "top_accuracy"
+    };
+    for (int index = 0; index < 4; ++index) {
+      SET_STRING_ELT(names, index, Rf_mkChar(output_labels[index]));
+    }
+    Rf_setAttrib(output, R_NamesSymbol, names);
+    return output;
+  });
+}
+
+template<class Scalar>
+SEXP vip_values(const fastpls::core::Matrix<Scalar>& response_loadings,
+                const fastpls::core::Matrix<Scalar>& scores,
+                const fastpls::core::Matrix<Scalar>& weights) {
+  if (scores.columns() != weights.columns() ||
+      response_loadings.columns() != weights.columns()) {
+    throw std::invalid_argument("VIP model component dimensions do not match");
+  }
+  const std::size_t components = weights.columns();
+  const std::size_t predictors = weights.rows();
+  std::vector<long double> score_squares(components, 0.0L);
+  std::vector<long double> weight_squares(components, 0.0L);
+  for (std::size_t component = 0; component < components; ++component) {
+    for (std::size_t row = 0; row < scores.rows(); ++row) {
+      const long double value = scores(row, component);
+      score_squares[component] += value * value;
+    }
+    for (std::size_t row = 0; row < predictors; ++row) {
+      const long double value = weights(row, component);
+      weight_squares[component] += value * value;
+    }
+  }
+  ProtectStack protect;
+  SEXP output = protect.add(Rf_allocVector(
+    VECSXP, response_loadings.rows()
+  ));
+  for (std::size_t response = 0; response < response_loadings.rows();
+       ++response) {
+    SEXP value = protect.add(Rf_allocMatrix(
+      REALSXP, static_cast<int>(components), static_cast<int>(predictors)
+    ));
+    std::vector<long double> numerator(predictors, 0.0L);
+    long double denominator = 0.0L;
+    for (std::size_t component = 0; component < components; ++component) {
+      const long double loading = response_loadings(response, component);
+      const long double explained = loading * loading * score_squares[component];
+      denominator += explained;
+      for (std::size_t predictor = 0; predictor < predictors; ++predictor) {
+        const long double weight = weights(predictor, component);
+        if (weight_squares[component] > 0.0L) {
+          numerator[predictor] += weight * weight * explained /
+            weight_squares[component];
+        }
+        REAL(value)[component + predictor * components] = denominator > 0.0L ?
+          std::sqrt(static_cast<double>(predictors * numerator[predictor] /
+                                       denominator)) : NA_REAL;
+      }
+    }
+    SET_VECTOR_ELT(output, response, value);
+  }
+  if (response_loadings.rows() == 1) return VECTOR_ELT(output, 0);
+  return output;
+}
+
+extern "C" SEXP _fastPLS_vip_core_cpp(SEXP model) {
+  return translate_exceptions("VIP calculation", [&] {
+    if (TYPEOF(model) != VECSXP) {
+      throw std::invalid_argument("VIP requires a fitted fastPLS model");
+    }
+    SEXP q = list_element(model, "Q");
+    SEXP scores = list_element(model, "Ttrain");
+    SEXP weights = list_element(model, "R");
+    if (scores == R_NilValue || XLENGTH(scores) == 0) {
+      throw std::invalid_argument("VIP requires a model fitted with fit = TRUE");
+    }
+    if (Rf_isS4(q)) {
+      return vip_values(
+        float_matrix_from_s4(q, "model$Q"),
+        float_matrix_from_s4(scores, "model$Ttrain"),
+        float_matrix_from_s4(weights, "model$R")
+      );
+    }
+    return vip_values(
+      numeric_matrix_from_sexp(q, "model$Q"),
+      numeric_matrix_from_sexp(scores, "model$Ttrain"),
+      numeric_matrix_from_sexp(weights, "model$R")
+    );
+  });
+}
+
+template<class Scalar>
+fastpls::core::Matrix<Scalar> normalized_units(
+    const fastpls::core::Matrix<Scalar>& input, bool by_row) {
+  const std::size_t units = by_row ? input.rows() : input.columns();
+  const std::size_t features = by_row ? input.columns() : input.rows();
+  fastpls::core::Matrix<Scalar> output(units, features);
+  for (std::size_t unit = 0; unit < units; ++unit) {
+    long double mean = 0.0L;
+    bool finite = true;
+    for (std::size_t feature = 0; feature < features; ++feature) {
+      const double value = by_row ? input(unit, feature) : input(feature, unit);
+      if (!std::isfinite(value)) finite = false;
+      mean += value;
+    }
+    mean /= static_cast<long double>(features);
+    long double sum_squares = 0.0L;
+    for (std::size_t feature = 0; feature < features; ++feature) {
+      const long double value =
+        (by_row ? input(unit, feature) : input(feature, unit)) - mean;
+      sum_squares += value * value;
+    }
+    const long double norm = std::sqrt(sum_squares);
+    for (std::size_t feature = 0; feature < features; ++feature) {
+      const long double value =
+        (by_row ? input(unit, feature) : input(feature, unit)) - mean;
+      output(unit, feature) = finite && norm > 0.0L ?
+        static_cast<Scalar>(value / norm) :
+        std::numeric_limits<Scalar>::quiet_NaN();
+    }
+  }
+  return output;
+}
+
+template<class Scalar>
+SEXP fastcor_values(const fastpls::core::Matrix<Scalar>& left_input,
+                    const fastpls::core::Matrix<Scalar>* right_input,
+                    bool by_row, bool diagonal) {
+  const auto left = normalized_units(left_input, by_row);
+  fastpls::core::Matrix<Scalar> right;
+  const fastpls::core::Matrix<Scalar>* right_values = nullptr;
+  if (right_input != nullptr) {
+    right = normalized_units(*right_input, by_row);
+    right_values = &right;
+    if (left.columns() != right.columns()) {
+      throw std::invalid_argument(
+        "a and b must contain the same number of correlated features"
+      );
+    }
+  } else {
+    right_values = &left;
+    diagonal = false;
+  }
+  if (diagonal) {
+    if (left.rows() != right_values->rows()) {
+      throw std::invalid_argument(
+        "diag = TRUE requires matching numbers of rows or columns"
+      );
+    }
+    SEXP output = PROTECT(Rf_allocVector(REALSXP, left.rows()));
+    for (std::size_t row = 0; row < left.rows(); ++row) {
+      long double sum = 0.0L;
+      for (std::size_t column = 0; column < left.columns(); ++column) {
+        sum += static_cast<long double>(left(row, column)) *
+          (*right_values)(row, column);
+      }
+      REAL(output)[row] = static_cast<double>(sum);
+    }
+    UNPROTECT(1);
+    return output;
+  }
+  fastpls::core::Matrix<Scalar> product(left.rows(), right_values->rows());
+  if constexpr (std::is_same_v<Scalar, float>) {
+    fastpls::runtime::cpu_gemm_f32(
+      left.view(), right_values->view(), false, true, product.view()
+    );
+  } else {
+    fastpls::runtime::cpu_gemm_f64(
+      left.view(), right_values->view(), false, true, product.view()
+    );
+  }
+  SEXP output = PROTECT(Rf_allocMatrix(
+    REALSXP, static_cast<int>(product.rows()),
+    static_cast<int>(product.columns())
+  ));
+  for (std::size_t index = 0; index < product.size(); ++index) {
+    REAL(output)[index] = static_cast<double>(product.data()[index]);
+  }
+  UNPROTECT(1);
+  return output;
+}
+
+extern "C" SEXP _fastPLS_fastcor_core_cpp(SEXP left, SEXP right,
+                                           SEXP by_row, SEXP diagonal) {
+  return translate_exceptions("fast Pearson correlation", [&] {
+    const bool rows = Rf_asLogical(by_row) != FALSE;
+    const bool diag = Rf_asLogical(diagonal) != FALSE;
+    if (Rf_isS4(left)) {
+      const auto left_values = float_matrix_from_s4(left, "a");
+      if (right == R_NilValue) {
+        return fastcor_values(left_values, static_cast<const
+          fastpls::core::Matrix<float>*>(nullptr), rows, diag);
+      }
+      const auto right_values = float_matrix_from_s4(right, "b");
+      return fastcor_values(left_values, &right_values, rows, diag);
+    }
+    const auto left_values = numeric_matrix_from_sexp(left, "a");
+    if (right == R_NilValue) {
+      return fastcor_values(left_values, static_cast<const
+        fastpls::core::Matrix<double>*>(nullptr), rows, diag);
+    }
+    const auto right_values = numeric_matrix_from_sexp(right, "b");
+    return fastcor_values(left_values, &right_values, rows, diag);
+  });
 }
 
 extern "C" SEXP _fastPLS_float32_argmax_cpp(SEXP scores) {
@@ -3136,7 +4242,7 @@ extern "C" SEXP _fastPLS_opls_filter_float32_backend_core_cpp(
     controls.seed = static_cast<unsigned int>(seed_value);
     controls.left_only = true;
     RoutedLinearAlgebraF32 routed_backend(
-      backend_code, x.rows(), x.columns()
+      backend_code, x.rows(), x.columns(), y.columns()
     );
     const auto filter = fastpls::core::fit_opls_filter_rsvd(
       std::move(x), y.view(), static_cast<std::size_t>(component_count),
@@ -3183,7 +4289,8 @@ extern "C" SEXP _fastPLS_opls_filter_float32_labels_backend_core_cpp(
       controls.seed = static_cast<unsigned int>(seed_value);
       controls.left_only = true;
       RoutedLinearAlgebraF32 routed_backend(
-        backend_code, x.rows(), x.columns()
+        backend_code, x.rows(), x.columns(),
+        static_cast<std::size_t>(classes)
       );
       const auto filter = fastpls::core::fit_opls_filter_labels_rsvd(
         std::move(x), encoded.data(), encoded.size(),
@@ -3447,7 +4554,7 @@ SEXP fit_float32_matrix_core(
       float_matrix_from_s4(predictors, "Xtrain");
     const auto y = float_matrix_from_s4(responses, "Ytrain");
     RoutedLinearAlgebraF32 backend(
-      backend_code, x.rows(), x.columns()
+      backend_code, x.rows(), x.columns(), y.columns()
     );
     const int scaling_code = Rf_asInteger(scaling);
     const int fit_code = Rf_asLogical(fit);
@@ -3458,6 +4565,34 @@ SEXP fit_float32_matrix_core(
         (method_code != 1 && method_code != 3)) {
       throw std::invalid_argument(
         "float32 dense core PLS dimensions or controls are invalid"
+      );
+    }
+    const long double crosscovariance_bytes =
+      static_cast<long double>(x.columns()) *
+      static_cast<long double>(y.columns()) * sizeof(float);
+    if ((backend_code == 0 || backend_code == 2) &&
+        crosscovariance_bytes > 512.0L * 1024.0L * 1024.0L) {
+      const auto prepared = fastpls::core::prepare_scaled_dense_operator(
+        x.view(), y.view(),
+        static_cast<fastpls::core::PredictorScaling>(scaling_code), backend
+      );
+      const auto x_view = fastpls::core::ConstMatrixView<float>(x.view());
+      const char* implicit_route = backend_code == 0 ?
+        "float32_implicit_crosscov" :
+        "float32_metal_implicit_crosscov";
+      if (method_code == 1) {
+        return fit_dense_plssvd_operator(
+          x_view, y.view(), prepared, components, fit_code,
+          store_scores_code, Rf_asInteger(oversample), Rf_asInteger(power),
+          static_cast<unsigned int>(Rf_asInteger(seed)),
+          implicit_route, backend, false
+        );
+      }
+      return fit_dense_simpls_operator(
+        x_view, y.view(), prepared, components, fit_code,
+        store_scores_code, Rf_asInteger(oversample), Rf_asInteger(power),
+        static_cast<unsigned int>(Rf_asInteger(seed)),
+        implicit_route, backend, false
       );
     }
     const auto prepared = fastpls::core::prepare_scaled_dense_crossprod(
@@ -4062,10 +5197,11 @@ SEXP fit_float32_labels_core(
     }
     fastpls::core::Matrix<float> x =
       float_matrix_from_s4(predictors, "Xtrain");
-    RoutedLinearAlgebraF32 backend(
-      backend_code, x.rows(), x.columns()
-    );
     const int classes = Rf_asInteger(class_count);
+    RoutedLinearAlgebraF32 backend(
+      backend_code, x.rows(), x.columns(),
+      classes > 0 ? static_cast<std::size_t>(classes) : 0
+    );
     const int scaling_code = Rf_asInteger(scaling);
     const int fit_code = Rf_asLogical(fit);
     const int store_scores_code = Rf_asLogical(store_scores);

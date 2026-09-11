@@ -32,9 +32,12 @@ pls.single.cv(
 \arguments{
 \item{Xdata}{Predictor matrix.}
 
-\item{Ydata}{Response (numeric or factor).}
+\item{Ydata}{Response. Use a numeric vector/matrix for regression or
+factor/character class labels for classification.}
 
-\item{ncomp}{Number of components (scalar or vector).}
+\item{ncomp}{Positive integer component count or vector of counts. Repeated
+values are removed. PLS-SVD, SIMPLS, and kernel PLS cap the returned path
+at the corresponding numerical rank and report the effective counts.}
 
 \item{constrain}{Optional grouping vector for grouped cross-validation. It
 must have one value per sample. Samples with the same value are assigned to
@@ -63,7 +66,9 @@ SVD for the selected backend, is supported.}
 \item{kfold}{Number of folds, or \code{"loocv"} for leave-one-out
 cross-validation. When \code{constrain} is supplied, LOOCV means
 leave-one-constraint-group-out: samples sharing the same constraint value
-are always held out together and are never split across training and test.}
+are always held out together and are never split across training and test.
+A numeric value at least as large as the number of groups has the same
+leave-one-group-out interpretation.}
 
 \item{north}{Number of orthogonal components removed by OPLS.
 The predictive count \code{ncomp} must fit within the predictor rank remaining
@@ -175,7 +180,26 @@ cross-validated accuracy, balanced accuracy, R2, Q2, or RMSD.
 For LDA classification, each training fold uses only the classes
 represented in that fold and maps predictions back to the original factor
 levels. A class absent from a fold's training data cannot be predicted in
-that fold; its held-out observations remain in the reported metrics.
+that fold; its held-out observations remain in the reported metrics. When
+otherwise identical \code{"argmax"} and \code{"lda"} configurations are tuned
+together, the PLS fit and fold projection are calculated once; each
+classifier still receives its own predictions, metric path, and selected
+component count. For sufficiently tall SIMPLS classification problems,
+full-data predictor and class moments are calculated once and each fold's
+training moments are obtained by subtracting its held-out contribution.
+Eligible SIMPLS and PLS-SVD folds can therefore be assembled without
+materializing a training-score matrix. The fold-specific centering, scaling,
+PLS fit, LDA fit, and predictions remain independent.
+With a CUDA backend, SIMPLS cross-validation keeps task data and fold
+workspaces resident on the device and reuses CUDA library handles across the
+CV call. PLS-SVD uses the resident CUDA route for
+large multivariate regression responses and the faster fold-local CUDA route
+for classification and smaller responses. This internal choice does not alter
+fold assignment, fold-specific preprocessing, requested components, or
+prediction semantics. Unsupported accelerator requests fail explicitly and
+never fall back to CPU.
+On the Metal route, large assigned sample-matrix products use Metal while
+small reduced products use Accelerate.
 }
 \examples{
 idx <- c(seq_len(12), 51:62, 101:112)

@@ -29,7 +29,7 @@ test_that("Metal float32 deflation updates the operation-split operator", {
     }
 })
 
-test_that("float32 diagnostics report the batched massive route", {
+test_that("float32 diagnostics report each massive backend route", {
     for (backend in c("cpu", "cuda", "metal")) {
         actual <- fastPLS:::.simpls_direction_diagnostics(
             TRUE, backend, training_samples = 1200L,
@@ -37,14 +37,23 @@ test_that("float32 diagnostics report the batched massive route", {
             requested_components = 165L, power = 2L, oversample = 12L,
             precision = "float32"
         )
-        expect_identical(
-            actual$rule,
-            paste0("batched_", backend, "_candidate_block")
-        )
-        expect_true(actual$candidate_block_refresh)
-        expect_identical(actual$refresh_width, 8L)
+        if (identical(backend, "cuda")) {
+            expect_identical(actual$rule, "batched_cuda_candidate_block")
+            expect_true(actual$candidate_block_refresh)
+            expect_identical(actual$refresh_width, 8L)
+        } else {
+            expect_identical(
+                actual$rule,
+                paste0("fresh_", backend, "_rank_one_refresh")
+            )
+            expect_false(actual$candidate_block_refresh)
+            expect_identical(actual$refresh_width, 1L)
+        }
         expect_true(actual$fresh_start)
-        expect_false("conditional_crossproduct_cache" %in% actual$active_optimizations)
+        expect_false(
+            "conditional_crossproduct_cache" %in%
+                actual$active_optimizations
+        )
     }
 })
 

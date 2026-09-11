@@ -58,15 +58,21 @@ template<class T, class Backend>
 PlssvdModel<T> assemble_plssvd_model(
     ConstMatrixView<T> predictors, std::size_t response_count,
     const int* components, std::size_t component_count,
-    SingularTriplets<T>& decomposition, Backend& backend) {
-  if (predictors.empty() || response_count == 0 || components == nullptr ||
-      component_count == 0) {
+    SingularTriplets<T>& decomposition, Backend& backend,
+    ConstMatrixView<T> predictor_gram = ConstMatrixView<T>()) {
+  const std::size_t predictor_count = predictor_gram.empty() ?
+    predictors.columns() : predictor_gram.rows();
+  if (predictor_count == 0 || response_count == 0 || components == nullptr ||
+      component_count == 0 ||
+      (!predictor_gram.empty() &&
+       predictor_gram.columns() != predictor_count) ||
+      (!predictors.empty() && predictors.columns() != predictor_count)) {
     throw std::invalid_argument(
       "fastPLS PLS-SVD dimensions or component counts are invalid"
     );
   }
   const std::size_t rank_bound = std::min(
-    predictors.columns(), response_count
+    predictor_count, response_count
   );
   const std::size_t retained = plssvd_retained_components(
     components, component_count, rank_bound
@@ -84,7 +90,7 @@ PlssvdModel<T> assemble_plssvd_model(
     );
   }
 
-  model.weights.resize(predictors.columns(), retained);
+  model.weights.resize(predictor_count, retained);
   model.response_loadings.resize(response_count, retained);
   model.singular_values.assign(
     decomposition.singular_values.begin(),
@@ -92,7 +98,7 @@ PlssvdModel<T> assemble_plssvd_model(
   );
   for (std::size_t component = 0; component < retained; ++component) {
     for (std::size_t predictor = 0;
-         predictor < predictors.columns(); ++predictor) {
+         predictor < predictor_count; ++predictor) {
       model.weights(predictor, component) =
         decomposition.U(predictor, component);
     }
@@ -102,15 +108,32 @@ PlssvdModel<T> assemble_plssvd_model(
         decomposition.Vt(component, response);
     }
   }
-  model.scores.resize(predictors.rows(), retained);
-  backend.gemm(
-    predictors, model.weights.view(), false, false, model.scores.view()
-  );
   Matrix<T> full_gram(retained, retained);
-  backend.gemm(
-    model.scores.view(), model.scores.view(), true, false,
-    full_gram.view()
-  );
+  if (predictor_gram.empty()) {
+    if (predictors.empty()) {
+      throw std::invalid_argument(
+        "fastPLS PLS-SVD requires predictors or their Gram matrix"
+      );
+    }
+    model.scores.resize(predictors.rows(), retained);
+    backend.gemm(
+      predictors, model.weights.view(), false, false, model.scores.view()
+    );
+    backend.gemm(
+      model.scores.view(), model.scores.view(), true, false,
+      full_gram.view()
+    );
+  } else {
+    Matrix<T> gram_weights(predictor_count, retained);
+    backend.gemm(
+      predictor_gram, model.weights.view(), false, false,
+      gram_weights.view()
+    );
+    backend.gemm(
+      model.weights.view(), gram_weights.view(), true, false,
+      full_gram.view()
+    );
+  }
 
   model.latent_coefficients.reserve(component_count);
   model.prediction_weights.reserve(component_count);
@@ -140,6 +163,34 @@ PlssvdModel<T> assemble_plssvd_model(
     model.prediction_weights.push_back(std::move(weights));
   }
   return model;
+}
+
+template<class T, class Backend>
+PlssvdModel<T> fit_plssvd_from_moments(
+    ConstMatrixView<T> predictor_gram, ConstMatrixView<T> crosscov,
+    const int* components, std::size_t component_count,
+    const PlssvdControls& controls, Backend& backend) {
+  if (predictor_gram.empty() || crosscov.empty() || components == nullptr ||
+      component_count == 0 ||
+      predictor_gram.rows() != predictor_gram.columns() ||
+      crosscov.rows() != predictor_gram.rows()) {
+    throw std::invalid_argument(
+      "fastPLS PLS-SVD moment dimensions or component counts are invalid"
+    );
+  }
+  const std::size_t retained = plssvd_retained_components(
+    components, component_count,
+    std::min(crosscov.rows(), crosscov.columns())
+  );
+  RsvdControls rsvd = controls.rsvd;
+  rsvd.left_only = false;
+  auto decomposition = randomized_svd(
+    crosscov, static_cast<int>(retained), rsvd, backend
+  );
+  return assemble_plssvd_model<T>(
+    ConstMatrixView<T>(), crosscov.columns(), components, component_count,
+    decomposition, backend, predictor_gram
+  );
 }
 
 template<class T, class Backend>

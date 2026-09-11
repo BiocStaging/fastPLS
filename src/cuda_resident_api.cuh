@@ -515,7 +515,653 @@ template<class T> void host_gemm(const T* left,const T* right,int rows,
         release();
     } catch(...) {release();throw;}
 }
+
+template<class T>
+__global__ void gather_matrix_rows(const T* source,int source_rows,int columns,
+                                   const int* indices,int output_rows,
+                                   T* output) {
+    const int row=blockIdx.x*blockDim.x+threadIdx.x;
+    const int column=blockIdx.y;
+    if(row<output_rows&&column<columns)
+        output[size_t(column)*output_rows+row]=
+            source[size_t(column)*source_rows+indices[row]];
+}
+
+template<class T>
+__global__ void subtract_crosscovariance(
+    const T* full,T* heldout,size_t size) {
+    for(size_t index=blockIdx.x*size_t(blockDim.x)+threadIdx.x;
+        index<size;index+=size_t(blockDim.x)*gridDim.x)
+        heldout[index]=full[index]-heldout[index];
+}
+
+template<class T,template<class> class Model,bool IncrementFoldSeed>
+void resident_pls_cv_classification(
+    const T* predictors,const int* labels,const int* folds,int n,int p,
+    int classes,const int* prefixes,int prefix_count,int scaling,
+    bool use_lda,int oversample,int power,unsigned long long seed,
+    bool store_predictions,bool store_scores,int* prediction_output,
+    T* score_output,int* status,double* metrics) {
+    if(!predictors||!labels||!folds||!prefixes||!status||!metrics||n<2||
+       p<1||classes<2||prefix_count<1||scaling<1||scaling>3)
+        throw std::invalid_argument("invalid resident CUDA CV input");
+    int maximum_prefix=0,fold_count=0;
+    for(int j=0;j<prefix_count;++j) {
+        if(prefixes[j]<=maximum_prefix)
+            throw std::invalid_argument(
+                "CUDA CV component path must be strictly increasing");
+        maximum_prefix=prefixes[j];
+    }
+    for(int row=0;row<n;++row) {
+        if(labels[row]<1||labels[row]>classes||folds[row]<1)
+            throw std::invalid_argument("invalid CUDA CV label or fold");
+        fold_count=std::max(fold_count,folds[row]);
+    }
+    if(maximum_prefix>std::min(n-1,p))
+        throw std::invalid_argument("CUDA CV component count exceeds rank");
+    if(store_predictions&&!prediction_output)
+        throw std::invalid_argument("null CUDA CV prediction output");
+    if(store_scores&&!score_output)
+        throw std::invalid_argument("null CUDA CV score output");
+
+    std::vector<std::vector<int>> test_rows(static_cast<size_t>(fold_count));
+    for(int row=0;row<n;++row)
+        test_rows[static_cast<size_t>(folds[row]-1)].push_back(row);
+    int maximum_test=0,maximum_train=0;
+    for(const auto& test:test_rows) {
+        maximum_test=std::max(maximum_test,static_cast<int>(test.size()));
+        maximum_train=std::max(maximum_train,n-static_cast<int>(test.size()));
+    }
+    if(maximum_test<1||maximum_train<2)
+        throw std::invalid_argument("CUDA CV contains an empty train or test fold");
+
+    cudaStream_t stream=nullptr;
+    cublasHandle_t model_blas=nullptr,component_blas=nullptr;
+    cusolverDnHandle_t model_solver=nullptr;
+    curandGenerator_t model_rng=nullptr;
+    T *full=nullptr,*train=nullptr,*test=nullptr,*test_scores=nullptr,
+      *response_scores=nullptr,*discriminants=nullptr;
+    int *train_indices=nullptr,*test_indices=nullptr,*top_indices=nullptr;
+    auto release=[&]() noexcept {
+        cudaFree(full);cudaFree(train);cudaFree(test);cudaFree(test_scores);
+        cudaFree(response_scores);cudaFree(discriminants);
+        cudaFree(train_indices);cudaFree(test_indices);cudaFree(top_indices);
+        if(component_blas)cublasDestroy(component_blas);
+        if(model_rng)curandDestroyGenerator(model_rng);
+        if(model_solver)cusolverDnDestroy(model_solver);
+        if(model_blas)cublasDestroy(model_blas);
+        if(stream)cudaStreamDestroy(stream);
+    };
+    try {
+        require_cuda(cudaStreamCreateWithFlags(&stream,cudaStreamNonBlocking));
+        require_blas(cublasCreate(&model_blas));
+        require_blas(cublasSetStream(model_blas,stream));
+        configure_blas_math<T>(model_blas);
+        require_blas(cublasCreate(&component_blas));
+        require_blas(cublasSetStream(component_blas,stream));
+        require_blas(cublasSetPointerMode(
+            component_blas,CUBLAS_POINTER_MODE_DEVICE));
+        require_solver(cusolverDnCreate(&model_solver));
+        require_solver(cusolverDnSetStream(model_solver,stream));
+        require_random(curandCreateGenerator(
+            &model_rng,CURAND_RNG_PSEUDO_DEFAULT));
+        require_random(curandSetStream(model_rng,stream));
+        require_cuda(cudaMalloc(&full,size_t(n)*p*sizeof(T)));
+        require_cuda(cudaMalloc(&train,size_t(maximum_train)*p*sizeof(T)));
+        require_cuda(cudaMalloc(&test,size_t(maximum_test)*p*sizeof(T)));
+        require_cuda(cudaMalloc(&test_scores,
+                                size_t(maximum_test)*maximum_prefix*sizeof(T)));
+        require_cuda(cudaMalloc(&response_scores,
+                                size_t(maximum_test)*classes*sizeof(T)));
+        require_cuda(cudaMalloc(&discriminants,
+                                size_t(maximum_test)*classes*sizeof(T)));
+        require_cuda(cudaMalloc(&train_indices,size_t(maximum_train)*sizeof(int)));
+        require_cuda(cudaMalloc(&test_indices,size_t(maximum_test)*sizeof(int)));
+        require_cuda(cudaMalloc(&top_indices,size_t(maximum_test)*sizeof(int)));
+        require_cuda(cudaMemcpyAsync(full,predictors,size_t(n)*p*sizeof(T),
+                                     cudaMemcpyHostToDevice,stream));
+        std::fill(metrics,metrics+prefix_count,0.0);
+        std::vector<double> metric_counts(static_cast<size_t>(prefix_count),0.0);
+        if(store_scores)
+            std::fill(score_output,
+                      score_output+size_t(n)*classes*prefix_count,T(0));
+
+        for(int fold=0;fold<fold_count;++fold) {
+            const auto& heldout=test_rows[static_cast<size_t>(fold)];
+            if(heldout.empty()) {status[fold]=2;continue;}
+            std::vector<char> heldout_flag(static_cast<size_t>(n),0);
+            for(const int row:heldout)heldout_flag[static_cast<size_t>(row)]=1;
+            std::vector<int> training;
+            training.reserve(static_cast<size_t>(n)-heldout.size());
+            std::vector<int> counts(static_cast<size_t>(classes),0);
+            for(int row=0;row<n;++row)if(!heldout_flag[static_cast<size_t>(row)]) {
+                training.push_back(row);
+                ++counts[static_cast<size_t>(labels[row]-1)];
+            }
+            std::vector<int> active;
+            std::vector<int> active_map(static_cast<size_t>(classes),-1);
+            for(int label=0;label<classes;++label)if(counts[static_cast<size_t>(label)]>0) {
+                active_map[static_cast<size_t>(label)]=static_cast<int>(active.size());
+                active.push_back(label+1);
+            }
+            if(active.size()<=1) {
+                const int fallback=active.empty()?1:active.front();
+                for(int prefix=0;prefix<prefix_count;++prefix) {
+                    for(const int row:heldout) {
+                        if(store_predictions)
+                            prediction_output[size_t(prefix)*n+row]=fallback;
+                        metrics[prefix]+=labels[row]==fallback?1.0:0.0;
+                        metric_counts[static_cast<size_t>(prefix)]+=1.0;
+                    }
+                }
+                status[fold]=4;continue;
+            }
+            const int train_n=static_cast<int>(training.size());
+            const int test_n=static_cast<int>(heldout.size());
+            if(maximum_prefix>std::min(train_n-1,p))
+                throw std::invalid_argument(
+                    "CUDA CV component count exceeds a fold rank");
+            std::vector<int> compact_labels(static_cast<size_t>(train_n));
+            for(int i=0;i<train_n;++i)
+                compact_labels[static_cast<size_t>(i)]=
+                    active_map[static_cast<size_t>(labels[training[static_cast<size_t>(i)]]-1)]+1;
+            require_cuda(cudaMemcpyAsync(train_indices,training.data(),
+                                         size_t(train_n)*sizeof(int),
+                                         cudaMemcpyHostToDevice,stream));
+            require_cuda(cudaMemcpyAsync(test_indices,heldout.data(),
+                                         size_t(test_n)*sizeof(int),
+                                         cudaMemcpyHostToDevice,stream));
+            gather_matrix_rows<<<dim3((train_n+255)/256,p),256,0,stream>>>(
+                full,n,p,train_indices,train_n,train);
+            gather_matrix_rows<<<dim3((test_n+255)/256,p),256,0,stream>>>(
+                full,n,p,test_indices,test_n,test);
+            require_cuda(cudaGetLastError());
+
+            {
+                const unsigned long long fold_seed = seed +
+                    (IncrementFoldSeed ? static_cast<unsigned long long>(fold) :
+                     0ULL);
+                Model<T> model(
+                    train_n,p,static_cast<int>(active.size()),maximum_prefix,
+                    oversample,power,stream,use_lda,true,0,0,T(0),0,T(0),false,
+                    model_blas,model_solver,model_rng,component_blas);
+                model.fit_borrowed_device_predictors(
+                    train,nullptr,compact_labels.data(),scaling,fold_seed,false);
+                model.standardize_device(test,test_n);
+                model.project_standardized_device(
+                    test,test_n,maximum_prefix,test_scores);
+                std::unique_ptr<ResidentLda<T>> lda;
+                if(use_lda) {
+                    if(model.has_lda_moments()) {
+                        model.prepare_lda_moments();
+                        lda.reset(new ResidentLda<T>(
+                            model.lda_gram(),model.lda_sums(),train_n,
+                            maximum_prefix,static_cast<int>(active.size()),
+                            model.label_offsets(),model.class_priors(),stream));
+                    } else {
+                        lda.reset(new ResidentLda<T>(
+                            model.training_scores(),train_n,maximum_prefix,
+                            static_cast<int>(active.size()),model.label_rows(),
+                            model.label_offsets(),model.class_priors(),stream));
+                    }
+                }
+                std::vector<int> host_labels(
+                    size_t(test_n)*prefix_count);
+                std::vector<T> host_scores;
+                if(store_scores)host_scores.resize(
+                    size_t(test_n)*active.size()*prefix_count);
+                for(int prefix_index=0;prefix_index<prefix_count;++prefix_index) {
+                    const int prefix=prefixes[prefix_index];
+                    model.predict_projected_device(
+                        test_scores,test_n,prefix,response_scores);
+                    if(store_scores)
+                        require_cuda(cudaMemcpyAsync(
+                            host_scores.data()+size_t(prefix_index)*test_n*active.size(),
+                            response_scores,size_t(test_n)*active.size()*sizeof(T),
+                            cudaMemcpyDeviceToHost,stream));
+                    T* decoded_scores=response_scores;
+                    if(use_lda) {
+                        lda->predict(test_scores,test_n,prefix,discriminants);
+                        decoded_scores=discriminants;
+                    }
+                    resident_topk_one_pass<T,10><<<(test_n+255)/256,256,0,stream>>>(
+                        decoded_scores,test_n,static_cast<int>(active.size()),1,
+                        top_indices);
+                    require_cuda(cudaGetLastError());
+                    require_cuda(cudaMemcpyAsync(
+                        host_labels.data()+size_t(prefix_index)*test_n,
+                        top_indices,size_t(test_n)*sizeof(int),
+                        cudaMemcpyDeviceToHost,stream));
+                }
+                require_cuda(cudaStreamSynchronize(stream));
+                for(int prefix_index=0;prefix_index<prefix_count;++prefix_index) {
+                    for(int i=0;i<test_n;++i) {
+                        const int predicted=active[static_cast<size_t>(
+                            host_labels[size_t(prefix_index)*test_n+i]-1)];
+                        const int row=heldout[static_cast<size_t>(i)];
+                        if(store_predictions)
+                            prediction_output[size_t(prefix_index)*n+row]=predicted;
+                        metrics[prefix_index]+=predicted==labels[row]?1.0:0.0;
+                        metric_counts[static_cast<size_t>(prefix_index)]+=1.0;
+                    }
+                    if(store_scores)for(size_t active_index=0;
+                        active_index<active.size();++active_index) {
+                        const int destination_class=active[active_index]-1;
+                        for(int i=0;i<test_n;++i) {
+                            const int row=heldout[static_cast<size_t>(i)];
+                            score_output[size_t(prefix_index)*n*classes+
+                                size_t(destination_class)*n+row]=
+                                host_scores[size_t(prefix_index)*test_n*active.size()+
+                                    active_index*test_n+i];
+                        }
+                    }
+                }
+            }
+            status[fold]=1;
+        }
+        for(int prefix=0;prefix<prefix_count;++prefix)
+            metrics[prefix]=metric_counts[static_cast<size_t>(prefix)]>0.0?
+                metrics[prefix]/metric_counts[static_cast<size_t>(prefix)]:
+                std::numeric_limits<double>::quiet_NaN();
+        release();
+    } catch(...) {release();throw;}
+}
+
+template<class T,template<class> class Model,bool ReuseCrosscov,
+         bool IncrementFoldSeed>
+void resident_pls_cv_regression(
+    const T* predictors,const T* responses,const int* folds,int n,int p,int q,
+    const int* prefixes,int prefix_count,int scaling,int metric,
+    int oversample,int power,unsigned long long seed,bool store_predictions,
+    double* prediction_output,int* status,double* metrics,double* q2_values,
+    double* rmsd_values,double* observed_r2_values) {
+    if(!predictors||!responses||!folds||!prefixes||!status||!metrics||n<2||
+       p<1||q<1||prefix_count<1||scaling<1||scaling>3||metric<2||metric>4)
+        throw std::invalid_argument("invalid resident CUDA regression CV input");
+    int maximum_prefix=0,fold_count=0;
+    for(int j=0;j<prefix_count;++j) {
+        if(prefixes[j]<=maximum_prefix)
+            throw std::invalid_argument(
+                "CUDA CV component path must be strictly increasing");
+        maximum_prefix=prefixes[j];
+    }
+    for(int row=0;row<n;++row) {
+        if(folds[row]<1)
+            throw std::invalid_argument("invalid CUDA CV fold");
+        fold_count=std::max(fold_count,folds[row]);
+    }
+    if(maximum_prefix>std::min(n-1,p)||
+       (store_predictions&&!prediction_output))
+        throw std::invalid_argument("invalid CUDA regression CV output or rank");
+    std::vector<std::vector<int>> test_rows(static_cast<size_t>(fold_count));
+    for(int row=0;row<n;++row)
+        test_rows[static_cast<size_t>(folds[row]-1)].push_back(row);
+    int maximum_test=0,maximum_train=0;
+    for(const auto& test:test_rows) {
+        maximum_test=std::max(maximum_test,static_cast<int>(test.size()));
+        maximum_train=std::max(maximum_train,n-static_cast<int>(test.size()));
+    }
+    if(maximum_test<1||maximum_train<2)
+        throw std::invalid_argument("CUDA CV contains an empty train or test fold");
+
+    long double total_ss=0.0L;
+    for(int response=0;response<q;++response) {
+        long double response_sum=0.0L,response_square=0.0L;
+        for(int row=0;row<n;++row) {
+            const long double value=responses[size_t(response)*n+row];
+            response_sum+=value;
+            response_square+=value*value;
+        }
+        total_ss+=response_square-response_sum*response_sum/n;
+    }
+    cudaStream_t stream=nullptr;
+    cublasHandle_t cv_blas=nullptr;
+    cublasHandle_t component_blas=nullptr;
+    cusolverDnHandle_t model_solver=nullptr;
+    curandGenerator_t model_rng=nullptr;
+    T *full_x=nullptr,*full_y=nullptr,*train_x=nullptr,*train_y=nullptr,
+      *test_x=nullptr,*test_y=nullptr,*test_scores=nullptr,*predictions=nullptr,
+      *metric_sums=nullptr,*full_crosscov=nullptr,*fold_crosscov=nullptr;
+    int *train_indices=nullptr,*test_indices=nullptr,*metric_invalid=nullptr;
+    auto release=[&]() noexcept {
+        cudaFree(full_x);cudaFree(full_y);cudaFree(train_x);cudaFree(train_y);
+        cudaFree(test_x);cudaFree(test_y);cudaFree(test_scores);
+        cudaFree(predictions);cudaFree(metric_sums);cudaFree(train_indices);
+        cudaFree(test_indices);cudaFree(metric_invalid);
+        cudaFree(full_crosscov);cudaFree(fold_crosscov);
+        if(component_blas)cublasDestroy(component_blas);
+        if(model_rng)curandDestroyGenerator(model_rng);
+        if(model_solver)cusolverDnDestroy(model_solver);
+        if(cv_blas)cublasDestroy(cv_blas);
+        if(stream)cudaStreamDestroy(stream);
+    };
+    try {
+        require_cuda(cudaStreamCreateWithFlags(&stream,cudaStreamNonBlocking));
+        require_blas(cublasCreate(&cv_blas));
+        require_blas(cublasSetStream(cv_blas,stream));
+        configure_blas_math<T>(cv_blas);
+        require_blas(cublasCreate(&component_blas));
+        require_blas(cublasSetStream(component_blas,stream));
+        require_blas(cublasSetPointerMode(
+            component_blas,CUBLAS_POINTER_MODE_DEVICE));
+        require_solver(cusolverDnCreate(&model_solver));
+        require_solver(cusolverDnSetStream(model_solver,stream));
+        require_random(curandCreateGenerator(
+            &model_rng,CURAND_RNG_PSEUDO_DEFAULT));
+        require_random(curandSetStream(model_rng,stream));
+        require_cuda(cudaMalloc(&full_x,size_t(n)*p*sizeof(T)));
+        require_cuda(cudaMalloc(&full_y,size_t(n)*q*sizeof(T)));
+        require_cuda(cudaMalloc(&train_x,size_t(maximum_train)*p*sizeof(T)));
+        require_cuda(cudaMalloc(&train_y,size_t(maximum_train)*q*sizeof(T)));
+        require_cuda(cudaMalloc(&test_x,size_t(maximum_test)*p*sizeof(T)));
+        require_cuda(cudaMalloc(&test_y,size_t(maximum_test)*q*sizeof(T)));
+        require_cuda(cudaMalloc(&test_scores,
+                                size_t(maximum_test)*maximum_prefix*sizeof(T)));
+        require_cuda(cudaMalloc(&predictions,size_t(maximum_test)*q*sizeof(T)));
+        require_cuda(cudaMalloc(&metric_sums,size_t(3)*q*sizeof(T)));
+        require_cuda(cudaMalloc(&train_indices,size_t(maximum_train)*sizeof(int)));
+        require_cuda(cudaMalloc(&test_indices,size_t(maximum_test)*sizeof(int)));
+        require_cuda(cudaMalloc(&metric_invalid,sizeof(int)));
+        require_cuda(cudaMemcpyAsync(full_x,predictors,size_t(n)*p*sizeof(T),
+                                     cudaMemcpyHostToDevice,stream));
+        require_cuda(cudaMemcpyAsync(full_y,responses,size_t(n)*q*sizeof(T),
+                                     cudaMemcpyHostToDevice,stream));
+        const size_t crosscov_elements=size_t(p)*q;
+        const size_t crosscov_bytes=crosscov_elements*sizeof(T);
+        size_t free_bytes=0,total_bytes=0;
+        require_cuda(cudaMemGetInfo(&free_bytes,&total_bytes));
+        bool share_crosscov=ReuseCrosscov&&crosscov_bytes<=free_bytes/4;
+        if(share_crosscov) {
+            cudaError_t first=cudaMalloc(&full_crosscov,crosscov_bytes);
+            cudaError_t second=first==cudaSuccess?
+                cudaMalloc(&fold_crosscov,crosscov_bytes):first;
+            if(first!=cudaSuccess||second!=cudaSuccess) {
+                cudaFree(full_crosscov);cudaFree(fold_crosscov);
+                full_crosscov=fold_crosscov=nullptr;
+                cudaGetLastError();
+                share_crosscov=false;
+            }
+        }
+        if(share_crosscov) {
+            const T one=T(1),zero=T(0);
+            require_blas(Decomposition<T>::gemm(
+                cv_blas,CUBLAS_OP_T,CUBLAS_OP_N,p,q,n,&one,full_x,n,
+                full_y,n,&zero,full_crosscov,p));
+        }
+        std::fill(metrics,metrics+prefix_count,0.0);
+        std::vector<double> counts(static_cast<size_t>(prefix_count),0.0);
+        std::vector<double> fold_training_ss(
+            static_cast<size_t>(prefix_count),0.0);
+
+        for(int fold=0;fold<fold_count;++fold) {
+            const auto& heldout=test_rows[static_cast<size_t>(fold)];
+            if(heldout.empty()) {status[fold]=2;continue;}
+            std::vector<char> heldout_flag(static_cast<size_t>(n),0);
+            for(const int row:heldout)heldout_flag[static_cast<size_t>(row)]=1;
+            std::vector<int> training;
+            training.reserve(static_cast<size_t>(n)-heldout.size());
+            for(int row=0;row<n;++row)
+                if(!heldout_flag[static_cast<size_t>(row)])training.push_back(row);
+            const int train_n=static_cast<int>(training.size());
+            const int test_n=static_cast<int>(heldout.size());
+            if(maximum_prefix>std::min(train_n-1,p))
+                throw std::invalid_argument(
+                    "CUDA CV component count exceeds a fold rank");
+            require_cuda(cudaMemcpyAsync(train_indices,training.data(),
+                                         size_t(train_n)*sizeof(int),
+                                         cudaMemcpyHostToDevice,stream));
+            require_cuda(cudaMemcpyAsync(test_indices,heldout.data(),
+                                         size_t(test_n)*sizeof(int),
+                                         cudaMemcpyHostToDevice,stream));
+            gather_matrix_rows<<<dim3((train_n+255)/256,p),256,0,stream>>>(
+                full_x,n,p,train_indices,train_n,train_x);
+            gather_matrix_rows<<<dim3((test_n+255)/256,p),256,0,stream>>>(
+                full_x,n,p,test_indices,test_n,test_x);
+            gather_matrix_rows<<<dim3((train_n+255)/256,q),256,0,stream>>>(
+                full_y,n,q,train_indices,train_n,train_y);
+            gather_matrix_rows<<<dim3((test_n+255)/256,q),256,0,stream>>>(
+                full_y,n,q,test_indices,test_n,test_y);
+            require_cuda(cudaGetLastError());
+            if(share_crosscov) {
+                const T one=T(1),zero=T(0);
+                require_blas(Decomposition<T>::gemm(
+                    cv_blas,CUBLAS_OP_T,CUBLAS_OP_N,p,q,test_n,&one,
+                    test_x,test_n,test_y,test_n,&zero,fold_crosscov,p));
+                subtract_crosscovariance<<<256,256,0,stream>>>(
+                    full_crosscov,fold_crosscov,crosscov_elements);
+                require_cuda(cudaGetLastError());
+            }
+            {
+                const unsigned long long fold_seed = seed +
+                    (IncrementFoldSeed ? static_cast<unsigned long long>(fold) :
+                     0ULL);
+                Model<T> model(
+                    train_n,p,q,maximum_prefix,oversample,power,stream,false,
+                    false,0,0,T(0),0,T(0),false,
+                    cv_blas,model_solver,model_rng,component_blas);
+                if constexpr(ReuseCrosscov) {
+                    if(share_crosscov) {
+                        model.fit_borrowed_device_regression_crosscov(
+                            train_x,train_y,fold_crosscov,scaling,fold_seed);
+                    } else {
+                        model.fit_borrowed_device_regression(
+                            train_x,train_y,scaling,fold_seed,false,false);
+                    }
+                } else {
+                    model.fit_borrowed_device_regression(
+                        train_x,train_y,scaling,fold_seed,false,false);
+                }
+                model.standardize_device(test_x,test_n);
+                model.project_standardized_device(
+                    test_x,test_n,maximum_prefix,test_scores);
+                std::vector<T> host_predictions;
+                if(store_predictions)host_predictions.resize(
+                    size_t(test_n)*q*prefix_count);
+                std::vector<T> host_metric(size_t(3)*q*prefix_count);
+                for(int prefix_index=0;prefix_index<prefix_count;++prefix_index) {
+                    model.predict_projected_device(
+                        test_scores,test_n,prefixes[prefix_index],predictions);
+                    if(store_predictions)
+                        require_cuda(cudaMemcpyAsync(
+                            host_predictions.data()+size_t(prefix_index)*test_n*q,
+                            predictions,size_t(test_n)*q*sizeof(T),
+                            cudaMemcpyDeviceToHost,stream));
+                    require_cuda(cudaMemsetAsync(
+                        metric_invalid,0,sizeof(int),stream));
+                    fastpls_device::response_sums<<<std::min(q,65535),256,0,stream>>>(
+                        predictions,test_y,nullptr,model.exported_field(5),
+                        test_n,q,metric_sums,metric_invalid);
+                    require_cuda(cudaGetLastError());
+                    require_cuda(cudaMemcpyAsync(
+                        host_metric.data()+size_t(prefix_index)*3*q,
+                        metric_sums,size_t(3)*q*sizeof(T),
+                        cudaMemcpyDeviceToHost,stream));
+                }
+                require_cuda(cudaStreamSynchronize(stream));
+                for(int prefix_index=0;prefix_index<prefix_count;++prefix_index) {
+                    long double sse=0.0L,training_ss=0.0L;
+                    for(int response=0;response<q;++response) {
+                        sse+=host_metric[size_t(prefix_index)*3*q+
+                                         size_t(response)*3];
+                        training_ss+=host_metric[size_t(prefix_index)*3*q+
+                                                 size_t(response)*3+1];
+                    }
+                    metrics[prefix_index]+=static_cast<double>(sse);
+                    fold_training_ss[static_cast<size_t>(prefix_index)]+=
+                        static_cast<double>(training_ss);
+                    counts[static_cast<size_t>(prefix_index)]+=
+                        static_cast<double>(test_n)*q;
+                    if(store_predictions)for(int response=0;response<q;++response)
+                        for(int i=0;i<test_n;++i) {
+                            const int row=heldout[static_cast<size_t>(i)];
+                            prediction_output[size_t(prefix_index)*n*q+
+                                size_t(response)*n+row]=
+                                static_cast<double>(host_predictions[
+                                    size_t(prefix_index)*test_n*q+
+                                    size_t(response)*test_n+i]);
+                        }
+                }
+            }
+            status[fold]=1;
+        }
+        for(int prefix=0;prefix<prefix_count;++prefix) {
+            const double sse=metrics[prefix];
+            rmsd_values[prefix]=counts[static_cast<size_t>(prefix)]>0.0?
+                std::sqrt(sse/counts[static_cast<size_t>(prefix)]):
+                std::numeric_limits<double>::quiet_NaN();
+            q2_values[prefix]=fold_training_ss[static_cast<size_t>(prefix)]>0.0?
+                1.0-sse/fold_training_ss[static_cast<size_t>(prefix)]:
+                std::numeric_limits<double>::quiet_NaN();
+            observed_r2_values[prefix]=total_ss>0.0L?
+                1.0-sse/static_cast<double>(total_ss):
+                std::numeric_limits<double>::quiet_NaN();
+            metrics[prefix]=metric==4?rmsd_values[prefix]:
+                metric==3?q2_values[prefix]:observed_r2_values[prefix];
+        }
+        release();
+    } catch(...) {release();throw;}
+}
 } // namespace fastpls_device
+
+extern "C" int fastpls_resident_simpls_cv_classification(
+    const void* predictors,const int* labels,const int* folds,int precision,
+    int n,int p,int classes,const int* prefixes,int prefix_count,int scaling,
+    int lda,int oversample,int power,unsigned long long seed,
+    int store_predictions,int store_scores,int* predictions,void* scores,
+    int* status,double* metrics,char* error,size_t error_capacity) {
+    using namespace fastpls_device;
+    resident_error(error,error_capacity,"");
+    try {
+        if((precision!=32&&precision!=64)||(lda!=0&&lda!=1)||
+           (store_predictions!=0&&store_predictions!=1)||
+           (store_scores!=0&&store_scores!=1))
+            throw std::invalid_argument("invalid resident CUDA CV controls");
+        if(precision==32)resident_pls_cv_classification<
+            float,ResidentSimpls,false>(
+            static_cast<const float*>(predictors),labels,folds,n,p,classes,
+            prefixes,prefix_count,scaling,lda==1,oversample,power,seed,
+            store_predictions==1,store_scores==1,predictions,
+            static_cast<float*>(scores),status,metrics);
+        else resident_pls_cv_classification<double,ResidentSimpls,false>(
+            static_cast<const double*>(predictors),labels,folds,n,p,classes,
+            prefixes,prefix_count,scaling,lda==1,oversample,power,seed,
+            store_predictions==1,store_scores==1,predictions,
+            static_cast<double*>(scores),status,metrics);
+        return 0;
+    } catch(const std::exception& exception) {
+        resident_error(error,error_capacity,exception.what());return 1;
+    } catch(...) {
+        resident_error(error,error_capacity,
+                       "unknown resident CUDA CV error");return 1;
+    }
+}
+
+extern "C" int fastpls_resident_simpls_cv_regression(
+    const void* predictors,const void* responses,const int* folds,
+    int precision,int n,int p,int q,const int* prefixes,int prefix_count,
+    int scaling,int metric,int oversample,int power,unsigned long long seed,
+    int store_predictions,double* predictions,int* status,double* metrics,
+    double* q2,double* rmsd,double* observed_r2,
+    char* error,size_t error_capacity) {
+    using namespace fastpls_device;
+    resident_error(error,error_capacity,"");
+    try {
+        if((precision!=32&&precision!=64)||!q2||!rmsd||!observed_r2||
+           (store_predictions!=0&&store_predictions!=1))
+            throw std::invalid_argument(
+                "invalid resident CUDA regression CV controls");
+        if(precision==32)resident_pls_cv_regression<
+            float,ResidentSimpls,true,false>(
+            static_cast<const float*>(predictors),
+            static_cast<const float*>(responses),folds,n,p,q,prefixes,
+            prefix_count,scaling,metric,oversample,power,seed,
+            store_predictions==1,predictions,status,metrics,q2,rmsd,
+            observed_r2);
+        else resident_pls_cv_regression<double,ResidentSimpls,true,false>(
+            static_cast<const double*>(predictors),
+            static_cast<const double*>(responses),folds,n,p,q,prefixes,
+            prefix_count,scaling,metric,oversample,power,seed,
+            store_predictions==1,predictions,status,metrics,q2,rmsd,
+            observed_r2);
+        return 0;
+    } catch(const std::exception& exception) {
+        resident_error(error,error_capacity,exception.what());return 1;
+    } catch(...) {
+        resident_error(error,error_capacity,
+                       "unknown resident CUDA regression CV error");return 1;
+    }
+}
+
+extern "C" int fastpls_resident_plssvd_cv_classification(
+    const void* predictors,const int* labels,const int* folds,int precision,
+    int n,int p,int classes,const int* prefixes,int prefix_count,int scaling,
+    int lda,int oversample,int power,unsigned long long seed,
+    int store_predictions,int store_scores,int* predictions,void* scores,
+    int* status,double* metrics,char* error,size_t error_capacity) {
+    using namespace fastpls_device;
+    resident_error(error,error_capacity,"");
+    try {
+        if((precision!=32&&precision!=64)||(lda!=0&&lda!=1)||
+           (store_predictions!=0&&store_predictions!=1)||
+           (store_scores!=0&&store_scores!=1))
+            throw std::invalid_argument(
+                "invalid resident CUDA PLS-SVD CV controls");
+        if(precision==32)
+            resident_pls_cv_classification<float,ResidentPlssvd,true>(
+                static_cast<const float*>(predictors),labels,folds,n,p,
+                classes,prefixes,prefix_count,scaling,lda==1,oversample,
+                power,seed,store_predictions==1,store_scores==1,predictions,
+                static_cast<float*>(scores),status,metrics);
+        else resident_pls_cv_classification<double,ResidentPlssvd,true>(
+                static_cast<const double*>(predictors),labels,folds,n,p,
+                classes,prefixes,prefix_count,scaling,lda==1,oversample,
+                power,seed,store_predictions==1,store_scores==1,predictions,
+                static_cast<double*>(scores),status,metrics);
+        return 0;
+    } catch(const std::exception& exception) {
+        resident_error(error,error_capacity,exception.what());return 1;
+    } catch(...) {
+        resident_error(error,error_capacity,
+                       "unknown resident CUDA PLS-SVD CV error");return 1;
+    }
+}
+
+extern "C" int fastpls_resident_plssvd_cv_regression(
+    const void* predictors,const void* responses,const int* folds,
+    int precision,int n,int p,int q,const int* prefixes,int prefix_count,
+    int scaling,int metric,int oversample,int power,unsigned long long seed,
+    int store_predictions,double* predictions,int* status,double* metrics,
+    double* q2,double* rmsd,double* observed_r2,
+    char* error,size_t error_capacity) {
+    using namespace fastpls_device;
+    resident_error(error,error_capacity,"");
+    try {
+        if((precision!=32&&precision!=64)||!q2||!rmsd||!observed_r2||
+           (store_predictions!=0&&store_predictions!=1))
+            throw std::invalid_argument(
+                "invalid resident CUDA PLS-SVD regression CV controls");
+        if(precision==32)
+            resident_pls_cv_regression<float,ResidentPlssvd,false,true>(
+                static_cast<const float*>(predictors),
+                static_cast<const float*>(responses),folds,n,p,q,prefixes,
+                prefix_count,scaling,metric,oversample,power,seed,
+                store_predictions==1,predictions,status,metrics,q2,rmsd,
+                observed_r2);
+        else resident_pls_cv_regression<double,ResidentPlssvd,false,true>(
+                static_cast<const double*>(predictors),
+                static_cast<const double*>(responses),folds,n,p,q,prefixes,
+                prefix_count,scaling,metric,oversample,power,seed,
+                store_predictions==1,predictions,status,metrics,q2,rmsd,
+                observed_r2);
+        return 0;
+    } catch(const std::exception& exception) {
+        resident_error(error,error_capacity,exception.what());return 1;
+    } catch(...) {
+        resident_error(error,error_capacity,
+                       "unknown resident CUDA PLS-SVD regression CV error");
+        return 1;
+    }
+}
 
 extern "C" int fastpls_cuda_gemm(const void* left,const void* right,
     int precision,int rows,int inner,int columns,void* output,char* error,

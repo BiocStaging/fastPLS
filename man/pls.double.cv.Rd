@@ -35,9 +35,12 @@ pls.double.cv(
 \arguments{
 \item{Xdata}{Predictor matrix.}
 
-\item{Ydata}{Response (numeric or factor).}
+\item{Ydata}{Response. Use a numeric vector/matrix for regression or
+factor/character class labels for classification.}
 
-\item{ncomp}{Number of components (scalar or vector).}
+\item{ncomp}{Positive integer component count or vector of counts. Repeated
+values are removed. PLS-SVD, SIMPLS, and kernel PLS cap the returned path
+at the corresponding numerical rank and report the effective counts.}
 
 \item{constrain}{Grouping vector for grouped cross-validation. It must have
 one value per sample. Samples with the same value are assigned to the same
@@ -55,8 +58,7 @@ replicate stay together in training or test data. The default
 float32 input and Apple Metal. Fold orchestration remains on the host;
 every fold uses the same fixed operation split as \code{pls()}, with
 training-sample products on Metal and reduced factorizations, sequential
-component updates, LDA, and prediction on the CPU. When
-omitted,
+component updates, LDA, and prediction on the CPU. When omitted,
 \code{options(backend = ...)} defines the session default; \code{options(cores = n)}
 controls the CPU thread request. Every requested backend must be available;
 unavailable accelerator entries raise an error instead of using CPU.}
@@ -88,7 +90,9 @@ constraint group at a time inside each outer training set.}
 
 \item{kfold_outer}{Outer-fold count, or \code{"loocv"} to leave out one
 constraint group at a time in the outer loop. In both loops, samples
-sharing the same constraint value are never split across training and test.}
+sharing the same constraint value are never split across training and test.
+A numeric fold count at least as large as the available number of groups
+has the same leave-one-group-out interpretation.}
 
 \item{north}{Number of orthogonal components removed by OPLS.
 The predictive count \code{ncomp} must fit within the predictor rank remaining
@@ -202,6 +206,16 @@ only the classes represented in that fold and maps predictions back to the
 original factor levels. A class absent from a fold's training data cannot
 be predicted in that fold; its held-out observations remain in the
 reported metrics.
+With a CUDA backend, SIMPLS cross-validation keeps task data and fold
+workspaces resident on the device and reuses CUDA library handles across the
+CV call. PLS-SVD uses the resident CUDA route for
+large multivariate regression responses and the faster fold-local CUDA route
+for classification and smaller responses. This internal choice does not alter
+fold assignment, fold-specific preprocessing, requested components, or
+prediction semantics. Unsupported accelerator requests fail explicitly and
+never fall back to CPU.
+On the Metal route, large assigned sample-matrix products use Metal while
+small reduced products use Accelerate.
 }
 \examples{
 idx <- c(seq_len(10), 51:60, 101:110)

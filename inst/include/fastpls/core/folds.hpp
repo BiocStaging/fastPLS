@@ -16,29 +16,15 @@ namespace detail {
 
 template<class Draw>
 std::vector<std::size_t> ordered_sample(std::size_t count, Draw&& draw) {
-  std::vector<std::size_t> tree(count + 1, 0);
-  for (std::size_t index = 1; index <= count; ++index) {
-    tree[index] = index & (~index + 1);
-  }
-  std::size_t top_bit = 1;
-  while (top_bit <= count / 2) top_bit *= 2;
+  std::vector<std::size_t> pool(count);
+  for (std::size_t index = 0; index < count; ++index) pool[index] = index;
   std::vector<std::size_t> output(count);
   for (std::size_t selected = 0; selected < count; ++selected) {
-    std::size_t rank = draw(count - selected);
-    if (rank >= count - selected) rank = count - selected - 1;
-    std::size_t index = 0;
-    for (std::size_t bit = top_bit; bit > 0; bit /= 2) {
-      const std::size_t next = index + bit;
-      if (next <= count && tree[next] <= rank) {
-        rank -= tree[next];
-        index = next;
-      }
-    }
-    output[selected] = index;
-    for (std::size_t update = index + 1; update <= count;
-         update += update & (~update + 1)) {
-      --tree[update];
-    }
+    const std::size_t remaining = count - selected;
+    std::size_t index = draw(remaining);
+    if (index >= remaining) index = remaining - 1;
+    output[selected] = pool[index];
+    pool[index] = pool[remaining - 1];
   }
   return output;
 }
@@ -84,14 +70,21 @@ std::vector<int> grouped_folds(const Group* groups, std::size_t sample_count,
     }
   } else if (labels != nullptr && class_count > 1) {
     std::vector<std::vector<std::size_t>> by_class(class_count);
+    std::vector<std::size_t> class_order;
+    std::vector<unsigned char> class_seen(class_count, 0);
     for (std::size_t index = 0; index < unique.size(); ++index) {
       const int label = labels[first[index]];
       const std::size_t encoded = static_cast<std::size_t>(
         std::max(1, std::min(label, static_cast<int>(class_count))) - 1
       );
+      if (!class_seen[encoded]) {
+        class_seen[encoded] = 1;
+        class_order.push_back(encoded);
+      }
       by_class[encoded].push_back(index);
     }
-    for (const auto& members : by_class) {
+    for (const std::size_t encoded : class_order) {
+      const auto& members = by_class[encoded];
       if (members.empty()) continue;
       const auto order = detail::ordered_sample(members.size(), draw);
       for (std::size_t position = 0; position < order.size(); ++position) {
@@ -102,8 +95,8 @@ std::vector<int> grouped_folds(const Group* groups, std::size_t sample_count,
   } else {
     const auto order = detail::ordered_sample(unique.size(), draw);
     for (std::size_t position = 0; position < order.size(); ++position) {
-      group_fold[position] = static_cast<int>(
-        order[position] % static_cast<std::size_t>(fold_count)
+      group_fold[order[position]] = static_cast<int>(
+        position % static_cast<std::size_t>(fold_count)
       );
     }
   }

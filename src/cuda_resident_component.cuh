@@ -49,6 +49,7 @@ template<class T> class ComponentWorkspace {
     cudaStream_t stream;
     T *scalars=nullptr,*projection=nullptr,*loading=nullptr,*row=nullptr;
     int n,p,q,capacity;
+    bool owns_handle=true;
     void mv(cublasOperation_t op,int m,int k,const T* a,const T* x,
             const T* v,const T* b,T* out) {
         require_blas(Blas<T>::gemv(h,op,m,k,a,x,m,v,b,out));
@@ -60,11 +61,19 @@ template<class T> class ComponentWorkspace {
         require_blas(Blas<T>::scale(h,size,scalars+3,x));
     }
 public:
-    ComponentWorkspace(int n_,int p_,int q_,int a,cudaStream_t s):stream(s),n(n_),p(p_),q(q_),capacity(a) {
+    ComponentWorkspace(int n_,int p_,int q_,int a,cudaStream_t s,
+                       cublasHandle_t shared_handle=nullptr)
+      :stream(s),n(n_),p(p_),q(q_),capacity(a),
+       owns_handle(shared_handle==nullptr) {
         if(n<1||p<1||q<1||a<1)throw std::invalid_argument("invalid resident component dimensions");
         try {
-            require_blas(cublasCreate(&h));require_blas(cublasSetStream(h,s));
-            require_blas(cublasSetPointerMode(h,CUBLAS_POINTER_MODE_DEVICE));
+            if(shared_handle)h=shared_handle;
+            else {
+                require_blas(cublasCreate(&h));
+                require_blas(cublasSetStream(h,s));
+                require_blas(cublasSetPointerMode(
+                    h,CUBLAS_POINTER_MODE_DEVICE));
+            }
             require_cuda(cudaMalloc(&scalars,6*sizeof(T)));
             require_cuda(cudaMalloc(&projection,a*sizeof(T)));
             require_cuda(cudaMalloc(&loading,p*sizeof(T)));
@@ -75,7 +84,7 @@ public:
     }
     void release() noexcept {
         cudaFree(scalars);cudaFree(projection);cudaFree(loading);cudaFree(row);
-        if(h)cublasDestroy(h);
+        if(h&&owns_handle)cublasDestroy(h);
         scalars=projection=loading=row=nullptr;h=nullptr;
     }
     ~ComponentWorkspace(){release();}

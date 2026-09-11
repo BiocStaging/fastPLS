@@ -41,7 +41,8 @@ test_that("metal fits every PLS family with a fixed operation split", {
             backend = "metal", classifier = "lda",
             return_variance = FALSE
         ))
-        expect_length(fit$accuracy, 2L)
+        expected_paths <- if (identical(family, "plssvd")) 1L else 2L
+        expect_length(fit$accuracy, expected_paths)
         expect_true(all(is.finite(fit$accuracy)))
         expect_identical(
             fit$diagnostics$metal_operation_split$policy,

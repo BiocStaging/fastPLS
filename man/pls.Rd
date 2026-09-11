@@ -37,14 +37,19 @@ predictor matrix for the supported float32 route, or a
 \code{Biobase::ExpressionSet}. ExpressionSet assay rows are treated as
 variables and columns as samples.}
 
-\item{Ytrain}{Training response (numeric or factor).}
+\item{Ytrain}{Training response. Use a numeric vector/matrix for regression
+or factor/character class labels for classification.}
 
 \item{Xtest}{Optional test predictor matrix or \code{Biobase::ExpressionSet}.}
 
 \item{Ytest}{Optional test response for independent-test \code{Q2Y}, whose
-denominator uses the training-response mean.}
+denominator uses the training-response mean. Classification labels may
+contain classes absent from the training data; such classes cannot be
+predicted and count as classification errors.}
 
-\item{ncomp}{Number of components (scalar or vector).}
+\item{ncomp}{Positive integer component count or vector of counts. Repeated
+values are removed. PLS-SVD, SIMPLS, and kernel PLS cap the returned path
+at the corresponding numerical rank and report the effective counts.}
 
 \item{scaling}{One of \code{centering}, \code{autoscaling}, or \code{none}.}
 

@@ -46,13 +46,15 @@ template<class T> class ResidentPlssvd {
     int n,p,q,a,oversample_value,power_value,work_size=0,cached_prefix=0;
     cudaStream_t stream;
     cublasHandle_t blas=nullptr;cusolverDnHandle_t chol=nullptr;
+    curandGenerator_t rng_handle=nullptr;
     std::unique_ptr<RsvdWorkspace<T>> solver;
     T *X=nullptr,*Y=nullptr,*S=nullptr,*R=nullptr,*Q=nullptr,*scores=nullptr,*gram=nullptr,*cross=nullptr,
       *factor=nullptr,*weights=nullptr,*work=nullptr,*meanX=nullptr,*scaleX=nullptr,*meanY=nullptr,*scaleY=nullptr;
     T *svd_gram=nullptr,*predictor_gram=nullptr,*moment_temp=nullptr;
     int *labels=nullptr,*keys=nullptr,*rows=nullptr,*offsets=nullptr,*invalid=nullptr,*info=nullptr;
     bool attempted=false,fitted=false,implicit_crosscov=false,
-         classification=false,retain_training_scores=true;
+         classification=false,retain_training_scores=true,
+         owns_predictors=true,owns_responses=true,owns_handles=true;
     template<class U> void allocate(U*& v,size_t size){require_cuda(cudaMalloc(&v,size*sizeof(U)));}
     void multiply(cublasOperation_t oa,cublasOperation_t ob,int m,int cols,int k,const T* x,int lx,const T* y,int ly,T* out,int ld){
         const T one=1,zero=0;
@@ -65,56 +67,47 @@ template<class T> class ResidentPlssvd {
     }
     void release()noexcept{
         solver.reset();
-        for(T* x:{X,Y,S,R,Q,scores,gram,cross,factor,weights,work,meanX,
+        if(owns_predictors)cudaFree(X);
+        if(owns_responses)cudaFree(Y);
+        for(T* x:{S,R,Q,scores,gram,cross,factor,weights,work,meanX,
                   scaleX,meanY,scaleY,svd_gram,predictor_gram,
                   moment_temp})cudaFree(x);
         for(int* x:{labels,keys,rows,offsets,invalid,info})cudaFree(x);
-        if(chol)cusolverDnDestroy(chol);if(blas)cublasDestroy(blas);
+        if(owns_handles) {
+            if(rng_handle)curandDestroyGenerator(rng_handle);
+            if(chol)cusolverDnDestroy(chol);
+            if(blas)cublasDestroy(blas);
+        }
     }
-public:
-    ResidentPlssvd(int n_,int p_,int q_,int components,int oversample,
-                   int power,cudaStream_t s,bool retain_scores=true,
-                   bool classification_=false,int=0,int=0,T=T(0),int=0,
-                   T=T(0))
-      :n(n_),p(p_),q(q_),a(components),oversample_value(oversample),
-       power_value(power),stream(s),classification(classification_),
-       retain_training_scores(retain_scores || !classification_ || n<8*p ||
-                              2*components<p ||
-                              double(n)*components*sizeof(T) <=
-                                  256.0*1024.0*1024.0){
-        if(n<2||p<1||q<1||a<1||a>std::min(n-1,std::min(p,q)))throw std::invalid_argument("invalid resident PLS-SVD dimensions");
-        try{
-            require_blas(cublasCreate(&blas));require_blas(cublasSetStream(blas,s));
-            configure_blas_math<T>(blas);
-            require_solver(cusolverDnCreate(&chol));require_solver(cusolverDnSetStream(chol,s));
-            allocate(X,size_t(n)*p);allocate(R,size_t(p)*a);
-            if(retain_training_scores)allocate(scores,size_t(n)*a);
-            allocate(Q,size_t(q)*a);
-            allocate(gram,size_t(a)*a);allocate(cross,size_t(a)*q);allocate(factor,size_t(a)*a);allocate(weights,size_t(a)*q);
-            allocate(meanX,p);allocate(scaleX,p);allocate(meanY,q);allocate(scaleY,q);allocate(invalid,1);allocate(info,1);
-            // cuSOLVER work requirements are queried for every eligible prefix.
-            for(int k=1;k<=a;++k){int size;require_solver(Cholesky<T>::size(chol,k,factor,&size));work_size=std::max(work_size,size);}
-            allocate(work,work_size);
-        }catch(...){release();throw;}
-    }
-    ~ResidentPlssvd(){release();}
-    ResidentPlssvd(const ResidentPlssvd&)=delete;
-    ResidentPlssvd& operator=(const ResidentPlssvd&)=delete;
-    void fit(const T* hx,const T* hy,const int* hl,int scaling,unsigned long long seed){
-        if(attempted)throw std::logic_error("resident PLS-SVD workspace already used");
-        if((hy==nullptr)==(hl==nullptr))throw std::invalid_argument("provide responses or labels, not both");
-        if(hl&&a>=q)throw std::invalid_argument("classification PLS-SVD components must be below class count");
-        attempted=true;require_cuda(cudaMemsetAsync(invalid,0,sizeof(int),stream));
-        require_cuda(cudaMemcpyAsync(X,hx,size_t(n)*p*sizeof(T),cudaMemcpyHostToDevice,stream));
+    void fit_loaded(const T* response,const int* host_labels,int scaling,
+                    unsigned long long seed,bool response_on_device){
+        if((response==nullptr)==(host_labels==nullptr))
+            throw std::invalid_argument("provide responses or labels, not both");
+        require_cuda(cudaMemsetAsync(invalid,0,sizeof(int),stream));
         require_cuda(preprocess(X,n,p,scaling,meanX,scaleX,stream));
-        if(hl){
+        if(host_labels){
+            if(a>=q)
+                throw std::invalid_argument(
+                    "classification PLS-SVD components must be below class count");
             allocate(S,size_t(p)*q);
-            allocate(labels,n);allocate(keys,n);allocate(rows,n);allocate(offsets,q+1);
-            require_cuda(cudaMemcpyAsync(labels,hl,n*sizeof(int),cudaMemcpyHostToDevice,stream));
-            require_cuda(prepare_labels(labels,n,q,keys,rows,offsets,meanY,invalid,stream));
-            require_cuda(class_product(X,n,p,q,rows,offsets,meanY,S,stream));
+            allocate(labels,n);allocate(keys,n);allocate(rows,n);
+            allocate(offsets,q+1);
+            require_cuda(cudaMemcpyAsync(labels,host_labels,n*sizeof(int),
+                                         cudaMemcpyHostToDevice,stream));
+            require_cuda(prepare_labels(
+                labels,n,q,keys,rows,offsets,meanY,invalid,stream));
+            require_cuda(class_product(
+                X,n,p,q,rows,offsets,meanY,S,stream));
         }else{
-            allocate(Y,size_t(n)*q);require_cuda(cudaMemcpyAsync(Y,hy,size_t(n)*q*sizeof(T),cudaMemcpyHostToDevice,stream));
+            if(response_on_device){
+                Y=const_cast<T*>(response);
+                owns_responses=false;
+            }else{
+                allocate(Y,size_t(n)*q);
+                require_cuda(cudaMemcpyAsync(
+                    Y,response,size_t(n)*q*sizeof(T),
+                    cudaMemcpyHostToDevice,stream));
+            }
             require_cuda(preprocess(Y,n,q,1,meanY,scaleY,stream));
             implicit_crosscov=double(p)*double(q)*sizeof(T)>
                 512.0*1024.0*1024.0;
@@ -125,7 +118,8 @@ public:
         }
         solver.reset(new RsvdWorkspace<T>(
             p,q,a,oversample_value,power_value,stream,
-            implicit_crosscov?n:0,implicit_crosscov?1:0));
+            implicit_crosscov?n:0,implicit_crosscov?1:0,
+            blas,chol,rng_handle));
         if(implicit_crosscov) {
             solver->solve_implicit_crosscov(
                 X,Y,nullptr,0,seed,R,invalid);
@@ -157,6 +151,91 @@ public:
             multiply(CUBLAS_OP_T,CUBLAS_OP_N,a,q,p,R,p,S,p,cross,a);
         }
         check_status();fitted=true;
+    }
+public:
+    ResidentPlssvd(int n_,int p_,int q_,int components,int oversample,
+                   int power,cudaStream_t s,bool retain_scores=true,
+                   bool classification_=false,int=0,int=0,T=T(0),int=0,
+                   T=T(0),bool allocate_predictors=true,
+                   cublasHandle_t shared_blas=nullptr,
+                   cusolverDnHandle_t shared_solver=nullptr,
+                   curandGenerator_t shared_rng=nullptr,
+                   cublasHandle_t=nullptr)
+      :n(n_),p(p_),q(q_),a(components),oversample_value(oversample),
+       power_value(power),stream(s),classification(classification_),
+       retain_training_scores(retain_scores || !classification_ || n<8*p ||
+                              2*components<p ||
+                              double(n)*components*sizeof(T) <=
+                                  256.0*1024.0*1024.0),
+       owns_predictors(allocate_predictors){
+        if(n<2||p<1||q<1||a<1||a>std::min(n-1,std::min(p,q)))throw std::invalid_argument("invalid resident PLS-SVD dimensions");
+        try{
+            const int shared_count=(shared_blas?1:0)+(shared_solver?1:0)+
+                (shared_rng?1:0);
+            if(shared_count!=0&&shared_count!=3)
+                throw std::invalid_argument(
+                    "provide every shared CUDA CV handle or none");
+            if(shared_count==3) {
+                blas=shared_blas;
+                chol=shared_solver;
+                rng_handle=shared_rng;
+                owns_handles=false;
+            } else {
+                require_blas(cublasCreate(&blas));
+                require_blas(cublasSetStream(blas,s));
+                configure_blas_math<T>(blas);
+                require_solver(cusolverDnCreate(&chol));
+                require_solver(cusolverDnSetStream(chol,s));
+                require_random(curandCreateGenerator(
+                    &rng_handle,CURAND_RNG_PSEUDO_DEFAULT));
+                require_random(curandSetStream(rng_handle,s));
+            }
+            if(allocate_predictors)allocate(X,size_t(n)*p);
+            allocate(R,size_t(p)*a);
+            if(retain_training_scores)allocate(scores,size_t(n)*a);
+            allocate(Q,size_t(q)*a);
+            allocate(gram,size_t(a)*a);allocate(cross,size_t(a)*q);allocate(factor,size_t(a)*a);allocate(weights,size_t(a)*q);
+            allocate(meanX,p);allocate(scaleX,p);allocate(meanY,q);allocate(scaleY,q);allocate(invalid,1);allocate(info,1);
+            // cuSOLVER work requirements are queried for every eligible prefix.
+            for(int k=1;k<=a;++k){int size;require_solver(Cholesky<T>::size(chol,k,factor,&size));work_size=std::max(work_size,size);}
+            allocate(work,work_size);
+        }catch(...){release();throw;}
+    }
+    ~ResidentPlssvd(){release();}
+    ResidentPlssvd(const ResidentPlssvd&)=delete;
+    ResidentPlssvd& operator=(const ResidentPlssvd&)=delete;
+    void fit(const T* hx,const T* hy,const int* hl,int scaling,unsigned long long seed){
+        if(attempted)throw std::logic_error("resident PLS-SVD workspace already used");
+        if(!hx)throw std::invalid_argument("null resident PLS-SVD predictors");
+        attempted=true;
+        require_cuda(cudaMemcpyAsync(X,hx,size_t(n)*p*sizeof(T),cudaMemcpyHostToDevice,stream));
+        fit_loaded(hy,hl,scaling,seed,false);
+    }
+    void fit_borrowed_device_predictors(
+        T* device_x,const T* host_y,const int* host_labels,int scaling,
+        unsigned long long seed,bool predictors_standardized=false){
+        if(attempted)
+            throw std::logic_error("resident PLS-SVD workspace already used");
+        if(!device_x||predictors_standardized||host_y)
+            throw std::invalid_argument(
+                "invalid resident PLS-SVD borrowed classification input");
+        if(X&&owns_predictors)cudaFree(X);
+        X=device_x;owns_predictors=false;attempted=true;
+        fit_loaded(nullptr,host_labels,scaling,seed,false);
+    }
+    void fit_borrowed_device_regression(
+        T* device_x,T* device_y,int scaling,unsigned long long seed,
+        bool predictors_standardized=false,
+        bool responses_standardized=false){
+        if(attempted)
+            throw std::logic_error("resident PLS-SVD workspace already used");
+        if(!device_x||!device_y||predictors_standardized||
+           responses_standardized)
+            throw std::invalid_argument(
+                "invalid resident PLS-SVD borrowed regression input");
+        if(X&&owns_predictors)cudaFree(X);
+        X=device_x;owns_predictors=false;attempted=true;
+        fit_loaded(device_y,nullptr,scaling,seed,true);
     }
     void predict_device(T* test,int count,int prefix,T* test_scores,T* pred){
         if(!fitted||count<1||prefix<1||prefix>a)throw std::invalid_argument("invalid resident PLS-SVD prediction request");
@@ -228,7 +307,11 @@ public:
     void compact_training() {
         require_cuda(cudaStreamSynchronize(stream));
         solver.reset();
-        for(T** value:{&X,&Y,&S,&scores,&svd_gram,&predictor_gram,
+        if(owns_predictors)cudaFree(X);
+        X=nullptr;
+        if(owns_responses)cudaFree(Y);
+        Y=nullptr;
+        for(T** value:{&S,&scores,&svd_gram,&predictor_gram,
                        &moment_temp}) {
             cudaFree(*value);*value=nullptr;
         }

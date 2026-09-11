@@ -254,7 +254,8 @@ void cpu_gemm_f32(core::ConstMatrixView<float> left,
                   core::ConstMatrixView<float> right,
                   bool transpose_left,
                   bool transpose_right,
-                  core::MatrixView<float> output) {
+                  core::MatrixView<float> output,
+                  bool accumulate) {
   const std::size_t rows = transpose_left ? left.columns() : left.rows();
   const std::size_t inner_left = transpose_left ? left.rows() : left.columns();
   const std::size_t inner_right = transpose_right ? right.columns() : right.rows();
@@ -264,11 +265,12 @@ void cpu_gemm_f32(core::ConstMatrixView<float> left,
     throw std::invalid_argument("fastPLS CPU matrix-product dimensions are inconsistent");
   }
 
-  if (!transpose_right && right.columns() == 1 &&
+  if (!accumulate && !transpose_right && right.columns() == 1 &&
       cpu_gemv_f32(left, transpose_left, right.data(), output.data())) {
     return;
   }
-  if (transpose_left && !transpose_right && left.columns() == 1 &&
+  if (!accumulate && transpose_left && !transpose_right &&
+      left.columns() == 1 &&
       output.rows() == 1 && cpu_gemv_f32(
         right, true, left.data(), output.data())) {
     return;
@@ -282,7 +284,8 @@ void cpu_gemm_f32(core::ConstMatrixView<float> left,
     static_cast<int>(rows), static_cast<int>(columns),
     static_cast<int>(inner_left), 1.0f, left.data(),
     static_cast<int>(left.leading_dimension()), right.data(),
-    static_cast<int>(right.leading_dimension()), 0.0f, output.data(),
+    static_cast<int>(right.leading_dimension()),
+    accumulate ? 1.0f : 0.0f, output.data(),
     static_cast<int>(output.leading_dimension())
   );
 #elif defined(FASTPLS_USE_OPENBLAS)
@@ -295,7 +298,8 @@ void cpu_gemm_f32(core::ConstMatrixView<float> left,
     static_cast<int>(rows), static_cast<int>(columns),
     static_cast<int>(inner_left), 1.0f, left.data(),
     static_cast<int>(left.leading_dimension()), right.data(),
-    static_cast<int>(right.leading_dimension()), 0.0f, output.data(),
+    static_cast<int>(right.leading_dimension()),
+    accumulate ? 1.0f : 0.0f, output.data(),
     static_cast<int>(output.leading_dimension())
   );
 #else
@@ -310,7 +314,8 @@ void cpu_gemm_f32(core::ConstMatrixView<float> left,
     static_cast<int>(rows), static_cast<int>(columns),
     static_cast<int>(inner_left), 1.0f, left.data(),
     static_cast<int>(left.leading_dimension()), right.data(),
-    static_cast<int>(right.leading_dimension()), 0.0f, output.data(),
+    static_cast<int>(right.leading_dimension()),
+    accumulate ? 1.0f : 0.0f, output.data(),
     static_cast<int>(output.leading_dimension())
   );
 #endif
@@ -328,18 +333,43 @@ void cpu_gemm_f32(core::ConstMatrixView<float> left,
       static_cast<int>(rows), static_cast<int>(columns),
       static_cast<int>(inner_left), 1.0f, left.data(),
       static_cast<int>(left.leading_dimension()), right.data(),
-      static_cast<int>(right.leading_dimension()), 0.0f, output.data(),
+      static_cast<int>(right.leading_dimension()),
+      accumulate ? 1.0f : 0.0f, output.data(),
       static_cast<int>(output.leading_dimension())
     );
     return;
   }
-  core::reference_gemm(
-    left, right, transpose_left, transpose_right, output
-  );
+  if (!accumulate) {
+    core::reference_gemm(
+      left, right, transpose_left, transpose_right, output
+    );
+  } else {
+    core::Matrix<float> temporary(rows, columns);
+    core::reference_gemm(
+      left, right, transpose_left, transpose_right, temporary.view()
+    );
+    for (std::size_t column = 0; column < columns; ++column) {
+      for (std::size_t row = 0; row < rows; ++row) {
+        output(row, column) += temporary(row, column);
+      }
+    }
+  }
 #else
-  core::reference_gemm(
-    left, right, transpose_left, transpose_right, output
-  );
+  if (!accumulate) {
+    core::reference_gemm(
+      left, right, transpose_left, transpose_right, output
+    );
+  } else {
+    core::Matrix<float> temporary(rows, columns);
+    core::reference_gemm(
+      left, right, transpose_left, transpose_right, temporary.view()
+    );
+    for (std::size_t column = 0; column < columns; ++column) {
+      for (std::size_t row = 0; row < rows; ++row) {
+        output(row, column) += temporary(row, column);
+      }
+    }
+  }
 #endif
 }
 
@@ -347,7 +377,8 @@ void cpu_gemm_f64(core::ConstMatrixView<double> left,
                   core::ConstMatrixView<double> right,
                   bool transpose_left,
                   bool transpose_right,
-                  core::MatrixView<double> output) {
+                  core::MatrixView<double> output,
+                  bool accumulate) {
   const std::size_t rows = transpose_left ? left.columns() : left.rows();
   const std::size_t inner_left = transpose_left ? left.rows() : left.columns();
   const std::size_t inner_right = transpose_right ? right.columns() : right.rows();
@@ -365,7 +396,8 @@ void cpu_gemm_f64(core::ConstMatrixView<double> left,
     static_cast<int>(rows), static_cast<int>(columns),
     static_cast<int>(inner_left), 1.0, left.data(),
     static_cast<int>(left.leading_dimension()), right.data(),
-    static_cast<int>(right.leading_dimension()), 0.0, output.data(),
+    static_cast<int>(right.leading_dimension()),
+    accumulate ? 1.0 : 0.0, output.data(),
     static_cast<int>(output.leading_dimension())
   );
 #elif defined(FASTPLS_USE_OPENBLAS)
@@ -378,7 +410,8 @@ void cpu_gemm_f64(core::ConstMatrixView<double> left,
     static_cast<int>(rows), static_cast<int>(columns),
     static_cast<int>(inner_left), 1.0, left.data(),
     static_cast<int>(left.leading_dimension()), right.data(),
-    static_cast<int>(right.leading_dimension()), 0.0, output.data(),
+    static_cast<int>(right.leading_dimension()),
+    accumulate ? 1.0 : 0.0, output.data(),
     static_cast<int>(output.leading_dimension())
   );
 #else
@@ -393,7 +426,8 @@ void cpu_gemm_f64(core::ConstMatrixView<double> left,
     static_cast<int>(rows), static_cast<int>(columns),
     static_cast<int>(inner_left), 1.0, left.data(),
     static_cast<int>(left.leading_dimension()), right.data(),
-    static_cast<int>(right.leading_dimension()), 0.0, output.data(),
+    static_cast<int>(right.leading_dimension()),
+    accumulate ? 1.0 : 0.0, output.data(),
     static_cast<int>(output.leading_dimension())
   );
 #endif
@@ -407,7 +441,7 @@ void cpu_gemm_f64(core::ConstMatrixView<double> left,
   const BLAS_INT ldb = static_cast<BLAS_INT>(right.leading_dimension());
   const BLAS_INT ldc = static_cast<BLAS_INT>(output.leading_dimension());
   const double alpha = 1.0;
-  const double beta = 0.0;
+  const double beta = accumulate ? 1.0 : 0.0;
   F77_CALL(dgemm)(
     &trans_left, &trans_right, &m, &n, &k, &alpha, left.data(), &lda,
     right.data(), &ldb, &beta, output.data(), &ldc FCONE FCONE
@@ -469,6 +503,17 @@ void CpuLinearAlgebraF64::gemm(core::ConstMatrixView<double> left,
   );
 }
 
+void CpuLinearAlgebraF64::gemm_accumulate(
+    core::ConstMatrixView<double> left,
+    core::ConstMatrixView<double> right,
+    bool transpose_left,
+    bool transpose_right,
+    core::MatrixView<double> output) const {
+  cpu_gemm_f64(
+    left, right, transpose_left, transpose_right, output, true
+  );
+}
+
 void CpuLinearAlgebraF32::gemm(core::ConstMatrixView<float> left,
                                core::ConstMatrixView<float> right,
                                bool transpose_left,
@@ -476,6 +521,17 @@ void CpuLinearAlgebraF32::gemm(core::ConstMatrixView<float> left,
                                core::MatrixView<float> output) const {
   cpu_gemm_f32(
     left, right, transpose_left, transpose_right, output
+  );
+}
+
+void CpuLinearAlgebraF32::gemm_accumulate(
+    core::ConstMatrixView<float> left,
+    core::ConstMatrixView<float> right,
+    bool transpose_left,
+    bool transpose_right,
+    core::MatrixView<float> output) const {
+  cpu_gemm_f32(
+    left, right, transpose_left, transpose_right, output, true
   );
 }
 

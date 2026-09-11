@@ -4,12 +4,79 @@
 #define FASTPLS_CORE_MATRIX_HPP
 
 #include <cstddef>
+#include <cstdlib>
+#include <limits>
+#include <new>
 #include <stdexcept>
 #include <type_traits>
 #include <vector>
 
+#if defined(_WIN32)
+#include <malloc.h>
+#endif
+
 namespace fastpls {
 namespace core {
+
+// Page-aligned storage lets Apple-silicon builds expose large matrices to
+// Metal as shared buffers without a staging copy. The same allocator remains
+// portable on CPU-only and CUDA builds.
+template<class T>
+class MatrixAllocator {
+ public:
+  using value_type = T;
+  using size_type = std::size_t;
+  using difference_type = std::ptrdiff_t;
+  using propagate_on_container_move_assignment = std::true_type;
+  using is_always_equal = std::true_type;
+
+  MatrixAllocator() noexcept = default;
+
+  template<class U>
+  MatrixAllocator(const MatrixAllocator<U>&) noexcept {}
+
+  T* allocate(std::size_t count) {
+    if (count == 0) return nullptr;
+    if (count > std::numeric_limits<std::size_t>::max() / sizeof(T)) {
+      throw std::bad_array_new_length();
+    }
+    constexpr std::size_t alignment = 16384;
+    const std::size_t bytes = count * sizeof(T);
+    if (bytes > std::numeric_limits<std::size_t>::max() - (alignment - 1)) {
+      throw std::bad_array_new_length();
+    }
+    const std::size_t allocated =
+      ((bytes + alignment - 1) / alignment) * alignment;
+#if defined(_WIN32)
+    void* memory = _aligned_malloc(allocated, alignment);
+    if (memory == nullptr) throw std::bad_alloc();
+#else
+    void* memory = nullptr;
+    if (posix_memalign(&memory, alignment, allocated) != 0) {
+      throw std::bad_alloc();
+    }
+#endif
+    return static_cast<T*>(memory);
+  }
+
+  void deallocate(T* pointer, std::size_t) noexcept {
+#if defined(_WIN32)
+    _aligned_free(pointer);
+#else
+    std::free(pointer);
+#endif
+  }
+};
+
+template<class T, class U>
+bool operator==(const MatrixAllocator<T>&, const MatrixAllocator<U>&) noexcept {
+  return true;
+}
+
+template<class T, class U>
+bool operator!=(const MatrixAllocator<T>&, const MatrixAllocator<U>&) noexcept {
+  return false;
+}
 
 template<class T>
 class BasicMatrixView {
@@ -106,7 +173,7 @@ class Matrix {
   }
 
  private:
-  std::vector<T> values_;
+  std::vector<T, MatrixAllocator<T>> values_;
   std::size_t rows_ = 0;
   std::size_t columns_ = 0;
 };

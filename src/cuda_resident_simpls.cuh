@@ -18,6 +18,18 @@ template<class T> __global__ void add_response_mean(T* pred,size_t size,int n,co
         pred[i]+=mean[i/n];
 }
 
+template<class T> __global__ void standardize_raw_crosscov(
+    T* crosscov,size_t size,int p,int n,const T* meanX,const T* scaleX,
+    const T* meanY) {
+    for(size_t index=blockIdx.x*size_t(blockDim.x)+threadIdx.x;
+        index<size;index+=size_t(blockDim.x)*gridDim.x) {
+        const int predictor=static_cast<int>(index%p);
+        const int response=static_cast<int>(index/p);
+        crosscov[index]=(crosscov[index]-T(n)*meanX[predictor]*meanY[response])/
+            scaleX[predictor];
+    }
+}
+
 // Isolated fitting core. Public R dispatch is connected only after validation.
 template<class T> class ResidentSimpls {
     int n,p,q,components,requested_oversample,requested_power;
@@ -34,7 +46,9 @@ template<class T> class ResidentSimpls {
     std::unique_ptr<ComponentWorkspace<T>> update;
     std::unique_ptr<RsvdWorkspace<T>> solver,rank_one_solver;
     bool fitted=false,attempted=false,implicit_crosscov=false,
-         cached_predictor_crossprod=false,retain_training_scores=true;
+         cached_predictor_crossprod=false,retain_training_scores=true,
+         owns_predictors=true,owns_responses=true,owns_crosscov=true,
+         owns_handles=true;
     template<class U> void allocate(U*& ptr,size_t size){require_cuda(cudaMalloc(&ptr,size*sizeof(U)));}
     void product(cublasOperation_t oa,cublasOperation_t ob,int m,int cols,int inner,
                  const T* a,int lda,const T* b,int ldb,T* out,int ldc) {
@@ -51,16 +65,27 @@ template<class T> class ResidentSimpls {
     }
     void release() noexcept {
         rank_one_solver.reset();solver.reset();update.reset();
-        for(T* a:{X,Y,S,meanX,scaleX,meanY,scaleY,R,Q,V,scores,candidate,
+        if(owns_predictors)cudaFree(X);
+        X=nullptr;
+        if(owns_responses)cudaFree(Y);
+        Y=nullptr;
+        if(owns_crosscov)cudaFree(S);
+        S=nullptr;
+        for(T* a:{meanX,scaleX,meanY,scaleY,R,Q,V,scores,candidate,
                   right_gram,predictor_gram,original_crosscov,lda_score_gram,
                   lda_class_sums,lda_moment_temp})cudaFree(a);
         for(int* a:{labels,keys,rows,offsets,invalid})cudaFree(a);
-        if(rng_handle)curandDestroyGenerator(rng_handle);
-        if(solver_handle)cusolverDnDestroy(solver_handle);
-        if(blas)cublasDestroy(blas);
+        if(owns_handles) {
+            if(rng_handle)curandDestroyGenerator(rng_handle);
+            if(solver_handle)cusolverDnDestroy(solver_handle);
+            if(blas)cublasDestroy(blas);
+        }
     }
-    void fit_loaded(const T* hostY,const int* hostLabels,int scaling,
-                    unsigned long long seed,bool predictors_standardized) {
+    void fit_loaded(const T* response,const int* hostLabels,int scaling,
+                    unsigned long long seed,bool predictors_standardized,
+                    bool response_on_device=false,
+                    bool response_standardized=false,
+                    T* borrowed_raw_crosscov=nullptr) {
         require_cuda(cudaMemsetAsync(invalid,0,sizeof(int),stream));
         if(predictors_standardized) {
             require_cuda(initialize_identity_statistics(
@@ -75,12 +100,32 @@ template<class T> class ResidentSimpls {
             require_cuda(prepare_labels(labels,n,q,keys,rows,offsets,meanY,invalid,stream));
             require_cuda(class_product(X,n,p,q,rows,offsets,meanY,S,stream));
         } else {
-            allocate(Y,size_t(n)*q);
-            require_cuda(cudaMemcpyAsync(Y,hostY,size_t(n)*q*sizeof(T),cudaMemcpyHostToDevice,stream));
-            require_cuda(preprocess(Y,n,q,1,meanY,scaleY,stream));
-            implicit_crosscov = double(p)*double(q)*sizeof(T) >
-                512.0*1024.0*1024.0;
-            if(!implicit_crosscov) {
+            if(response_on_device) {
+                Y=const_cast<T*>(response);
+                owns_responses=false;
+            } else {
+                allocate(Y,size_t(n)*q);
+                require_cuda(cudaMemcpyAsync(
+                    Y,response,size_t(n)*q*sizeof(T),
+                    cudaMemcpyHostToDevice,stream));
+            }
+            if(response_standardized) {
+                require_cuda(initialize_identity_statistics(
+                    meanY,scaleY,q,stream));
+            } else {
+                require_cuda(preprocess(Y,n,q,1,meanY,scaleY,stream));
+            }
+            if(borrowed_raw_crosscov) {
+                S=borrowed_raw_crosscov;
+                owns_crosscov=false;
+                standardize_raw_crosscov<<<256,256,0,stream>>>(
+                    S,size_t(p)*q,p,n,meanX,scaleX,meanY);
+                require_cuda(cudaGetLastError());
+            } else {
+                implicit_crosscov = double(p)*double(q)*sizeof(T) >
+                    512.0*1024.0*1024.0;
+            }
+            if(!borrowed_raw_crosscov&&!implicit_crosscov) {
                 allocate(S,size_t(p)*q);
                 product(CUBLAS_OP_T,CUBLAS_OP_N,p,q,n,X,n,Y,n,S,p);
             }
@@ -158,22 +203,40 @@ public:
     ResidentSimpls(int n_,int p_,int q_,int a,int oversample,int power,
                    cudaStream_t s,bool retain_scores=true,
                    bool classification=false,int=0,int=0,T=T(0),int=0,
-                   T=T(0),bool allocate_predictors=true)
+                   T=T(0),bool allocate_predictors=true,
+                   cublasHandle_t shared_blas=nullptr,
+                   cusolverDnHandle_t shared_solver=nullptr,
+                   curandGenerator_t shared_rng=nullptr,
+                   cublasHandle_t shared_component_blas=nullptr)
       :n(n_),p(p_),q(q_),components(a),requested_oversample(oversample),
        requested_power(power),stream(s),
        retain_training_scores(retain_scores || !classification ||
                               components<8 || n<8*p ||
                               double(n)*components*sizeof(T) <=
-                                  256.0*1024.0*1024.0) {
+                                  256.0*1024.0*1024.0),
+       owns_predictors(allocate_predictors) {
         if(n<2||p<1||q<1||a<1||a>std::min(n-1,p))throw std::invalid_argument("invalid resident SIMPLS dimensions");
         try {
-            require_blas(cublasCreate(&blas));require_blas(cublasSetStream(blas,s));
-            configure_blas_math<T>(blas);
-            require_solver(cusolverDnCreate(&solver_handle));
-            require_solver(cusolverDnSetStream(solver_handle,s));
-            require_random(curandCreateGenerator(
-                &rng_handle,CURAND_RNG_PSEUDO_DEFAULT));
-            require_random(curandSetStream(rng_handle,s));
+            const int shared_count=(shared_blas?1:0)+(shared_solver?1:0)+
+                (shared_rng?1:0)+(shared_component_blas?1:0);
+            if(shared_count!=0&&shared_count!=4)
+                throw std::invalid_argument(
+                    "provide every shared CUDA CV handle or none");
+            if(shared_count==4) {
+                blas=shared_blas;
+                solver_handle=shared_solver;
+                rng_handle=shared_rng;
+                owns_handles=false;
+            } else {
+                require_blas(cublasCreate(&blas));
+                require_blas(cublasSetStream(blas,s));
+                configure_blas_math<T>(blas);
+                require_solver(cusolverDnCreate(&solver_handle));
+                require_solver(cusolverDnSetStream(solver_handle,s));
+                require_random(curandCreateGenerator(
+                    &rng_handle,CURAND_RNG_PSEUDO_DEFAULT));
+                require_random(curandSetStream(rng_handle,s));
+            }
             if(allocate_predictors)allocate(X,size_t(n)*p);
             allocate(meanX,p);allocate(scaleX,p);allocate(meanY,q);allocate(scaleY,q);
             allocate(R,size_t(p)*a);allocate(Q,size_t(q)*a);allocate(V,size_t(p)*a);
@@ -181,7 +244,8 @@ public:
             allocate(candidate,size_t(p)*std::min({kResidentSimplsMaximumBlock,a,p,q}));
             if(q<=p&&q<=512)allocate(right_gram,size_t(q)*q);
             allocate(invalid,1);
-            update.reset(new ComponentWorkspace<T>(n,p,q,a,s));
+            update.reset(new ComponentWorkspace<T>(
+                n,p,q,a,s,shared_component_blas));
         } catch(...) {release();throw;}
     }
     ~ResidentSimpls(){release();}
@@ -214,10 +278,51 @@ public:
         if(!deviceX||(hostY==nullptr)==(hostLabels==nullptr))
             throw std::invalid_argument("invalid resident device fitting input");
         attempted=true;
-        cudaFree(X);
+        if(owns_predictors)cudaFree(X);
         X=deviceX;
+        owns_predictors=true;
         deviceX=nullptr;
         fit_loaded(hostY,hostLabels,scaling,seed,predictors_standardized);
+    }
+    void fit_borrowed_device_predictors(T* deviceX,const T* hostY,
+                                        const int* hostLabels,int scaling,
+                                        unsigned long long seed,
+                                        bool predictors_standardized=false) {
+        if(attempted)throw std::logic_error("resident fitting workspace already used");
+        if(!deviceX||(hostY==nullptr)==(hostLabels==nullptr))
+            throw std::invalid_argument("invalid resident borrowed fitting input");
+        if(X&&owns_predictors)cudaFree(X);
+        X=deviceX;
+        owns_predictors=false;
+        attempted=true;
+        fit_loaded(hostY,hostLabels,scaling,seed,predictors_standardized);
+    }
+    void fit_borrowed_device_regression(
+        T* deviceX,T* deviceY,int scaling,unsigned long long seed,
+        bool predictors_standardized=false,bool responses_standardized=false) {
+        if(attempted)throw std::logic_error("resident fitting workspace already used");
+        if(!deviceX||!deviceY)
+            throw std::invalid_argument("invalid resident borrowed regression input");
+        if(X&&owns_predictors)cudaFree(X);
+        X=deviceX;
+        owns_predictors=false;
+        attempted=true;
+        fit_loaded(deviceY,nullptr,scaling,seed,predictors_standardized,
+                   true,responses_standardized);
+    }
+    void fit_borrowed_device_regression_crosscov(
+        T* deviceX,T* deviceY,T* deviceRawCrosscov,int scaling,
+        unsigned long long seed) {
+        if(attempted)throw std::logic_error("resident fitting workspace already used");
+        if(!deviceX||!deviceY||!deviceRawCrosscov)
+            throw std::invalid_argument(
+                "invalid resident borrowed regression cross-product input");
+        if(X&&owns_predictors)cudaFree(X);
+        X=deviceX;
+        owns_predictors=false;
+        attempted=true;
+        fit_loaded(deviceY,nullptr,scaling,seed,false,true,false,
+                   deviceRawCrosscov);
     }
     void project_device(T* test,int test_n,int prefix,T* test_scores) {
         if(!fitted||test_n<1||prefix<1||prefix>components)throw std::invalid_argument("invalid resident prediction request");
@@ -296,7 +401,13 @@ public:
     void compact_training() {
         require_cuda(cudaStreamSynchronize(stream));
         solver.reset();update.reset();
-        for(T** value:{&X,&Y,&S,&V,&scores,&candidate,&right_gram,
+        if(owns_predictors)cudaFree(X);
+        X=nullptr;
+        if(owns_responses)cudaFree(Y);
+        Y=nullptr;
+        if(owns_crosscov)cudaFree(S);
+        S=nullptr;
+        for(T** value:{&V,&scores,&candidate,&right_gram,
                        &predictor_gram,&original_crosscov}) {
             cudaFree(*value);*value=nullptr;
         }

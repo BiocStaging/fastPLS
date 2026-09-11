@@ -76,6 +76,7 @@ double dummy_response_r2(
 template<class T>
 struct LabelCrossprodResult {
   Matrix<T> crossprod;
+  Matrix<T> class_predictor_sums;
   std::vector<T> predictor_center;
   std::vector<T> predictor_scale;
   std::vector<T> response_mean;

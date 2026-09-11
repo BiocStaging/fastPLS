@@ -1,9 +1,53 @@
-# fastPLS 0.99.57
+# fastPLS 0.99.58
+
+* Reduced repeated setup in every compiled cross-validation backend. Eligible
+  CPU and Metal classification folds now recover both SIMPLS and PLS-SVD
+  predictor and class moments from bounded full-data sufficient statistics;
+  PLS-SVD can assemble its latent Gram matrix without materializing the
+  training-score matrix. CUDA now retains configured cuBLAS, cuSOLVER, cuRAND,
+  and device-pointer handles across all folds in one CV call. The Metal route
+  sends small reduced products to Accelerate while retaining large assigned
+  sample-matrix products on Metal. Fold membership, fold-specific
+  preprocessing, component requests, seeds, predictions, and selection
+  semantics are unchanged.
+
+* Restored the fresh block randomized operator route for wide-response SIMPLS
+  cross-validation when a bounded sample-response Gram matrix is not
+  advantageous. Candidate blocks are generated from the current deflated
+  operator and consumed through the existing sequential SIMPLS
+  orthogonalization and deflation equations; no preceding component direction
+  is reused.
+
+* Reduced multivariate-regression CV work without changing its folds or model
+  fits. Large implicit PLS-SVD and SIMPLS routes now compute predictor and
+  response marginal moments once and recover each training fold by subtracting
+  its held-out contribution. Aggregate float32 CV metrics are calculated on the
+  native out-of-fold predictions before conversion to R, including an exact
+  four-pass float32 Spearman rank calculation. Contiguous prediction paths are
+  transferred to R with bulk conversion rather than element-wise indexing.
+
+* Accelerated wide-response SIMPLS cross-validation on Apple Accelerate with a
+  bounded sample-space response Gram matrix. When the arithmetic estimate
+  predicts a gain, the native CV engine forms the response Gram matrix once,
+  extracts and training-centers each fold submatrix, and reuses it throughout
+  that fold's sequential direction updates. This is algebraically equivalent
+  to the implicit predictor-response products and leaves fold-specific
+  preprocessing, seeds, component requests, and prediction semantics
+  unchanged. OpenBLAS and CUDA retain their faster implicit or resident route.
+
+* Moved grouped fold construction, prediction evaluation, top-k summaries,
+  `fastcor()` and VIP trajectories into the dependency-free C++ core. The R
+  functions now validate inputs and format native results. Fold construction
+  retains the existing seeded assignments while avoiding repeated scans of
+  every sample for every constraint group.
 
 * Removed the optional `RhpcBLASctl` dependency. `options(cores = n)` now uses
   an internal compiled bridge to configure loaded OpenBLAS, MKL, BLIS and
   OpenMP runtimes when they expose thread-control functions, while retaining
   environment-based requests for Apple Accelerate and other BLAS libraries.
+
+* Reused fold matrix allocations in the compiled cross-validation engine,
+  including predictor, response, held-out, and predictor-Gram workspaces.
 
 * Made OpenBLAS the default CPU numerical library on Linux and Windows. The
   configure scripts now stop with installation guidance when OpenBLAS is not
@@ -21,6 +65,31 @@
 * Removed obsolete compiled routes and bundled third-party example datasets,
   retained strict registered native calls, and preserved CPU, CUDA and Metal
   behavior across PLS-SVD, SIMPLS, OPLS, kernel PLS and LDA tests.
+
+* Reused bounded full-data sufficient statistics in eligible SIMPLS
+  classification cross-validation. Fold predictor Gram matrices and class
+  predictor sums now provide the score moments required by LDA without
+  materializing each training-fold score matrix; fold assignment,
+  preprocessing, selected components and classifier semantics are unchanged.
+
+* Added a resident CUDA SIMPLS cross-validation route that uploads each task
+  once and retains fold gathering, standardization, fitting, projection,
+  prediction and metric reduction on the device. Unsupported accelerator
+  configurations continue to fail explicitly rather than falling back to CPU.
+
+* Added resident CUDA PLS-SVD cross-validation for large multivariate
+  regression responses. The automatic dispatcher retains the faster
+  fold-local CUDA route for classification and smaller responses, while the
+  resident route avoids repeated transfer of NMR-scale response matrices.
+
+* Corrected numerical-rank detection in the implicit PLS-SVD rSVD operator.
+  The Gram-matrix shortcut now applies the squared singular-value tolerance
+  and is accepted only when it supplies the requested retained rank; otherwise
+  the implementation uses the direct reduced-SVD fallback.
+
+* Reused one fitted PLS response-score path when argmax and LDA are tuned
+  together, and accumulated requested prediction prefixes in place on CPU and
+  Metal to avoid rebuilding each prefix from the first component.
 
 # fastPLS 0.99.55
 

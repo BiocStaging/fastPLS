@@ -177,6 +177,47 @@ test_that("xprod default threshold matches the benchmark rule", {
   expect_true(should_use_rsvd(p = 5000, q = 1000, ncomp = 50))
 })
 
+test_that("implicit float32 PLS-SVD retains requested subunit directions", {
+  old_mode <- Sys.getenv("FASTPLS_ABLATION_MODE", unset = NA_character_)
+  old_xprod <- Sys.getenv("FASTPLS_ABLATION_XPROD", unset = NA_character_)
+  on.exit({
+    if (is.na(old_mode)) Sys.unsetenv("FASTPLS_ABLATION_MODE") else {
+      Sys.setenv(FASTPLS_ABLATION_MODE = old_mode)
+    }
+    if (is.na(old_xprod)) Sys.unsetenv("FASTPLS_ABLATION_XPROD") else {
+      Sys.setenv(FASTPLS_ABLATION_XPROD = old_xprod)
+    }
+  }, add = TRUE)
+  Sys.setenv(FASTPLS_ABLATION_MODE = "1", FASTPLS_ABLATION_XPROD = "1")
+
+  set.seed(144)
+  n <- 120L
+  p <- 40L
+  q <- 180L
+  retained <- 15L
+  X64 <- matrix(rnorm(n * p), n, p)
+  coefficient <- matrix(rnorm(p * q), p, q)
+  Y64 <- 1e-3 * (
+    X64 %*% coefficient + matrix(rnorm(n * q, sd = 0.05), n, q)
+  )
+
+  fit <- suppressWarnings(pls(
+    float::fl(X64),
+    float::fl(Y64),
+    ncomp = retained,
+    method = "plssvd",
+    backend = "cpu",
+    rsvd_oversample = 20L,
+    rsvd_power = 2L,
+    seed = 31L,
+    return_variance = FALSE
+  ))
+
+  expect_equal(ncol(fit$R), retained)
+  expect_true(all(is.finite(fit$R)))
+  expect_true(all(is.finite(fit$Q)))
+})
+
 test_that("core prediction is stable for compiled PLS", {
   set.seed(17)
   X <- matrix(rnorm(70 * 20), nrow = 70, ncol = 20)
@@ -347,4 +388,90 @@ test_that("centered factor-response PLSSVD respects the C minus 1 rank bound", {
     "rank is limited to 2"
   )
   expect_equal(as.integer(attr(fit, "fastPLS_internal")$ncomp), 2L)
+})
+
+test_that("rank-capped PLS-SVD component paths remain unique", {
+  set.seed(80)
+  X <- matrix(rnorm(90 * 12), nrow = 90, ncol = 12)
+  y <- factor(rep(letters[1:3], each = 30))
+
+  expect_warning(
+    fit <- pls(
+      X,
+      y,
+      ncomp = 1:5,
+      method = "plssvd",
+      backend = "cpu",
+      svd.method = "rsvd",
+      fit = TRUE,
+      return_variance = FALSE
+    ),
+    "rank is limited to 2"
+  )
+  expect_identical(
+    as.integer(attr(fit, "fastPLS_internal")$ncomp),
+    c(1L, 2L)
+  )
+  expect_identical(names(fit$R2Y), c("ncomp=1", "ncomp=2"))
+  expect_identical(names(fit$Yfit), c("ncomp=1", "ncomp=2"))
+})
+
+test_that("PLS-SVD rank cap accounts for centered sample rank", {
+  cap <- fastPLS:::.cap_plssvd_ncomp(
+    ncomp = 1:6,
+    nrows_x = 4,
+    ncols_x = 20,
+    ncols_y = 10,
+    warn = FALSE
+  )
+  expect_identical(cap$ncomp, 1:3)
+  expect_identical(cap$max_rank, 3L)
+})
+
+test_that("sequential PLS paths contain unique effective components", {
+  set.seed(81)
+  X <- matrix(rnorm(8 * 10), 8, 10)
+  Y <- matrix(rnorm(8 * 3), 8, 3)
+
+  for (method in c("simpls", "kernelpls")) {
+    fit <- suppressWarnings(pls(
+      X,
+      Y,
+      ncomp = c(1, 2, 5, 10, 20),
+      method = method,
+      kernel = "linear",
+      return_variance = FALSE
+    ))
+    effective <- attr(fit, "fastPLS_internal")$ncomp
+    expect_identical(as.integer(effective), c(1L, 2L, 5L, 7L))
+    expect_false(anyDuplicated(names(fit$R2Y)) > 0L)
+  }
+})
+
+test_that("R and native SIMPLS cross-product routing use one decision", {
+  variables <- c(
+    "FASTPLS_FAST_CROSSPROD_MAX_P",
+    "FASTPLS_FAST_CROSSPROD_MIN_NCOMP",
+    "FASTPLS_FAST_CROSSPROD_MIN_N_TO_P_RATIO"
+  )
+  previous <- Sys.getenv(variables, unset = NA_character_)
+  on.exit({
+    unset <- variables[is.na(previous)]
+    if (length(unset)) Sys.unsetenv(unset)
+    restore <- previous[!is.na(previous)]
+    if (length(restore)) do.call(Sys.setenv, as.list(restore))
+  }, add = TRUE)
+
+  Sys.setenv(
+    FASTPLS_FAST_CROSSPROD_MIN_NCOMP = "20",
+    FASTPLS_FAST_CROSSPROD_MIN_N_TO_P_RATIO = "8"
+  )
+  X <- matrix(0, 256, 32)
+
+  Sys.setenv(FASTPLS_FAST_CROSSPROD_MAX_P = "16")
+  expect_false(fastPLS:::.float32_simpls_uses_cached_crossprod(X, 20L))
+
+  Sys.setenv(FASTPLS_FAST_CROSSPROD_MAX_P = "65536")
+  expect_true(fastPLS:::.float32_simpls_uses_cached_crossprod(X, 20L))
+  expect_false(fastPLS:::.float32_simpls_uses_cached_crossprod(X, 19L))
 })

@@ -251,6 +251,31 @@ class ProjectedOperator {
     ++active_;
   }
 
+  void stabilize(Matrix<T>& direction) {
+    if (active_ == 0) return;
+    if (direction.rows() != rows() || direction.columns() != 1) {
+      throw std::invalid_argument(
+        "fastPLS projected-operator direction dimensions are inconsistent"
+      );
+    }
+    const ConstMatrixView<T> active_basis(
+      basis_.data(), basis_.rows(), active_, basis_.rows()
+    );
+    for (int pass = 0; pass < 2; ++pass) {
+      coefficients_.resize(active_, 1);
+      backend_.gemm(
+        active_basis, direction.view(), true, false, coefficients_.view()
+      );
+      correction_.resize(rows(), 1);
+      backend_.gemm(
+        active_basis, coefficients_.view(), false, false, correction_.view()
+      );
+      for (std::size_t row = 0; row < rows(); ++row) {
+        direction(row, 0) -= correction_(row, 0);
+      }
+    }
+  }
+
   void materialize(Matrix<T>& output) {
     Matrix<T> identity(columns(), columns());
     for (std::size_t index = 0; index < columns(); ++index) {

@@ -42,6 +42,16 @@ test_that("pls.single.cv can optimize explicit regression metrics", {
   expect_false(is.null(opt_rmsd$Ypred_optim))
 })
 
+test_that("a single selected regression path reuses its prediction cube", {
+  prediction <- array(seq_len(24), dim = c(4L, 6L, 1L))
+  selected <- fastPLS:::.cv_extract_prediction_at(
+    list(Ypred = prediction),
+    1L
+  )
+
+  expect_identical(selected, prediction)
+})
+
 test_that("classification cannot select on descriptive training R2", {
   set.seed(2105)
   X <- matrix(rnorm(36 * 5), nrow = 36, ncol = 5)

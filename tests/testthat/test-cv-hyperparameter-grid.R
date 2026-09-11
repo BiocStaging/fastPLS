@@ -187,3 +187,216 @@ test_that("OPLS component selection returns fitted R2 output", {
   expect_length(fit$Yfit, 2L)
   expect_true(all(is.finite(fit$accuracy)))
 })
+
+test_that("joint argmax and LDA tuning reuses an identical PLS score path", {
+  set.seed(99)
+  X <- matrix(rnorm(240 * 28), 240, 28)
+  y <- factor(rep(letters[1:4], each = 60))
+  common <- list(
+    Xdata = X,
+    Ydata = y,
+    ncomp = c(2L, 5L),
+    kfold = 4L,
+    method = "simpls",
+    backend = "cpu",
+    fit = FALSE,
+    seed = 17L
+  )
+
+  argmax <- do.call(pls.single.cv, c(common, list(classifier = "argmax")))
+  lda <- do.call(pls.single.cv, c(common, list(classifier = "lda")))
+  joint <- do.call(
+    pls.single.cv,
+    c(common, list(classifier = c("argmax", "lda")))
+  )
+  by_head <- setNames(
+    joint$tuning_results,
+    vapply(
+      joint$tuning_results,
+      function(value) value$tuning_config$classifier,
+      character(1L)
+    )
+  )
+
+  expect_identical(
+    lapply(by_head$argmax$pred, as.character),
+    lapply(argmax$pred, as.character)
+  )
+  expect_identical(
+    lapply(by_head$lda$pred, as.character),
+    lapply(lda$pred, as.character)
+  )
+  expect_equal(
+    by_head$argmax$selection_metrics,
+    argmax$selection_metrics,
+    tolerance = 0
+  )
+  expect_equal(
+    by_head$lda$selection_metrics,
+    lda$selection_metrics,
+    tolerance = 0
+  )
+  expect_identical(by_head$argmax$best_ncomp, argmax$best_ncomp)
+  expect_identical(by_head$lda$best_ncomp, lda$best_ncomp)
+})
+
+test_that("joint classifier reuse agrees on available float32 backends", {
+  set.seed(101)
+  X <- float::fl(matrix(rnorm(120 * 12), 120, 12))
+  y <- factor(rep(LETTERS[1:3], each = 40))
+  backends <- "cpu"
+  if (isTRUE(has_cuda())) backends <- c(backends, "cuda")
+  if (isTRUE(has_metal())) backends <- c(backends, "metal")
+
+  for (backend in backends) {
+    common <- list(
+      Xdata = X,
+      Ydata = y,
+      ncomp = c(1L, 3L),
+      kfold = 3L,
+      method = "simpls",
+      backend = backend,
+      fit = FALSE,
+      seed = 23L
+    )
+    argmax <- do.call(
+      pls.single.cv,
+      c(common, list(classifier = "argmax"))
+    )
+    lda <- do.call(pls.single.cv, c(common, list(classifier = "lda")))
+    joint <- do.call(
+      pls.single.cv,
+      c(common, list(classifier = c("argmax", "lda")))
+    )
+    by_head <- setNames(
+      joint$tuning_results,
+      vapply(
+        joint$tuning_results,
+        function(value) value$tuning_config$classifier,
+        character(1L)
+      )
+    )
+
+    expect_identical(
+      lapply(by_head$argmax$pred, as.character),
+      lapply(argmax$pred, as.character),
+      info = backend
+    )
+    expect_identical(
+      lapply(by_head$lda$pred, as.character),
+      lapply(lda$pred, as.character),
+      info = backend
+    )
+    expect_equal(
+      by_head$argmax$selection_metrics,
+      argmax$selection_metrics,
+      tolerance = 0,
+      info = backend
+    )
+    expect_equal(
+      by_head$lda$selection_metrics,
+      lda$selection_metrics,
+      tolerance = 0,
+      info = backend
+    )
+  }
+})
+
+test_that("joint classifier reuse preserves every PLS family", {
+  index <- c(1:20, 51:70, 101:120)
+  X <- as.matrix(iris[index, 1:4])
+  y <- droplevels(iris[index, 5])
+
+  for (method in c("plssvd", "simpls", "opls", "kernelpls")) {
+    common <- list(
+      Xdata = X,
+      Ydata = y,
+      ncomp = 1:2,
+      kfold = 3,
+      method = method,
+      backend = "cpu",
+      fit = FALSE,
+      seed = 17
+    )
+    argmax <- do.call(
+      pls.single.cv,
+      c(common, list(classifier = "argmax"))
+    )
+    lda <- do.call(pls.single.cv, c(common, list(classifier = "lda")))
+    joint <- do.call(
+      pls.single.cv,
+      c(common, list(classifier = c("argmax", "lda")))
+    )
+    by_head <- setNames(
+      joint$tuning_results,
+      vapply(
+        joint$tuning_results,
+        function(value) value$tuning_config$classifier,
+        character(1L)
+      )
+    )
+
+    expect_identical(
+      lapply(by_head$argmax$pred, as.character),
+      lapply(argmax$pred, as.character),
+      info = method
+    )
+    expect_identical(
+      lapply(by_head$lda$pred, as.character),
+      lapply(lda$pred, as.character),
+      info = method
+    )
+    expect_identical(by_head$argmax$best_ncomp, argmax$best_ncomp)
+    expect_identical(by_head$lda$best_ncomp, lda$best_ncomp)
+  }
+})
+
+test_that("SIMPLS-LDA fold moments preserve the cross-validation result", {
+  previous <- Sys.getenv("FASTPLS_CV_FOLD_GRAM_CACHE", unset = NA_character_)
+  on.exit({
+    if (is.na(previous)) {
+      Sys.unsetenv("FASTPLS_CV_FOLD_GRAM_CACHE")
+    } else {
+      Sys.setenv(FASTPLS_CV_FOLD_GRAM_CACHE = previous)
+    }
+  }, add = TRUE)
+
+  set.seed(311)
+  X <- matrix(rnorm(240 * 24), 240, 24)
+  y <- factor(rep(LETTERS[1:4], each = 60))
+  common <- list(
+    Xdata = X,
+    Ydata = y,
+    ncomp = c(5L, 12L, 20L),
+    kfold = 4L,
+    method = "simpls",
+    backend = "cpu",
+    classifier = "lda",
+    selection_metric = "accuracy",
+    fit = FALSE,
+    seed = 47L
+  )
+
+  Sys.setenv(FASTPLS_CV_FOLD_GRAM_CACHE = "0")
+  explicit_scores <- do.call(pls.single.cv, common)
+  Sys.setenv(FASTPLS_CV_FOLD_GRAM_CACHE = "1")
+  sufficient_moments <- do.call(pls.single.cv, common)
+
+  agreement <- vapply(seq_along(explicit_scores$pred), function(index) {
+    mean(
+      as.character(explicit_scores$pred[[index]]) ==
+        as.character(sufficient_moments$pred[[index]])
+    )
+  }, numeric(1L))
+  expect_true(all(agreement >= 0.995))
+  expect_equal(
+    explicit_scores$accuracy,
+    sufficient_moments$accuracy,
+    tolerance = 0.005
+  )
+  expect_identical(
+    explicit_scores$best_ncomp,
+    sufficient_moments$best_ncomp
+  )
+  expect_identical(explicit_scores$fold, sufficient_moments$fold)
+})

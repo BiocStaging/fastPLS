@@ -17,13 +17,15 @@ void cpu_gemm_f32(core::ConstMatrixView<float> left,
                   core::ConstMatrixView<float> right,
                   bool transpose_left,
                   bool transpose_right,
-                  core::MatrixView<float> output);
+                  core::MatrixView<float> output,
+                  bool accumulate = false);
 
 void cpu_gemm_f64(core::ConstMatrixView<double> left,
                   core::ConstMatrixView<double> right,
                   bool transpose_left,
                   bool transpose_right,
-                  core::MatrixView<double> output);
+                  core::MatrixView<double> output,
+                  bool accumulate = false);
 
 void cpu_crossprod_f32(core::ConstMatrixView<float> input,
                        core::MatrixView<float> output);
@@ -35,6 +37,12 @@ class CpuLinearAlgebraF32 {
             bool transpose_left,
             bool transpose_right,
             core::MatrixView<float> output) const;
+
+  void gemm_accumulate(core::ConstMatrixView<float> left,
+                       core::ConstMatrixView<float> right,
+                       bool transpose_left,
+                       bool transpose_right,
+                       core::MatrixView<float> output) const;
 
   bool qr_economy(core::ConstMatrixView<float> input,
                   core::Matrix<float>& q) const;
@@ -56,6 +64,12 @@ class CpuLinearAlgebraF64 {
             bool transpose_left,
             bool transpose_right,
             core::MatrixView<double> output) const;
+
+  void gemm_accumulate(core::ConstMatrixView<double> left,
+                       core::ConstMatrixView<double> right,
+                       bool transpose_left,
+                       bool transpose_right,
+                       core::MatrixView<double> output) const;
 
   bool qr_economy(core::ConstMatrixView<double> input,
                   core::Matrix<double>& q) const;

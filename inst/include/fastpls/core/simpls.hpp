@@ -93,6 +93,7 @@ struct SimplsWorkspace {
   Matrix<T> reduced_left;
   Matrix<T> candidate_scores;
   Matrix<T> candidate_loadings;
+  bool predictor_crossprod_preloaded = false;
 };
 
 namespace simpls_detail {
@@ -206,6 +207,20 @@ void copy_matrix(ConstMatrixView<T> source, Matrix<T>& destination) {
       destination(row, column) = source(row, column);
     }
   }
+}
+
+template<class T, class Backend>
+auto backend_rank1_subtract(
+    MatrixView<T> target, ConstMatrixView<T> column,
+    ConstMatrixView<T> row, Backend& backend, int)
+    -> decltype(backend.rank1_subtract(target, column, row), bool()) {
+  return backend.rank1_subtract(target, column, row);
+}
+
+template<class T, class Backend>
+bool backend_rank1_subtract(
+    MatrixView<T>, ConstMatrixView<T>, ConstMatrixView<T>, Backend&, long) {
+  return false;
 }
 
 template<class T, class Backend>
@@ -352,6 +367,110 @@ bool refresh_directions(ConstMatrixView<T> crosscov,
   return true;
 }
 
+template<class T, class Backend>
+auto backend_sample_gram_apply(
+    Backend& backend, ConstMatrixView<T> predictors,
+    ConstMatrixView<T> sample_gram, ConstMatrixView<T> direction,
+    MatrixView<T> output, int) -> decltype(
+      backend.sample_gram_apply(
+        predictors, sample_gram, direction, output
+      ), bool()) {
+  return backend.sample_gram_apply(
+    predictors, sample_gram, direction, output
+  );
+}
+
+template<class T, class Backend>
+bool backend_sample_gram_apply(
+    Backend&, ConstMatrixView<T>, ConstMatrixView<T>,
+    ConstMatrixView<T>, MatrixView<T>, long) {
+  return false;
+}
+
+template<class T, class Backend>
+auto backend_sample_geometry(
+    Backend& backend, ConstMatrixView<T> predictors,
+    ConstMatrixView<T> direction, MatrixView<T> score,
+    MatrixView<T> loading, int) -> decltype(
+      backend.sample_geometry(
+        predictors, direction, score, loading
+      ), bool()) {
+  return backend.sample_geometry(
+    predictors, direction, score, loading
+  );
+}
+
+template<class T, class Backend>
+bool backend_sample_geometry(
+    Backend&, ConstMatrixView<T>, ConstMatrixView<T>, MatrixView<T>,
+    MatrixView<T>, long) {
+  return false;
+}
+
+template<class T, class Backend>
+bool sample_gram_direction(
+    ConstMatrixView<T> predictors, ConstMatrixView<T> sample_gram,
+    ConstMatrixView<T> deflation_basis, std::size_t used,
+    const RsvdControls& controls, Backend& backend,
+    SimplsWorkspace<T>& workspace, Matrix<T>& direction) {
+  if (sample_gram.rows() != predictors.rows() ||
+      sample_gram.columns() != predictors.rows()) {
+    return false;
+  }
+  std::mt19937 generator(controls.seed);
+  std::normal_distribution<T> normal(T(0), T(1));
+  direction.resize(predictors.columns(), 1);
+  for (std::size_t row = 0; row < direction.rows(); ++row) {
+    direction(row, 0) = normal(generator);
+  }
+  remove_basis(
+    deflation_basis, used, direction, true, backend,
+    workspace.projection, workspace.correction
+  );
+  T direction_norm = norm(ConstMatrixView<T>(direction.view()));
+  if (!std::isfinite(direction_norm) || direction_norm <= T(0)) return false;
+  scale(direction.view(), direction_norm);
+
+  const int iterations = std::max(controls.power, 1);
+  for (int iteration = 0; iteration < iterations; ++iteration) {
+    workspace.direction_basis.resize(predictors.columns(), 1);
+    const bool fused = backend_sample_gram_apply(
+      backend, predictors, sample_gram,
+      ConstMatrixView<T>(direction.view()),
+      workspace.direction_basis.view(), 0
+    );
+    if (!fused) {
+      workspace.direction_sample.resize(predictors.rows(), 1);
+      backend.gemm(
+        predictors, direction.view(), false, false,
+        workspace.direction_sample.view()
+      );
+      workspace.reverse_sample.resize(predictors.rows(), 1);
+      backend.gemm(
+        sample_gram, workspace.direction_sample.view(), false, false,
+        workspace.reverse_sample.view()
+      );
+      backend.gemm(
+        predictors, workspace.reverse_sample.view(), true, false,
+        workspace.direction_basis.view()
+      );
+    }
+    remove_basis(
+      deflation_basis, used, workspace.direction_basis, true, backend,
+      workspace.projection, workspace.correction
+    );
+    direction_norm = norm(
+      ConstMatrixView<T>(workspace.direction_basis.view())
+    );
+    if (!std::isfinite(direction_norm) || direction_norm <= T(0)) {
+      return false;
+    }
+    scale(workspace.direction_basis.view(), direction_norm);
+    direction = std::move(workspace.direction_basis);
+  }
+  return true;
+}
+
 }  // namespace simpls_detail
 
 // Fits the sequential SIMPLS estimator from an already preprocessed predictor
@@ -363,19 +482,28 @@ SimplsModel<T> fit_simpls_preprocessed(
     ConstMatrixView<T> initial_crosscov,
     const SimplsControls& controls,
     Backend& backend,
-    SimplsWorkspace<T>& workspace) {
+    SimplsWorkspace<T>& workspace,
+    std::size_t sample_count_override = 0) {
   using Clock = std::chrono::steady_clock;
   const auto started = Clock::now();
-  if (predictors.data() == nullptr || initial_crosscov.data() == nullptr ||
-      predictors.empty() || initial_crosscov.empty() ||
-      predictors.columns() != initial_crosscov.rows() ||
-      controls.components == 0) {
+  const bool moments_only = predictors.data() == nullptr;
+  const bool valid_moments_only = moments_only && sample_count_override > 0 &&
+    controls.cache_predictor_crossprod && !controls.store_scores &&
+    !controls.reorthogonalize &&
+    workspace.predictor_crossprod_preloaded &&
+    workspace.predictor_crossprod.rows() == initial_crosscov.rows() &&
+    workspace.predictor_crossprod.columns() == initial_crosscov.rows();
+  if (initial_crosscov.data() == nullptr || initial_crosscov.empty() ||
+      controls.components == 0 ||
+      (!moments_only && (predictors.empty() ||
+        predictors.columns() != initial_crosscov.rows())) ||
+      (moments_only && !valid_moments_only)) {
     throw std::invalid_argument(
       "fastPLS SIMPLS requires nonempty conformable inputs and components"
     );
   }
-  const std::size_t n = predictors.rows();
-  const std::size_t p = predictors.columns();
+  const std::size_t n = moments_only ? sample_count_override : predictors.rows();
+  const std::size_t p = initial_crosscov.rows();
   const std::size_t q = initial_crosscov.columns();
   const std::size_t maximum = std::min({
     controls.components, p, std::max<std::size_t>(n - 1, 1)
@@ -391,11 +519,17 @@ SimplsModel<T> fit_simpls_preprocessed(
   simpls_detail::copy_matrix(initial_crosscov, workspace.crosscov);
 
   if (controls.cache_predictor_crossprod) {
-    workspace.predictor_crossprod.resize(p, p);
-    backend.gemm(
-      predictors, predictors, true, false,
-      workspace.predictor_crossprod.view()
-    );
+    const bool use_preloaded = workspace.predictor_crossprod_preloaded &&
+      workspace.predictor_crossprod.rows() == p &&
+      workspace.predictor_crossprod.columns() == p;
+    if (!use_preloaded) {
+      workspace.predictor_crossprod.resize(p, p);
+      backend.gemm(
+        predictors, predictors, true, false,
+        workspace.predictor_crossprod.view()
+      );
+    }
+    workspace.predictor_crossprod_preloaded = false;
   }
   const bool use_right_gram = controls.use_right_gram &&
     q <= p && q <= 512;
@@ -565,11 +699,16 @@ SimplsModel<T> fit_simpls_preprocessed(
         workspace.deflation_direction.view(), workspace.crosscov.view(),
         true, false, workspace.deflation_row.view()
       );
-      for (std::size_t column = 0; column < q; ++column) {
-        const T coefficient = workspace.deflation_row(0, column);
-        for (std::size_t row = 0; row < p; ++row) {
-          workspace.crosscov(row, column) -=
-            workspace.deflation_direction(row, 0) * coefficient;
+      if (!simpls_detail::backend_rank1_subtract(
+            workspace.crosscov.view(),
+            ConstMatrixView<T>(workspace.deflation_direction.view()),
+            ConstMatrixView<T>(workspace.deflation_row.view()), backend, 0)) {
+        for (std::size_t column = 0; column < q; ++column) {
+          const T coefficient = workspace.deflation_row(0, column);
+          for (std::size_t row = 0; row < p; ++row) {
+            workspace.crosscov(row, column) -=
+              workspace.deflation_direction(row, 0) * coefficient;
+          }
         }
       }
       if (use_right_gram) {
@@ -635,7 +774,8 @@ SimplsModel<T> fit_simpls_operator(
     const SimplsControls& controls,
     Backend& backend,
     SimplsWorkspace<T>& workspace,
-    OperatorRsvdWorkspace<T>& rsvd_workspace) {
+    OperatorRsvdWorkspace<T>& rsvd_workspace,
+    ConstMatrixView<T> sample_response_gram = ConstMatrixView<T>()) {
   using Clock = std::chrono::steady_clock;
   const auto started = Clock::now();
   if (predictors.empty() || initial_crosscov.rows() != predictors.columns() ||
@@ -662,11 +802,17 @@ SimplsModel<T> fit_simpls_operator(
     controls.reorthogonalize;
   if (retain_scores) model.scores.resize(n, maximum);
   if (controls.cache_predictor_crossprod) {
-    workspace.predictor_crossprod.resize(p, p);
-    backend.gemm(
-      predictors, predictors, true, false,
-      workspace.predictor_crossprod.view()
-    );
+    const bool use_preloaded = workspace.predictor_crossprod_preloaded &&
+      workspace.predictor_crossprod.rows() == p &&
+      workspace.predictor_crossprod.columns() == p;
+    if (!use_preloaded) {
+      workspace.predictor_crossprod.resize(p, p);
+      backend.gemm(
+        predictors, predictors, true, false,
+        workspace.predictor_crossprod.view()
+      );
+    }
+    workspace.predictor_crossprod_preloaded = false;
   }
   model.timing.setup = std::chrono::duration<double>(
     Clock::now() - started
@@ -675,7 +821,8 @@ SimplsModel<T> fit_simpls_operator(
   std::size_t component = 0;
   while (component < maximum) {
     const auto direction_started = Clock::now();
-    const std::size_t block = std::min({
+    const bool use_sample_gram = !sample_response_gram.empty();
+    const std::size_t block = use_sample_gram ? 1 : std::min({
       std::max<std::size_t>(controls.maximum_block, 1),
       maximum - component,
       std::min(p, q)
@@ -684,7 +831,14 @@ SimplsModel<T> fit_simpls_operator(
     rsvd.seed += static_cast<unsigned int>(component);
     rsvd.left_only = true;
     Matrix<T> candidates;
-    if (block == 1 && controls.rank_one_operator_direction) {
+    if (use_sample_gram) {
+      if (!simpls_detail::sample_gram_direction(
+            predictors, sample_response_gram,
+            projected_crosscov.basis(), component, rsvd, backend,
+            workspace, candidates)) {
+        break;
+      }
+    } else if (block == 1 && controls.rank_one_operator_direction) {
       if (!randomized_dominant_operator_direction<T>(
             projected_crosscov, rsvd, backend, rsvd_workspace,
             candidates)) {
@@ -761,16 +915,24 @@ SimplsModel<T> fit_simpls_operator(
           );
         }
       } else {
+        bool fused_geometry = false;
         if (controls.batch_candidate_geometry) {
           simpls_detail::copy_column(
             ConstMatrixView<T>(workspace.candidate_scores.view()),
             candidate, workspace.score.view(), 0
           );
         } else {
-          backend.gemm(
-            predictors, direction.view(), false, false,
-            workspace.score.view()
-          );
+          fused_geometry = use_sample_gram &&
+            simpls_detail::backend_sample_geometry(
+              backend, predictors, ConstMatrixView<T>(direction.view()),
+              workspace.score.view(), workspace.predictor_loading.view(), 0
+            );
+          if (!fused_geometry) {
+            backend.gemm(
+              predictors, direction.view(), false, false,
+              workspace.score.view()
+            );
+          }
         }
         const bool score_reorthogonalized =
           controls.reorthogonalize && component > 0;
@@ -791,12 +953,14 @@ SimplsModel<T> fit_simpls_operator(
         }
         simpls_detail::scale(workspace.score.view(), score_norm);
         simpls_detail::scale(direction.view(), score_norm);
-        if (controls.batch_candidate_geometry &&
+        if ((controls.batch_candidate_geometry || fused_geometry) &&
             !score_reorthogonalized) {
-          simpls_detail::copy_column(
-            ConstMatrixView<T>(workspace.candidate_loadings.view()),
-            candidate, workspace.predictor_loading.view(), 0
-          );
+          if (controls.batch_candidate_geometry) {
+            simpls_detail::copy_column(
+              ConstMatrixView<T>(workspace.candidate_loadings.view()),
+              candidate, workspace.predictor_loading.view(), 0
+            );
+          }
           simpls_detail::scale(
             workspace.predictor_loading.view(), score_norm
           );
@@ -808,9 +972,11 @@ SimplsModel<T> fit_simpls_operator(
         }
       }
 
-      initial_crosscov.multiply(
-        direction.view(), true, workspace.response_loading
-      );
+      if (!use_sample_gram) {
+        initial_crosscov.multiply(
+          direction.view(), true, workspace.response_loading
+        );
+      }
       simpls_detail::copy_matrix(
         ConstMatrixView<T>(workspace.predictor_loading.view()),
         workspace.deflation_direction
@@ -836,10 +1002,12 @@ SimplsModel<T> fit_simpls_operator(
         ConstMatrixView<T>(direction.view()), 0,
         model.weights.view(), component
       );
-      simpls_detail::copy_column(
-        ConstMatrixView<T>(workspace.response_loading.view()), 0,
-        model.response_loadings.view(), component
-      );
+      if (!use_sample_gram) {
+        simpls_detail::copy_column(
+          ConstMatrixView<T>(workspace.response_loading.view()), 0,
+          model.response_loadings.view(), component
+        );
+      }
       simpls_detail::copy_column(
         ConstMatrixView<T>(workspace.deflation_direction.view()), 0,
         model.deflation_basis.view(), component
@@ -856,6 +1024,21 @@ SimplsModel<T> fit_simpls_operator(
       ).count();
     }
     if (stopped) break;
+  }
+  if (!sample_response_gram.empty() && model.completed_components > 0) {
+    ConstMatrixView<T> active_weights(
+      model.weights.data(), model.weights.rows(), model.completed_components,
+      model.weights.rows()
+    );
+    Matrix<T> response_loadings;
+    initial_crosscov.multiply(active_weights, true, response_loadings);
+    for (std::size_t column = 0;
+         column < model.completed_components; ++column) {
+      for (std::size_t row = 0; row < q; ++row) {
+        model.response_loadings(row, column) =
+          response_loadings(row, column);
+      }
+    }
   }
   model.timing.total = std::chrono::duration<double>(
     Clock::now() - started

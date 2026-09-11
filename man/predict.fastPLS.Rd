@@ -2,8 +2,6 @@
 % Please edit documentation in R/main.R
 \name{predict.fastPLS}
 \alias{predict.fastPLS}
-\alias{predict.fastPLSKernel}
-\alias{predict.fastPLSOpls}
 \title{Predict from fitted fastPLS models}
 \usage{
 \method{predict}{fastPLS}(
@@ -18,10 +16,6 @@
   raw_scores = FALSE,
   ...
 )
-
-\method{predict}{fastPLSKernel}(object, newdata, Ytest = NULL, proj = FALSE, ...)
-
-\method{predict}{fastPLSOpls}(object, newdata, Ytest = NULL, proj = FALSE, ...)
 }
 \arguments{
 \item{object}{A fitted \code{fastPLS}, \code{fastPLSKernel}, or \code{fastPLSOpls} object.}

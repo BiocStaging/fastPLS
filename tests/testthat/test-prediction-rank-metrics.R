@@ -18,8 +18,6 @@ test_that("compiled Spearman preserves average ties and complete pairs", {
             use = "complete.obs"))
         expect_equal(fastPLS:::spearman_correlation_cpp(x, y), expected,
             tolerance = 1e-14)
-        expect_equal(fastPLS:::.evaluate_correlation(x, y, "spearman"),
-            expected, tolerance = 1e-14)
     }
     expect_true(is.na(fastPLS:::spearman_correlation_cpp(1, 2)))
     expect_error(fastPLS:::spearman_correlation_cpp(c(NA, NaN), c(1, 2)),

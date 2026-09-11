@@ -1,13 +1,3 @@
-ordered_draw_reference <- function(values) {
-    result <- integer(length(values))
-    for (i in seq_along(result)) {
-        position <- floor(runif(1) * length(values)) + 1L
-        result[[i]] <- values[[position]]
-        values <- values[-position]
-    }
-    result
-}
-
 legacy_fold_reference <- function(groups, labels, kfold) {
     levels <- sort(unique(groups))
     mapped <- match(groups, levels)
@@ -16,14 +6,15 @@ legacy_fold_reference <- function(groups, labels, kfold) {
     group_fold <- integer(count)
     if (!is.null(labels)) {
         first_label <- labels[match(levels, groups)]
-        for (label in seq_len(max(labels))) {
+        for (label in unique(first_label)) {
             indices <- which(first_label == label)
             if (!length(indices)) next
-            order <- ordered_draw_reference(seq_along(indices))
+            order <- sample(seq_along(indices), length(indices))
             group_fold[indices[order]] <- (seq_along(indices) - 1L) %% kfold
         }
     } else {
-        group_fold <- (ordered_draw_reference(seq_len(count)) - 1L) %% kfold
+        order <- sample(seq_len(count), count)
+        group_fold[order] <- (seq_len(count) - 1L) %% kfold
     }
     as.integer(group_fold[mapped] + 1L)
 }

@@ -132,6 +132,78 @@ test_that("massive cross-covariance routing accounts for input precision", {
   expect_identical(single$profile, "high_response_stable")
 })
 
+test_that("massive implicit SIMPLS is reproducible and backend concordant", {
+  skip_on_os("windows")
+  set.seed(918)
+  ntrain <- 48L
+  ntest <- 12L
+  predictor_count <- 9000L
+  response_count <- 15000L
+  latent_count <- 4L
+  latent <- matrix(
+    rnorm((ntrain + ntest) * latent_count),
+    ntrain + ntest, latent_count
+  )
+  predictors <- latent %*% matrix(
+    rnorm(latent_count * predictor_count, sd = 0.25),
+    latent_count, predictor_count
+  )
+  responses <- latent %*% matrix(
+    rnorm(latent_count * response_count, sd = 0.08),
+    latent_count, response_count
+  )
+  Xtrain <- float::fl(predictors[seq_len(ntrain), , drop = FALSE])
+  Ytrain <- float::fl(responses[seq_len(ntrain), , drop = FALSE])
+  Xtest <- float::fl(
+    predictors[ntrain + seq_len(ntest), , drop = FALSE]
+  )
+
+  fit_once <- function(backend) {
+    pls(
+      Xtrain, Ytrain,
+      ncomp = 1:6,
+      method = "simpls",
+      backend = backend,
+      scaling = "none",
+      fit = FALSE,
+      proj = FALSE,
+      return_variance = FALSE,
+      return_loadings = FALSE,
+      oversample = 12L,
+      power = 1L,
+      seed = 7L
+    )
+  }
+  first <- fit_once("cpu")
+  second <- fit_once("cpu")
+  first_prediction <- predict(first, Xtest)$Ypred[[6L]]
+  second_prediction <- predict(second, Xtest)$Ypred[[6L]]
+
+  expect_identical(
+    first$diagnostics$simpls_direction$rule,
+    "fresh_cpu_rank_one_refresh"
+  )
+  expect_equal(
+    float::dbl(first_prediction),
+    float::dbl(second_prediction),
+    tolerance = 0
+  )
+
+  if (isTRUE(has_metal())) {
+    metal <- fit_once("metal")
+    metal_prediction <- predict(metal, Xtest, backend = "metal")$Ypred[[6L]]
+    expect_identical(
+      metal$diagnostics$simpls_direction$rule,
+      "fresh_metal_rank_one_refresh"
+    )
+    expect_equal(
+      float::dbl(metal_prediction),
+      float::dbl(first_prediction),
+      tolerance = 1e-6
+    )
+  }
+})
+
 test_that("public diagnostics name componentwise and block randomized SIMPLS", {
   set.seed(831)
   ordinary <- pls(
@@ -225,7 +297,7 @@ test_that("CUDA massive cross-covariance diagnostics report block refresh", {
   expect_true(rule$fresh_start)
 })
 
-test_that("CPU massive cross-covariance diagnostics report block refresh", {
+test_that("CPU massive cross-covariance diagnostics report rank-one refresh", {
   rule <- fastPLS:::.simpls_direction_diagnostics(
     randomized = TRUE,
     backend = "cpu",
@@ -236,15 +308,15 @@ test_that("CPU massive cross-covariance diagnostics report block refresh", {
     requested_components = 50L,
     power = 2L
   )
-  expect_identical(rule$rule, "batched_cpu_candidate_block")
-  expect_identical(rule$refresh_width, 8L)
-  expect_identical(rule$directions_per_solve, 8L)
+  expect_identical(rule$rule, "fresh_cpu_rank_one_refresh")
+  expect_identical(rule$refresh_width, 1L)
+  expect_identical(rule$directions_per_solve, 1L)
   expect_identical(rule$refresh_iterations, 2L)
-  expect_identical(rule$seed_rule, "seed_plus_candidate_block_start")
+  expect_identical(rule$seed_rule, "seed_plus_component_index")
   expect_true(rule$fresh_start)
 })
 
-test_that("Metal massive SIMPLS diagnostics report block refresh", {
+test_that("Metal massive SIMPLS diagnostics report rank-one refresh", {
   rule <- fastPLS:::.simpls_direction_diagnostics(
     randomized = TRUE,
     backend = "metal",
@@ -256,13 +328,13 @@ test_that("Metal massive SIMPLS diagnostics report block refresh", {
     route_mode = "metal_resident_rank_one_simpls",
     power = 1L
   )
-  expect_identical(rule$rule, "batched_metal_candidate_block")
-  expect_identical(rule$refresh_width, 8L)
-  expect_identical(rule$directions_per_solve, 8L)
+  expect_identical(rule$rule, "fresh_metal_rank_one_refresh")
+  expect_identical(rule$refresh_width, 1L)
+  expect_identical(rule$directions_per_solve, 1L)
   expect_identical(rule$refresh_iterations, 1L)
   expect_identical(
     rule$seed_rule,
-    "seed_plus_candidate_block_start"
+    "single_seed_fresh_component_sequence"
   )
   expect_true(rule$fresh_start)
 })

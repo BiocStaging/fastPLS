@@ -11,6 +11,32 @@ extern "C" {
 int fastpls_cuda_gemm(const void* left,const void* right,int precision,
     int rows,int inner,int columns,void* output,char* error,
     size_t error_capacity);
+int fastpls_resident_simpls_cv_classification(
+    const void* predictors,const int* labels,const int* folds,int precision,
+    int n,int p,int classes,const int* prefixes,int prefix_count,int scaling,
+    int lda,int oversample,int power,unsigned long long seed,
+    int store_predictions,int store_scores,int* predictions,void* scores,
+    int* status,double* metrics,char* error,size_t error_capacity);
+int fastpls_resident_simpls_cv_regression(
+    const void* predictors,const void* responses,const int* folds,
+    int precision,int n,int p,int q,const int* prefixes,int prefix_count,
+    int scaling,int metric,int oversample,int power,unsigned long long seed,
+    int store_predictions,double* predictions,int* status,double* metrics,
+    double* q2,double* rmsd,double* observed_r2,
+    char* error,size_t error_capacity);
+int fastpls_resident_plssvd_cv_classification(
+    const void* predictors,const int* labels,const int* folds,int precision,
+    int n,int p,int classes,const int* prefixes,int prefix_count,int scaling,
+    int lda,int oversample,int power,unsigned long long seed,
+    int store_predictions,int store_scores,int* predictions,void* scores,
+    int* status,double* metrics,char* error,size_t error_capacity);
+int fastpls_resident_plssvd_cv_regression(
+    const void* predictors,const void* responses,const int* folds,
+    int precision,int n,int p,int q,const int* prefixes,int prefix_count,
+    int scaling,int metric,int oversample,int power,unsigned long long seed,
+    int store_predictions,double* predictions,int* status,double* metrics,
+    double* q2,double* rmsd,double* observed_r2,
+    char* error,size_t error_capacity);
 void* fastpls_resident_simpls_create(const void* x,const void* y,const int* labels,
     int precision,int n,int p,int q,int components,int scaling,int oversample,
     int power,int retain_scores,unsigned long long seed,char* error,

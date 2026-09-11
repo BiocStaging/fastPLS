@@ -6,6 +6,18 @@ set_cpu_threads_cpp <- function(threads) {
     )
 }
 
+simpls_cache_predictor_crossprod_cpp <- function(
+    samples, predictors, components
+) {
+    .Call(
+        "_fastPLS_simpls_cache_predictor_crossprod",
+        as.integer(samples),
+        as.integer(predictors),
+        as.integer(components),
+        PACKAGE = "fastPLS"
+    )
+}
+
 fastsvd_core_cpp <- function(
     matrix, components, oversample, power, seed, left_only = FALSE
 ) {
@@ -58,6 +70,45 @@ pls_cv_classification_float32_core_cpp <- function(
         PACKAGE = "fastPLS"
     )
     result
+}
+
+pls_cv_classification_float32_metal_core_cpp <- function(
+    predictors, labels, class_count, folds, components, scaling, method,
+    classifier, north, kernel, gamma, degree, coef0, oversample, power, seed,
+    store_predictions = TRUE, store_scores = TRUE
+) {
+    .Call(
+        "_fastPLS_pls_cv_classification_float32_metal_core_cpp",
+        predictors, labels, class_count, folds, components, scaling, method,
+        classifier, north, kernel, gamma, degree, coef0, oversample, power,
+        seed, store_predictions, store_scores, PACKAGE = "fastPLS"
+    )
+}
+
+cuda_resident_simpls_cv_classification_cpp <- function(
+    predictors, labels, class_count, folds, components, scaling, classifier,
+    oversample, power, seed, store_predictions = TRUE, store_scores = TRUE,
+    method = 3L
+) {
+    .Call(
+        "_fastPLS_cuda_resident_simpls_cv_classification_cpp",
+        predictors, labels, class_count, folds, components, scaling,
+        classifier, oversample, power, seed, store_predictions, store_scores,
+        method,
+        PACKAGE = "fastPLS"
+    )
+}
+
+cuda_resident_simpls_cv_regression_cpp <- function(
+    predictors, responses, folds, components, scaling, metric, oversample,
+    power, seed, store_predictions = TRUE, method = 3L
+) {
+    .Call(
+        "_fastPLS_cuda_resident_simpls_cv_regression_cpp",
+        predictors, responses, folds, components, scaling, metric,
+        oversample, power, seed, store_predictions, method,
+        PACKAGE = "fastPLS"
+    )
 }
 
 pls_cv_opls_classification_core_cpp <- function(
@@ -133,6 +184,19 @@ pls_cv_regression_float32_core_cpp <- function(
         power, seed, store_predictions, PACKAGE = "fastPLS"
     )
     result
+}
+
+pls_cv_regression_float32_metal_core_cpp <- function(
+    predictors, responses, folds, components, scaling, method, metric,
+    north, kernel, gamma, degree, coef0, oversample, power, seed,
+    store_predictions = TRUE
+) {
+    .Call(
+        "_fastPLS_pls_cv_regression_float32_metal_core_cpp",
+        predictors, responses, folds, components, scaling, method, metric,
+        north, kernel, gamma, degree, coef0, oversample, power, seed,
+        store_predictions, PACKAGE = "fastPLS"
+    )
 }
 
 pls_cv_opls_regression_core_cpp <- function(
@@ -541,6 +605,61 @@ spearman_correlation_cpp <- function(observed, predicted) {
         "_fastPLS_spearman_correlation_cpp",
         observed,
         predicted,
+        PACKAGE = "fastPLS"
+    )
+}
+
+evaluate_regression_core_cpp <- function(
+    observed, predicted, training = NULL,
+    relative_epsilon = .Machine$double.eps, na.rm = TRUE
+) {
+    .Call(
+        "_fastPLS_evaluate_regression_core_cpp",
+        observed, predicted, training, relative_epsilon, na.rm,
+        PACKAGE = "fastPLS"
+    )
+}
+
+evaluate_regression_by_column_cpp <- function(
+    observed, predicted, training = NULL,
+    relative_epsilon = .Machine$double.eps, na.rm = TRUE
+) {
+    .Call(
+        "_fastPLS_evaluate_regression_by_column_cpp",
+        observed, predicted, training, relative_epsilon, na.rm,
+        PACKAGE = "fastPLS"
+    )
+}
+
+evaluate_classification_core_cpp <- function(
+    observed, predicted, class_count, scores = NULL,
+    score_observed = integer(), top_k = integer()
+) {
+    .Call(
+        "_fastPLS_evaluate_classification_core_cpp",
+        observed, predicted, as.integer(class_count), scores,
+        as.integer(score_observed), as.integer(top_k), PACKAGE = "fastPLS"
+    )
+}
+
+evaluate_is_onehot_cpp <- function(values) {
+    .Call("_fastPLS_evaluate_is_onehot_cpp", values, PACKAGE = "fastPLS")
+}
+
+evaluate_class_labels_cpp <- function(values, reference_levels = NULL) {
+    .Call(
+        "_fastPLS_evaluate_class_labels_cpp",
+        values, reference_levels, PACKAGE = "fastPLS"
+    )
+}
+
+vip_core_cpp <- function(model) {
+    .Call("_fastPLS_vip_core_cpp", model, PACKAGE = "fastPLS")
+}
+
+fastcor_core_cpp <- function(a, b = NULL, byrow = TRUE, diag = TRUE) {
+    .Call(
+        "_fastPLS_fastcor_core_cpp", a, b, byrow, diag,
         PACKAGE = "fastPLS"
     )
 }
