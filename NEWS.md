@@ -1,4 +1,18 @@
-# fastPLS 0.99.58
+# fastPLS 0.99.59
+
+* Added precision- and shape-aware CPU dispatch between GEMM and direct
+  SSYRK/DSYRK self-products. Symmetric routes retain one triangle when the
+  caller does not require a complete matrix, avoiding unnecessary mirroring.
+
+* Generalized bounded sample-response Gram reuse in wide-response SIMPLS
+  cross-validation to all CPU platforms. The raw Gram matrix is computed once,
+  each fold is recovered by principal-submatrix extraction and exact double
+  centering, and centering/output workspaces are retained across folds. Wide
+  gathered response matrices use aligned storage with 64-byte column padding.
+
+* Made OpenBLAS a mandatory Linux and Windows system requirement and declared
+  `libopenblas-dev` explicitly for `pak`-based Linux build environments.
+  Configuration fails clearly rather than silently linking a different BLAS.
 
 * Reduced repeated setup in every compiled cross-validation backend. Eligible
   CPU and Metal classification folds now recover both SIMPLS and PLS-SVD
@@ -49,9 +63,7 @@
 * Reused fold matrix allocations in the compiled cross-validation engine,
   including predictor, response, held-out, and predictor-Gram workspaces.
 
-* Made OpenBLAS the default CPU numerical library on Linux and Windows. The
-  configure scripts now stop with installation guidance when OpenBLAS is not
-  found; `FASTPLS_USE_OPENBLAS=0` remains an explicit portability override.
+* Made OpenBLAS the CPU numerical library on Linux and Windows.
 
 * Completed the MIT-licensed core migration by removing the remaining Rcpp,
   RcppArmadillo and Armadillo source boundaries, generated wrappers and

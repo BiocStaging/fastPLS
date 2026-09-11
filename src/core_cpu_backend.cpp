@@ -7,6 +7,7 @@
 #include <algorithm>
 #include <cstdlib>
 #include <stdexcept>
+#include <type_traits>
 
 #if !defined(_WIN32)
 #include <dlfcn.h>
@@ -181,6 +182,71 @@ bool cpu_gemv_f32(core::ConstMatrixView<float> matrix,
 #endif
 }
 
+template<class T>
+void mirror_lower_to_upper(core::MatrixView<T> output) {
+  constexpr std::size_t block_size = 32;
+  for (std::size_t column_block = 0; column_block < output.columns();
+       column_block += block_size) {
+    const std::size_t column_end = std::min(
+      output.columns(), column_block + block_size
+    );
+    for (std::size_t row_block = column_block; row_block < output.rows();
+         row_block += block_size) {
+      const std::size_t row_end = std::min(
+        output.rows(), row_block + block_size
+      );
+      for (std::size_t column = column_block; column < column_end; ++column) {
+        const std::size_t first_row = std::max(row_block, column + 1);
+        for (std::size_t row = first_row; row < row_end; ++row) {
+          output(column, row) = output(row, column);
+        }
+      }
+    }
+  }
+}
+
+template<class T>
+bool is_self_gram(core::ConstMatrixView<T> left,
+                  core::ConstMatrixView<T> right,
+                  bool transpose_left,
+                  bool transpose_right,
+                  core::MatrixView<T> output) {
+  if (left.data() != right.data() || left.rows() != right.rows() ||
+      left.columns() != right.columns() ||
+      left.leading_dimension() != right.leading_dimension() ||
+      transpose_left == transpose_right || output.rows() != output.columns()) {
+    return false;
+  }
+  const std::size_t dimension = transpose_left ? left.columns() : left.rows();
+  return output.rows() == dimension;
+}
+
+template<class T>
+bool use_symmetric_kernel(std::size_t dimension, std::size_t rank,
+                          bool transpose_input) {
+#if defined(FASTPLS_USE_ACCELERATE)
+  // Accelerate's float32 GEMM overtakes SYRK for large sample-space outputs,
+  // whereas float64 SYRK regains an advantage near n=1000. For transposed
+  // products, SYRK wins in the measured medium-dimension, moderate-rank range;
+  // GEMM remains faster for tiny outputs and very tall input matrices.
+  if (transpose_input) {
+    return dimension >= 128 && rank <= 8192;
+  }
+  if constexpr (std::is_same<T, float>::value) {
+    return dimension <= 128;
+  }
+  return dimension >= 768;
+#else
+  // Avoid multithreaded SYRK launch overhead only for truly tiny products.
+#if defined(_WIN32)
+  if constexpr (std::is_same<T, float>::value) {
+    return dimension >= 32;
+  }
+#endif
+  return dimension >= 32 || rank >= 256;
+#endif
+}
+
 }  // namespace
 
 std::vector<std::string> set_cpu_threads(const int threads) {
@@ -255,7 +321,8 @@ void cpu_gemm_f32(core::ConstMatrixView<float> left,
                   bool transpose_left,
                   bool transpose_right,
                   core::MatrixView<float> output,
-                  bool accumulate) {
+                  bool accumulate,
+                  bool dispatch_symmetric) {
   const std::size_t rows = transpose_left ? left.columns() : left.rows();
   const std::size_t inner_left = transpose_left ? left.rows() : left.columns();
   const std::size_t inner_right = transpose_right ? right.columns() : right.rows();
@@ -274,6 +341,16 @@ void cpu_gemm_f32(core::ConstMatrixView<float> left,
       output.rows() == 1 && cpu_gemv_f32(
         right, true, left.data(), output.data())) {
     return;
+  }
+  if (dispatch_symmetric && !accumulate &&
+      is_self_gram(left, right, transpose_left, transpose_right, output)) {
+    const bool transpose_input = transpose_left;
+    const std::size_t dimension = transpose_input ? left.columns() : left.rows();
+    const std::size_t rank = transpose_input ? left.rows() : left.columns();
+    if (use_symmetric_kernel<float>(dimension, rank, transpose_input)) {
+      cpu_self_gram_f32(left, transpose_input, output, true);
+      return;
+    }
   }
 
 #if defined(FASTPLS_USE_ACCELERATE)
@@ -378,7 +455,8 @@ void cpu_gemm_f64(core::ConstMatrixView<double> left,
                   bool transpose_left,
                   bool transpose_right,
                   core::MatrixView<double> output,
-                  bool accumulate) {
+                  bool accumulate,
+                  bool dispatch_symmetric) {
   const std::size_t rows = transpose_left ? left.columns() : left.rows();
   const std::size_t inner_left = transpose_left ? left.rows() : left.columns();
   const std::size_t inner_right = transpose_right ? right.columns() : right.rows();
@@ -386,6 +464,16 @@ void cpu_gemm_f64(core::ConstMatrixView<double> left,
   if (inner_left != inner_right || output.rows() != rows ||
       output.columns() != columns) {
     throw std::invalid_argument("fastPLS CPU matrix-product dimensions are inconsistent");
+  }
+  if (dispatch_symmetric && !accumulate &&
+      is_self_gram(left, right, transpose_left, transpose_right, output)) {
+    const bool transpose_input = transpose_left;
+    const std::size_t dimension = transpose_input ? left.columns() : left.rows();
+    const std::size_t rank = transpose_input ? left.rows() : left.columns();
+    if (use_symmetric_kernel<double>(dimension, rank, transpose_input)) {
+      cpu_self_gram_f64(left, transpose_input, output, true);
+      return;
+    }
   }
 
 #if defined(FASTPLS_USE_ACCELERATE)
@@ -449,48 +537,111 @@ void cpu_gemm_f64(core::ConstMatrixView<double> left,
 #endif
 }
 
-void cpu_crossprod_f32(core::ConstMatrixView<float> input,
-                       core::MatrixView<float> output) {
-  if (output.rows() != input.columns() ||
-      output.columns() != input.columns()) {
+void cpu_self_gram_f32(core::ConstMatrixView<float> input,
+                       bool transpose_input,
+                       core::MatrixView<float> output,
+                       bool full_output) {
+  const std::size_t dimension = transpose_input ? input.columns() : input.rows();
+  const std::size_t rank = transpose_input ? input.rows() : input.columns();
+  if (output.rows() != dimension || output.columns() != dimension) {
     throw std::invalid_argument(
-      "fastPLS CPU float32 cross-product dimensions are inconsistent"
+      "fastPLS CPU float32 self-Gram dimensions are inconsistent"
     );
   }
-  const int dimension = static_cast<int>(input.columns());
-  const int observations = static_cast<int>(input.rows());
+  if (!use_symmetric_kernel<float>(dimension, rank, transpose_input)) {
+    cpu_gemm_f32(
+      input, input, transpose_input, !transpose_input, output, false, false
+    );
+    return;
+  }
 #if defined(FASTPLS_USE_ACCELERATE)
   cblas_ssyrk(
-    CblasColMajor, CblasUpper, CblasTrans, dimension, observations,
+    CblasColMajor, CblasLower,
+    transpose_input ? CblasTrans : CblasNoTrans,
+    static_cast<int>(dimension), static_cast<int>(rank),
     1.0f, input.data(), static_cast<int>(input.leading_dimension()),
     0.0f, output.data(), static_cast<int>(output.leading_dimension())
   );
 #elif defined(FASTPLS_USE_OPENBLAS)
   configure_openblas_threads();
   cblas_ssyrk(
-    CblasColMajor, CblasUpper, CblasTrans, dimension, observations,
+    CblasColMajor, CblasLower,
+    transpose_input ? CblasTrans : CblasNoTrans,
+    static_cast<int>(dimension), static_cast<int>(rank),
     1.0f, input.data(), static_cast<int>(input.leading_dimension()),
     0.0f, output.data(), static_cast<int>(output.leading_dimension())
   );
 #else
-  const char upper = 'U';
-  const char transpose = 'T';
+  const char lower = 'L';
+  const char transpose = transpose_input ? 'T' : 'N';
   const BLAS_INT n = static_cast<BLAS_INT>(dimension);
-  const BLAS_INT k = static_cast<BLAS_INT>(observations);
+  const BLAS_INT k = static_cast<BLAS_INT>(rank);
   const BLAS_INT lda = static_cast<BLAS_INT>(input.leading_dimension());
   const BLAS_INT ldc = static_cast<BLAS_INT>(output.leading_dimension());
   const float alpha = 1.0f;
   const float beta = 0.0f;
   F77_CALL(ssyrk)(
-    &upper, &transpose, &n, &k, &alpha, input.data(), &lda, &beta,
+    &lower, &transpose, &n, &k, &alpha, input.data(), &lda, &beta,
     output.data(), &ldc FCONE FCONE
   );
 #endif
-  for (std::size_t column = 0; column < output.columns(); ++column) {
-    for (std::size_t row = column + 1; row < output.rows(); ++row) {
-      output(row, column) = output(column, row);
-    }
+  if (full_output) mirror_lower_to_upper(output);
+}
+
+void cpu_self_gram_f64(core::ConstMatrixView<double> input,
+                       bool transpose_input,
+                       core::MatrixView<double> output,
+                       bool full_output) {
+  const std::size_t dimension = transpose_input ? input.columns() : input.rows();
+  const std::size_t rank = transpose_input ? input.rows() : input.columns();
+  if (output.rows() != dimension || output.columns() != dimension) {
+    throw std::invalid_argument(
+      "fastPLS CPU float64 self-Gram dimensions are inconsistent"
+    );
   }
+  if (!use_symmetric_kernel<double>(dimension, rank, transpose_input)) {
+    cpu_gemm_f64(
+      input, input, transpose_input, !transpose_input, output, false, false
+    );
+    return;
+  }
+#if defined(FASTPLS_USE_ACCELERATE)
+  cblas_dsyrk(
+    CblasColMajor, CblasLower,
+    transpose_input ? CblasTrans : CblasNoTrans,
+    static_cast<int>(dimension), static_cast<int>(rank),
+    1.0, input.data(), static_cast<int>(input.leading_dimension()),
+    0.0, output.data(), static_cast<int>(output.leading_dimension())
+  );
+#elif defined(FASTPLS_USE_OPENBLAS)
+  configure_openblas_threads();
+  cblas_dsyrk(
+    CblasColMajor, CblasLower,
+    transpose_input ? CblasTrans : CblasNoTrans,
+    static_cast<int>(dimension), static_cast<int>(rank),
+    1.0, input.data(), static_cast<int>(input.leading_dimension()),
+    0.0, output.data(), static_cast<int>(output.leading_dimension())
+  );
+#else
+  const char lower = 'L';
+  const char transpose = transpose_input ? 'T' : 'N';
+  const BLAS_INT n = static_cast<BLAS_INT>(dimension);
+  const BLAS_INT k = static_cast<BLAS_INT>(rank);
+  const BLAS_INT lda = static_cast<BLAS_INT>(input.leading_dimension());
+  const BLAS_INT ldc = static_cast<BLAS_INT>(output.leading_dimension());
+  const double alpha = 1.0;
+  const double beta = 0.0;
+  F77_CALL(dsyrk)(
+    &lower, &transpose, &n, &k, &alpha, input.data(), &lda, &beta,
+    output.data(), &ldc FCONE FCONE
+  );
+#endif
+  if (full_output) mirror_lower_to_upper(output);
+}
+
+void cpu_crossprod_f32(core::ConstMatrixView<float> input,
+                       core::MatrixView<float> output) {
+  cpu_gemm_f32(input, input, true, false, output);
 }
 
 void CpuLinearAlgebraF64::gemm(core::ConstMatrixView<double> left,
@@ -514,6 +665,12 @@ void CpuLinearAlgebraF64::gemm_accumulate(
   );
 }
 
+void CpuLinearAlgebraF64::self_gram(
+    core::ConstMatrixView<double> input, bool transpose_input,
+    core::MatrixView<double> output, bool full_output) const {
+  cpu_self_gram_f64(input, transpose_input, output, full_output);
+}
+
 void CpuLinearAlgebraF32::gemm(core::ConstMatrixView<float> left,
                                core::ConstMatrixView<float> right,
                                bool transpose_left,
@@ -533,6 +690,12 @@ void CpuLinearAlgebraF32::gemm_accumulate(
   cpu_gemm_f32(
     left, right, transpose_left, transpose_right, output, true
   );
+}
+
+void CpuLinearAlgebraF32::self_gram(
+    core::ConstMatrixView<float> input, bool transpose_input,
+    core::MatrixView<float> output, bool full_output) const {
+  cpu_self_gram_f32(input, transpose_input, output, full_output);
 }
 
 }  // namespace runtime

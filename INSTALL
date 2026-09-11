@@ -9,14 +9,17 @@ CPU-only installation
 ---------------------
 
 No external GPU software is required. macOS uses Apple Accelerate. Linux and
-Windows use OpenBLAS by default and require its development headers and
-libraries. On Debian or Ubuntu, install them with:
+Windows require OpenBLAS development headers and libraries. On Debian or
+Ubuntu, install them with:
 
   sudo apt-get install libopenblas-dev pkg-config
 
 If OpenBLAS is installed outside the standard search path, set OPENBLAS_ROOT
-to its prefix before installation. Set FASTPLS_USE_OPENBLAS=0 only when an
-explicit build against R's BLAS is required.
+to its prefix before installation. Linux and Windows installation fails
+explicitly when OpenBLAS cannot be found; it does not select another BLAS.
+For source builds intended for repeated large analyses, use a current
+OpenBLAS release compiled for the target architecture rather than a generic
+portable binary.
 
 CUDA installation
 -----------------

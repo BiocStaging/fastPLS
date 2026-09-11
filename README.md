@@ -65,16 +65,25 @@ redistributed with fastPLS. Acquisition and data-use notes are provided in
 - `kernelpls`: linear, RBF, or polynomial kernel construction followed by the
   selected PLS core.
 
-The CPU backend uses Apple Accelerate by default on macOS and OpenBLAS by
-default on Linux and Windows. Configuration locates OpenBLAS through
-`OPENBLAS_ROOT` or `pkg-config` and stops with installation guidance when it is
-unavailable. Set `FASTPLS_USE_OPENBLAS=0` only to request R's BLAS explicitly.
+The CPU backend uses Apple Accelerate by default on macOS and requires OpenBLAS
+on Linux and Windows. Configuration locates OpenBLAS through `OPENBLAS_ROOT`,
+`pkg-config`, or Rtools. Installation fails explicitly when OpenBLAS is
+unavailable rather than selecting another BLAS.
 Set `options(cores = 4L)` to request four CPU threads. Eligible matrix
 operations can use multiple cores when linked to a multithreaded BLAS,
 for example OpenBLAS. SIMPLS deflation remains sequential, so multicore gains depend
 on matrix shape. In the controlled one-, two-, and four-thread study, the
 four-thread speed-up ranged from 1.03- to 1.77-fold across the three tested
 matrix regimes; this is not a guarantee that additional threads help every fit.
+
+CPU self-products are dispatched between GEMM and SYRK according to platform,
+precision, and matrix shape. SYRK computes one triangle, and fastPLS mirrors it
+only when a downstream operation requires a complete matrix. Owned numerical
+workspaces use aligned storage; wide fold-response matrices additionally align
+each column to a 64-byte boundary. For eligible wide-response cross-validation,
+the raw response Gram matrix is computed once and each fold is obtained by
+principal-submatrix extraction followed by exact double centering. Classification
+uses compact labels and class sums rather than a dense one-hot response matrix.
 
 For classification, factor responses are handled as PLS-DA responses. Large
 response spaces use compact prediction where possible so the full coefficient

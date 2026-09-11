@@ -1,7 +1,7 @@
 Package: fastPLS
 Type: Package
 Title: Fast Partial Least Squares for High-Dimensional Data
-Version: 0.99.58
+Version: 0.99.59
 Date: 2026-09-11
 Authors@R: c(
     person(
@@ -47,6 +47,7 @@ Suggests: BiocStyle, knitr, rmarkdown, testthat (>= 3.0.0)
 VignetteBuilder: knitr
 NeedsCompilation: yes
 Config/testthat/edition: 3
+Config/pak/sysreqs: libopenblas-dev
 Encoding: UTF-8
 Roxygen: list(markdown = TRUE)
 Config/roxygen2/version: 8.1.0

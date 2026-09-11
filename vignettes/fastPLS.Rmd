@@ -173,10 +173,10 @@ The `backend` argument selects where the main numerical work is performed.
 `backend = "cpu"` uses the package's compiled, dependency-free C++ core with
 native rSVD. It is usually best for small and moderate
 datasets, low-dimensional problems, and machines without GPU support.
-The CPU kernels use Apple Accelerate by default on macOS and OpenBLAS by
-default on Linux and Windows. Configuration locates OpenBLAS through
-`OPENBLAS_ROOT` or `pkg-config` and stops with installation guidance when it is
-unavailable. Set `FASTPLS_USE_OPENBLAS=0` only to request R's BLAS explicitly.
+The CPU kernels use Apple Accelerate by default on macOS and require OpenBLAS
+on Linux and Windows. Configuration locates OpenBLAS through `OPENBLAS_ROOT`,
+`pkg-config`, or Rtools. Installation fails explicitly when OpenBLAS is
+unavailable rather than selecting another BLAS implementation.
 Linking against multithreaded OpenBLAS enables eligible
 matrix operations to use multiple CPU cores. For example,
 `options(backend = "cpu", cores = 4L)` selects CPU execution and requests four
@@ -188,6 +188,14 @@ Additional BLAS threads help only when the matrix products are sufficiently
 large; sequential updates and thread-management overhead can limit or reverse
 the benefit. Compare timings on the intended workload rather than assuming
 that more threads are always faster.
+
+For CPU self-products, fastPLS selects GEMM or the symmetric rank-k operation
+SYRK from the linked numerical library according to platform, precision, and
+matrix dimensions. SYRK computes one triangle; the other triangle is generated
+only when required by a later operation. Owned workspaces are aligned, and
+wide response matrices gathered for repeated fold computations use 64-byte
+column alignment. Classification routes operate on compact labels and class
+sums, so they do not allocate a dense one-hot response matrix.
 
 `backend = "cuda"` uses CUDA-native routines when the package is compiled with
 CUDA and a compatible NVIDIA runtime is available. After input transfer, CUDA
@@ -850,10 +858,12 @@ For large multivariate responses, predictor and response marginal moments are
 computed once. Each training fold obtains its own moments by subtracting the
 held-out contribution before fold-specific centering and scaling. The large
 cross-covariance remains matrix-free, so this reuse does not introduce a dense
-predictor-by-response cache. On Apple Accelerate, the compiled engine can also
-form a bounded response Gram matrix once for wide-response SIMPLS problems and
-extract a separately centered training submatrix for each fold. OpenBLAS and
-CUDA retain their faster implicit or resident route. Fold-specific
+predictor-by-response cache. When its cost and storage model is favorable, the
+compiled CPU engine can also form a bounded response Gram matrix once for
+wide-response SIMPLS problems and extract an exactly double-centred training
+submatrix for each fold. The Gram kernel is selected between GEMM and SYRK by
+platform, precision, and matrix shape; a SYRK route retains one triangle until
+a complete fold matrix is required. Fold-specific
 preprocessing, seeds, and model fitting remain unchanged. Aggregate regression
 metrics are computed directly from the native out-of-fold predictions before
 those predictions are formatted for R.

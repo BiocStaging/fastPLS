@@ -50,16 +50,19 @@ find_openblas() {
   return 1
 }
 
-if [ "${use_openblas}" = "auto" ] && [ "${system_name}" = "Linux" ]; then
+if [ "${use_openblas}" = "auto" ] && [ "${system_name}" != "Darwin" ]; then
   use_openblas="1"
-elif [ "${use_openblas}" = "auto" ] && [ "${system_name}" != "Darwin" ]; then
-  if find_openblas; then use_openblas="1"; else use_openblas="0"; fi
+fi
+
+if [ "${system_name}" != "Darwin" ] && [ "${use_openblas}" != "1" ]; then
+  echo "ERROR: OpenBLAS is mandatory for fastPLS on ${system_name}." >&2
+  echo "Install its development package or set OPENBLAS_ROOT; disabling it is unsupported." >&2
+  exit 1
 fi
 
 if [ "${use_openblas}" = "1" ] && ! find_openblas; then
   echo "ERROR: OpenBLAS is required for this fastPLS ${system_name} build but was not found." >&2
   echo "Install the OpenBLAS development package and pkg-config, or set OPENBLAS_ROOT." >&2
-  echo "Set FASTPLS_USE_OPENBLAS=0 only to request R's BLAS explicitly." >&2
   exit 1
 fi
 

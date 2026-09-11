@@ -18,17 +18,29 @@ void cpu_gemm_f32(core::ConstMatrixView<float> left,
                   bool transpose_left,
                   bool transpose_right,
                   core::MatrixView<float> output,
-                  bool accumulate = false);
+                  bool accumulate = false,
+                  bool dispatch_symmetric = true);
 
 void cpu_gemm_f64(core::ConstMatrixView<double> left,
                   core::ConstMatrixView<double> right,
                   bool transpose_left,
                   bool transpose_right,
                   core::MatrixView<double> output,
-                  bool accumulate = false);
+                  bool accumulate = false,
+                  bool dispatch_symmetric = true);
 
 void cpu_crossprod_f32(core::ConstMatrixView<float> input,
                        core::MatrixView<float> output);
+
+void cpu_self_gram_f32(core::ConstMatrixView<float> input,
+                       bool transpose_input,
+                       core::MatrixView<float> output,
+                       bool full_output = true);
+
+void cpu_self_gram_f64(core::ConstMatrixView<double> input,
+                       bool transpose_input,
+                       core::MatrixView<double> output,
+                       bool full_output = true);
 
 class CpuLinearAlgebraF32 {
  public:
@@ -43,6 +55,11 @@ class CpuLinearAlgebraF32 {
                        bool transpose_left,
                        bool transpose_right,
                        core::MatrixView<float> output) const;
+
+  void self_gram(core::ConstMatrixView<float> input,
+                 bool transpose_input,
+                 core::MatrixView<float> output,
+                 bool full_output) const;
 
   bool qr_economy(core::ConstMatrixView<float> input,
                   core::Matrix<float>& q) const;
@@ -70,6 +87,11 @@ class CpuLinearAlgebraF64 {
                        bool transpose_left,
                        bool transpose_right,
                        core::MatrixView<double> output) const;
+
+  void self_gram(core::ConstMatrixView<double> input,
+                 bool transpose_input,
+                 core::MatrixView<double> output,
+                 bool full_output) const;
 
   bool qr_economy(core::ConstMatrixView<double> input,
                   core::Matrix<double>& q) const;

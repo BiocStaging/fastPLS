@@ -152,17 +152,6 @@ template<class T>
 bool fold_sample_response_gram_enabled(
     std::size_t samples, std::size_t responses, std::size_t components,
     int power, std::size_t folds) {
-#if !defined(FASTPLS_USE_ACCELERATE)
-  // The one-off symmetric product is beneficial with Apple Accelerate for the
-  // wide-response workloads measured here. OpenBLAS and CUDA retain the
-  // faster repeated implicit/resident path rather than paying this setup cost.
-  (void)samples;
-  (void)responses;
-  (void)components;
-  (void)power;
-  (void)folds;
-  return false;
-#else
   const char* value = std::getenv("FASTPLS_CV_SAMPLE_RESPONSE_GRAM");
   if (value != nullptr && value[0] == '0' && value[1] == '\0') {
     return false;
@@ -188,7 +177,6 @@ bool fold_sample_response_gram_enabled(
   const long double cached_sample_gram =
     n * n * q + k * a * iterations * training_rows * training_rows;
   return cached_sample_gram < repeated_operator;
-#endif
 }
 
 inline bool fold_simpls_moments_enabled(
@@ -212,9 +200,26 @@ Matrix<T> predictor_gram(ConstMatrixView<T> predictors, Backend& backend) {
 }
 
 template<class T, class Backend>
+auto response_gram_product(ConstMatrixView<T> responses, Backend& backend,
+                           MatrixView<T> output, int)
+    -> decltype(
+      backend.self_gram(responses, false, output, false), void()
+    ) {
+  backend.self_gram(responses, false, output, false);
+}
+
+template<class T, class Backend>
+void response_gram_product(ConstMatrixView<T> responses, Backend& backend,
+                           MatrixView<T> output, long) {
+  // Generic accelerator backends return a complete product. The fold
+  // extractor consumes only the lower triangle in either representation.
+  backend.gemm(responses, responses, false, true, output);
+}
+
+template<class T, class Backend>
 Matrix<T> response_gram(ConstMatrixView<T> responses, Backend& backend) {
   Matrix<T> result(responses.rows(), responses.rows());
-  backend.gemm(responses, responses, false, true, result.view());
+  response_gram_product<T>(responses, backend, result.view(), 0);
   return result;
 }
 
@@ -222,7 +227,8 @@ template<class T>
 void prepare_centered_training_response_gram(
     ConstMatrixView<T> full_gram,
     const std::vector<std::size_t>& training_rows,
-    Matrix<T>& centered_gram) {
+    Matrix<T>& centered_gram,
+    std::vector<long double>& row_means) {
   const std::size_t n = training_rows.size();
   if (full_gram.rows() != full_gram.columns() || n == 0) {
     throw std::invalid_argument(
@@ -231,11 +237,14 @@ void prepare_centered_training_response_gram(
   }
 
   centered_gram.resize(n, n);
-  std::vector<long double> row_means(n, 0.0L);
+  row_means.assign(n, 0.0L);
   for (std::size_t column = 0; column < n; ++column) {
     const std::size_t source_column = training_rows[column];
     for (std::size_t row = 0; row < n; ++row) {
-      const T value = full_gram(training_rows[row], source_column);
+      const std::size_t source_row = training_rows[row];
+      const T value = source_row >= source_column ?
+        full_gram(source_row, source_column) :
+        full_gram(source_column, source_row);
       centered_gram(row, column) = value;
       row_means[row] += static_cast<long double>(value);
     }
@@ -762,6 +771,26 @@ void gather_rows(ConstMatrixView<T> source,
       output(row, column) = source(rows[row], column);
     }
   }
+}
+
+template<class T>
+void gather_rows_padded(ConstMatrixView<T> source,
+                        const std::vector<std::size_t>& rows,
+                        std::size_t row_multiple,
+                        PaddedMatrix<T>& output) {
+  output.resize(rows.size(), source.columns(), row_multiple);
+  for (std::size_t column = 0; column < source.columns(); ++column) {
+    for (std::size_t row = 0; row < rows.size(); ++row) {
+      output(row, column) = source(rows[row], column);
+    }
+  }
+}
+
+template<class T>
+std::size_t response_row_alignment(std::size_t responses) {
+  if (responses < 2048) return 1;
+  constexpr std::size_t cache_line_bytes = 64;
+  return cache_line_bytes / sizeof(T);
 }
 
 template<class T>
@@ -1630,10 +1659,11 @@ RegressionCvResult<T> cross_validate_regression(
   SimplsWorkspace<T> shared_simpls_workspace;
   OperatorRsvdWorkspace<T> shared_operator_workspace;
   Matrix<T> fold_response_gram;
+  std::vector<long double> fold_response_row_means;
   Matrix<T> heldout_predictor_gram;
   Matrix<T> train;
   Matrix<T> test;
-  Matrix<T> train_response;
+  PaddedMatrix<T> train_response;
   Matrix<T> test_response;
 
   for (std::size_t fold = 0; fold < partitions.size(); ++fold) {
@@ -1653,7 +1683,11 @@ RegressionCvResult<T> cross_validate_regression(
         ConstMatrixView<T>(test.view()), backend, heldout_predictor_gram
       );
     }
-    cv_detail::gather_rows(responses, partition.train, train_response);
+    cv_detail::gather_rows_padded(
+      responses, partition.train,
+      cv_detail::response_row_alignment<T>(responses.columns()),
+      train_response
+    );
     if (reuse_dense_statistics) {
       cv_detail::gather_rows(responses, partition.test, test_response);
     }
@@ -1783,7 +1817,8 @@ RegressionCvResult<T> cross_validate_regression(
         );
         if (reuse_sample_response_gram) {
           cv_detail::prepare_centered_training_response_gram<T>(
-            full_response_gram.view(), partition.train, fold_response_gram
+            full_response_gram.view(), partition.train, fold_response_gram,
+            fold_response_row_means
           );
         }
         model = fit_simpls_operator<T>(

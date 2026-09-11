@@ -113,22 +113,30 @@ find_openblas() {
 if [ "${use_openblas}" = "auto" ]; then
   use_openblas="1"
 fi
+if [ "${use_openblas}" != "1" ]; then
+  echo "ERROR: OpenBLAS is mandatory for fastPLS on Windows." >&2
+  echo "Install its development archive or set OPENBLAS_ROOT; disabling it is unsupported." >&2
+  exit 1
+fi
 if [ "${use_openblas}" = "1" ] && ! find_openblas; then
   echo "ERROR: OpenBLAS is required for the default fastPLS Windows build but was not found." >&2
   echo "Install the static OpenBLAS development archive for Rtools or set OPENBLAS_ROOT." >&2
-  echo "Set FASTPLS_USE_OPENBLAS=0 only to request R's BLAS explicitly." >&2
   exit 1
 fi
 
 if [ "${use_openblas}" = "1" ]; then
   echo "fastPLS configure.win: using OpenBLAS (${openblas_origin})"
   pkg_cppflags="-DFASTPLS_USE_OPENBLAS ${openblas_cppflags}"
-  pkg_libs="${openblas_libs}"
+  # Rtools distributes a static OpenMP-enabled OpenBLAS archive.  The OpenMP
+  # runtime must follow the archive on the link line to resolve its symbols.
+  # Adding the flag is harmless for private pthread OpenBLAS builds.
+  pkg_cxxflags="-fopenmp"
+  pkg_libs="${openblas_libs} -fopenmp"
 else
   pkg_cppflags=""
+  pkg_cxxflags=""
   pkg_libs='$(LAPACK_LIBS) $(BLAS_LIBS)'
 fi
-pkg_cxxflags=""
 cuda_objects=""
 cuda_rule=""
 

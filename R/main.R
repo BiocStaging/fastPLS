@@ -9196,8 +9196,7 @@ plot.permutation <- function(
 #' values, variance summaries, and optional classification heads.
 #'
 #' The compiled CPU backend uses Apple Accelerate by default on macOS and
-#' OpenBLAS by default on Linux and Windows. Set `FASTPLS_USE_OPENBLAS=0` only
-#' to request R's BLAS explicitly. OpenBLAS can execute eligible matrix products
+#' OpenBLAS is required on Linux and Windows. It can execute eligible products
 #' on several CPU cores, but the SIMPLS deflation sequence remains serial and
 #' additional threads are not guaranteed to reduce runtime.
 #'

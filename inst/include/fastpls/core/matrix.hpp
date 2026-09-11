@@ -178,6 +178,69 @@ class Matrix {
   std::size_t columns_ = 0;
 };
 
+// Column padding is useful when a matrix is already being gathered into owned
+// storage and will be consumed repeatedly by level-3 kernels. It is kept as a
+// separate type so ordinary Matrix code can continue to rely on contiguous
+// rows * columns storage.
+template<class T>
+class PaddedMatrix {
+ public:
+  PaddedMatrix() = default;
+
+  void resize(std::size_t rows, std::size_t columns,
+              std::size_t row_multiple) {
+    if (row_multiple == 0 ||
+        rows > std::numeric_limits<std::size_t>::max() -
+          (row_multiple - 1)) {
+      throw std::invalid_argument(
+        "fastPLS padded-matrix dimensions are invalid"
+      );
+    }
+    const std::size_t leading =
+      ((rows + row_multiple - 1) / row_multiple) * row_multiple;
+    if (columns != 0 &&
+        leading > std::numeric_limits<std::size_t>::max() / columns) {
+      throw std::bad_array_new_length();
+    }
+    values_.resize(leading * columns);
+    rows_ = rows;
+    columns_ = columns;
+    leading_dimension_ = leading;
+  }
+
+  T* data() noexcept { return values_.data(); }
+  const T* data() const noexcept { return values_.data(); }
+  std::size_t rows() const noexcept { return rows_; }
+  std::size_t columns() const noexcept { return columns_; }
+  std::size_t leading_dimension() const noexcept {
+    return leading_dimension_;
+  }
+
+  MatrixView<T> view() noexcept {
+    return MatrixView<T>(data(), rows_, columns_, leading_dimension_);
+  }
+
+  ConstMatrixView<T> view() const noexcept {
+    return ConstMatrixView<T>(
+      data(), rows_, columns_, leading_dimension_
+    );
+  }
+
+  T& operator()(std::size_t row, std::size_t column) {
+    return view()(row, column);
+  }
+
+  const T& operator()(std::size_t row, std::size_t column) const {
+    return view()(row, column);
+  }
+
+ private:
+  std::vector<T, MatrixAllocator<T>> values_;
+  std::size_t rows_ = 0;
+  std::size_t columns_ = 0;
+  std::size_t leading_dimension_ = 0;
+};
+
 template<class T>
 ConstMatrixView<T> make_const_view(const T* data, std::size_t rows,
                                    std::size_t columns,
