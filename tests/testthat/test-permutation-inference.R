@@ -47,7 +47,7 @@ test_that("grouped nested permutation reports its inferential contract", {
     method = "simpls",
     backend = "cpu",
     classifier = "argmax",
-    selection_metric = "balanced_accuracy",
+    selection = "balanced_accuracy",
     perm.test = TRUE,
     times = 2,
     seed = 93

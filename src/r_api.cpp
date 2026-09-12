@@ -3870,36 +3870,44 @@ extern "C" SEXP _fastPLS_evaluate_classification_core_cpp(
         throw std::invalid_argument("top-k labels must match score rows");
       }
       top_accuracy = protect.add(Rf_allocVector(REALSXP, XLENGTH(top_k)));
-      std::vector<int> order(static_cast<std::size_t>(score_columns));
-      for (R_xlen_t request = 0; request < XLENGTH(top_k); ++request) {
-        const int requested = INTEGER(top_k)[request];
-        if (requested == NA_INTEGER) {
-          REAL(top_accuracy)[request] = NA_REAL;
-          continue;
-        }
-        const int keep = std::min(std::max(requested, 1), score_columns);
-        std::size_t valid = 0, hits = 0;
-        for (int row = 0; row < score_rows; ++row) {
-          const int truth = INTEGER(score_truth)[row];
-          if (truth == NA_INTEGER || truth < 1 || truth > score_columns) continue;
-          for (int column = 0; column < score_columns; ++column) {
-            order[column] = column;
+      std::vector<std::size_t> hits(
+        static_cast<std::size_t>(XLENGTH(top_k)), 0
+      );
+      std::size_t valid = 0;
+      for (int row = 0; row < score_rows; ++row) {
+        const int truth = INTEGER(score_truth)[row];
+        if (truth == NA_INTEGER || truth < 1 || truth > score_columns) continue;
+        const int truth_column = truth - 1;
+        const double truth_score = REAL(score_real)[
+          row + static_cast<std::size_t>(truth_column) * score_rows
+        ];
+        int rank = 1;
+        for (int column = 0; column < score_columns; ++column) {
+          if (column == truth_column) continue;
+          const double candidate = REAL(score_real)[
+            row + static_cast<std::size_t>(column) * score_rows
+          ];
+          if (candidate > truth_score ||
+              (candidate == truth_score && column < truth_column)) {
+            ++rank;
           }
-          std::partial_sort(
-            order.begin(), order.begin() + keep, order.end(),
-            [&](int left, int right) {
-              const double l = REAL(score_real)[row + left * score_rows];
-              const double r = REAL(score_real)[row + right * score_rows];
-              if (l == r) return left < right;
-              return l > r;
-            }
-          );
-          ++valid;
-          if (std::find(order.begin(), order.begin() + keep, truth - 1) !=
-              order.begin() + keep) ++hits;
         }
-        REAL(top_accuracy)[request] = valid ?
-          static_cast<double>(hits) / valid : NA_REAL;
+        ++valid;
+        for (R_xlen_t request = 0; request < XLENGTH(top_k); ++request) {
+          const int requested = INTEGER(top_k)[request];
+          if (requested == NA_INTEGER) continue;
+          const int keep = std::min(std::max(requested, 1), score_columns);
+          if (rank <= keep) ++hits[static_cast<std::size_t>(request)];
+        }
+      }
+      for (R_xlen_t request = 0; request < XLENGTH(top_k); ++request) {
+        if (INTEGER(top_k)[request] == NA_INTEGER || !valid) {
+          REAL(top_accuracy)[request] = NA_REAL;
+        } else {
+          REAL(top_accuracy)[request] = static_cast<double>(
+            hits[static_cast<std::size_t>(request)]
+          ) / valid;
+        }
       }
     }
 
@@ -3916,6 +3924,48 @@ extern "C" SEXP _fastPLS_evaluate_classification_core_cpp(
       SET_STRING_ELT(names, index, Rf_mkChar(output_labels[index]));
     }
     Rf_setAttrib(output, R_NamesSymbol, names);
+    return output;
+  });
+}
+
+extern "C" SEXP _fastPLS_evaluate_ranked_accuracy_cpp(
+    SEXP observed, SEXP ranked) {
+  return translate_exceptions("ranked classification evaluation", [&] {
+    ProtectStack protect;
+    SEXP observed_integer = protect.add(Rf_coerceVector(observed, INTSXP));
+    if (!Rf_isMatrix(ranked) || TYPEOF(ranked) != INTSXP) {
+      throw std::invalid_argument("ranked predictions must be an integer matrix");
+    }
+    const SEXP dimensions = Rf_getAttrib(ranked, R_DimSymbol);
+    const int rows = INTEGER(dimensions)[0];
+    const int columns = INTEGER(dimensions)[1];
+    if (XLENGTH(observed_integer) != rows) {
+      throw std::invalid_argument(
+        "observed and ranked predictions must have matching rows"
+      );
+    }
+    std::vector<std::size_t> hits(static_cast<std::size_t>(columns), 0);
+    std::size_t valid = 0;
+    for (int row = 0; row < rows; ++row) {
+      const int truth = INTEGER(observed_integer)[row];
+      const int first = INTEGER(ranked)[row];
+      if (truth == NA_INTEGER || first == NA_INTEGER) continue;
+      bool found = false;
+      for (int column = 0; column < columns; ++column) {
+        const int estimate = INTEGER(ranked)[
+          row + static_cast<std::size_t>(column) * rows
+        ];
+        if (estimate == truth) found = true;
+        if (found) ++hits[static_cast<std::size_t>(column)];
+      }
+      ++valid;
+    }
+    SEXP output = protect.add(Rf_allocVector(REALSXP, columns));
+    for (int column = 0; column < columns; ++column) {
+      REAL(output)[column] = valid ? static_cast<double>(
+        hits[static_cast<std::size_t>(column)]
+      ) / valid : NA_REAL;
+    }
     return output;
   });
 }
@@ -4181,6 +4231,47 @@ extern "C" SEXP _fastPLS_float32_topk_cpp(SEXP scores, SEXP top) {
     Rf_error("Unknown error in float32 top-rank selection");
   }
   return R_NilValue;
+}
+
+extern "C" SEXP _fastPLS_double_topk_cpp(SEXP scores, SEXP top) {
+  return translate_exceptions("float64 top-rank selection", [&] {
+    const int requested = Rf_asInteger(top);
+    if (requested == NA_INTEGER || requested < 1) {
+      throw std::invalid_argument("top must be a positive integer");
+    }
+    const auto values = numeric_matrix_view(scores, "scores");
+    const std::size_t keep = std::min<std::size_t>(
+      static_cast<std::size_t>(requested), values.columns()
+    );
+    ProtectStack protect;
+    SEXP index = protect.add(Rf_allocMatrix(
+      INTSXP, static_cast<int>(values.rows()), static_cast<int>(keep)
+    ));
+    SEXP value = protect.add(Rf_allocMatrix(
+      REALSXP, static_cast<int>(values.rows()), static_cast<int>(keep)
+    ));
+    std::vector<std::size_t> workspace;
+    std::vector<std::size_t> row_indices(keep);
+    std::vector<double> row_scores(keep);
+    for (std::size_t row = 0; row < values.rows(); ++row) {
+      fastpls::core::row_top_k(
+        values, row, keep, workspace, row_indices.data(), row_scores.data()
+      );
+      for (std::size_t rank = 0; rank < keep; ++rank) {
+        const std::size_t offset = row + rank * values.rows();
+        INTEGER(index)[offset] = static_cast<int>(row_indices[rank] + 1);
+        REAL(value)[offset] = row_scores[rank];
+      }
+    }
+    SEXP result = protect.add(Rf_allocVector(VECSXP, 2));
+    SET_VECTOR_ELT(result, 0, index);
+    SET_VECTOR_ELT(result, 1, value);
+    SEXP names = protect.add(Rf_allocVector(STRSXP, 2));
+    SET_STRING_ELT(names, 0, Rf_mkChar("top_index"));
+    SET_STRING_ELT(names, 1, Rf_mkChar("top_score"));
+    Rf_setAttrib(result, R_NamesSymbol, names);
+    return result;
+  });
 }
 
 extern "C" SEXP _fastPLS_lda_train_prefix_float32_cpp(
@@ -5643,6 +5734,10 @@ extern "C" SEXP _fastPLS_pls_class_predict_topk_core_cpp(
     const std::size_t prefix_count = static_cast<std::size_t>(
       XLENGTH(components)
     );
+    SEXP latent_loadings = list_element(model, "W_latent");
+    const bool component_specific_loadings =
+      TYPEOF(latent_loadings) == VECSXP &&
+      static_cast<std::size_t>(XLENGTH(latent_loadings)) == prefix_count;
     const std::size_t maximum_components = projection.columns();
     for (std::size_t column = 0; column < x.columns(); ++column) {
       if (!std::isfinite(scale[column]) || scale[column] == 0.0) {
@@ -5710,14 +5805,26 @@ extern "C" SEXP _fastPLS_pls_class_predict_topk_core_cpp(
         const auto score_prefix = fastpls::core::make_const_view(
           scores.data(), rows, count, scores.rows()
         );
-        const auto loading_prefix = fastpls::core::make_const_view(
-          loadings.data(), loadings.rows(), count,
-          loadings.leading_dimension()
-        );
         fastpls::core::Matrix<double> values(rows, class_count);
-        backend.gemm(
-          score_prefix, loading_prefix, false, true, values.view()
-        );
+        if (component_specific_loadings) {
+          const auto weights = numeric_matrix_view(
+            VECTOR_ELT(latent_loadings, prefix), "model$W_latent"
+          );
+          if (weights.rows() != count || weights.columns() != class_count) {
+            throw std::invalid_argument(
+              "double core top-k latent loadings are inconsistent"
+            );
+          }
+          backend.gemm(score_prefix, weights, false, false, values.view());
+        } else {
+          const auto loading_prefix = fastpls::core::make_const_view(
+            loadings.data(), loadings.rows(), count,
+            loadings.leading_dimension()
+          );
+          backend.gemm(
+            score_prefix, loading_prefix, false, true, values.view()
+          );
+        }
         for (std::size_t row = 0; row < rows; ++row) {
           std::vector<double> best_scores(
             keep, -std::numeric_limits<double>::infinity()

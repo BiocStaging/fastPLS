@@ -10,7 +10,7 @@ test_that("CPU rSVD recovery rechecks slow spectra without another solver", {
         X <- if (precision == "float32") float::fl(A) else A
         for (seed in c(1L, 7L)) {
             out <- suppressWarnings(fastsvd(X, ncomp = 6L, backend = "cpu",
-                method = "rsvd", oversample = 0L, power = 0L, seed = seed))
+                oversample = 0L, power = 0L, seed = seed))
             audit <- out$diagnostics$rsvd_case_audit
             expect_true(audit$certified)
             expect_false(audit$deterministic_fallback)

@@ -13,7 +13,6 @@ pls(
   scaling = c("centering", "autoscaling", "none"),
   method = c("simpls", "plssvd", "opls", "kernelpls"),
   classifier = c("argmax", "lda"),
-  lda_ridge = NULL,
   fit = FALSE,
   bycol = FALSE,
   return_variance = TRUE,
@@ -22,6 +21,7 @@ pls(
   perm.test = FALSE,
   times = 100,
   backend = NULL,
+  n.cores = NULL,
   north = 1L,
   kernel = c("linear", "rbf", "poly"),
   gamma = NULL,
@@ -60,10 +60,6 @@ at the corresponding numerical rank and report the effective counts.}
 standard PLS-DA response-score argmax. \code{lda} fits a regularized LDA
 classifier on the PLS latent scores.}
 
-\item{lda_ridge}{Deprecated compatibility argument. It is ignored and emits
-a warning when supplied. PLS-LDA uses a fixed, scale-normalized Cholesky
-fallback sequence rather than a user-tuned ridge.}
-
 \item{fit}{Return fitted values and \code{R2Y} when \code{TRUE}.}
 
 \item{bycol}{For matrix-valued regression responses, calculate response-wise
@@ -94,9 +90,13 @@ successful null fits. Failed fits are excluded from \code{B} and reported.}
 \code{cuda} for CUDA-native fitting, or \code{metal} for operation-split
 float32 CPU/Metal fitting on Apple silicon. When omitted,
 \code{options(backend = ...)}
-defines the session default. For CPU execution, \code{options(cores = n)}
-requests \code{n} BLAS/OpenMP threads. Selecting unavailable CUDA or Metal
+defines the session default. Selecting unavailable CUDA or Metal
 support raises an error without a CPU fallback.}
+
+\item{n.cores}{Number of CPU cores requested for supported BLAS/OpenMP host
+operations. An explicit value takes precedence over
+\code{options(n.cores = ...)}. CUDA and Metal device parallelism is managed by
+their native runtimes; \code{n.cores} applies only to their host-side stages.}
 
 \item{north}{Number of orthogonal components removed by OPLS.
 The predictive count \code{ncomp} must fit within the predictor rank remaining
@@ -217,114 +217,36 @@ model can include predictions for held-out samples, latent scores, fitted
 values, variance summaries, and optional classification heads.
 }
 \details{
-The compiled CPU backend uses Apple Accelerate by default on macOS. Linux
-and Windows prefer OpenBLAS when it is available and otherwise use the
-BLAS/LAPACK supplied by R. Eligible products can use several CPU cores when
-the selected library supports runtime thread control, but the SIMPLS
-deflation sequence remains serial and additional threads are not guaranteed
-to reduce runtime. Use \code{\link[=fastPLS_blas]{fastPLS_blas()}} to identify the library selected at
-compilation.
+The CPU backend uses Apple Accelerate on macOS, prefers OpenBLAS
+when available on Linux and Windows, and otherwise uses the numerical
+libraries supplied by R. Use \code{\link[=fastPLS_blas]{fastPLS_blas()}} to report the library chosen
+at compilation. \code{options(n.cores = n)} requests CPU threads when supported
+by that library; additional threads are not guaranteed to improve every
+fit.
 
-Supplying \code{float::float32} predictors or responses requests single-precision
-execution without silent promotion to double. Float32 is route-specific,
-however, rather than a package-wide speed or memory guarantee. CPU, CUDA,
-and Metal rSVD PLS-SVD and SIMPLS have current route-level validation.
-CUDA provides fully device-resident float32 and float64 routes for all four
-PLS families. \code{backend = "metal"} is a float32 Apple-silicon route. It
-uses one operation-split implementation rather than selecting a complete
-CPU or Metal estimator from dataset dimensions. CPU code handles
-preprocessing, QR and reduced decompositions, sequential orthogonalization,
-deflation bookkeeping, LDA, and coefficient assembly. Persistent Metal
-workspaces handle fitting products involving the training sample matrix,
-including
-explicit cross-covariance formation, fused score/loading products, and
-randomized range-finder products for an implicit cross-covariance operator.
-CPU code retains the smaller cross-covariance and component-state products.
-Prediction uses the compact host
-factors. Its CPU/Metal assignment is independent of dataset shape. Apple
-GPUs do not provide the native float64 arithmetic required here.
+Base R numeric matrices use float64. Supplying \code{float::float32} predictors
+or numeric responses requests float32 execution without silent promotion.
+CUDA supports float32 and float64. The Apple Metal route requires float32
+and divides work between CPU code and persistent Metal workspaces.
+Unsupported backend and precision combinations stop rather than silently
+falling back to CPU.
 
-Float64 remains the baseline precision. Raw float32 matrices require about
-half the input storage, but paired tests show route-dependent runtime,
-incremental host RSS, and device-memory behavior. \code{pls()} therefore warns
-for experimental or measured-risk regimes, including nonlinear kernels
-and extreme multivariate responses. For
-numeric responses with at least 10,000 columns and at least 50 components,
-PLS-SVD and SIMPLS-derived routes warn about observed performance, memory,
-or precision risk in regimes for which current validation remains limited.
-Unsupported combinations stop before allocation.
+\code{method} selects PLS-SVD, SIMPLS, OPLS, or kernel PLS. Classification can
+use response-score argmax or LDA on latent scores. PLS-SVD classification
+cannot return more than one fewer component than the number of response
+classes. The requested model family is never silently replaced by another
+family.
 
-For a factor response with \eqn{C} levels, centred dummy coding has rank at
-most \eqn{C-1}; consequently, \code{method = "plssvd"} caps the effective
-component count at \eqn{C-1}. The requested PLS estimator is always
-enforced: \code{method = "simpls"} fits SIMPLS and \code{method = "plssvd"} fits
-PLS-SVD. If a large CUDA classification response would exceed the guarded
-dense-indicator path, SIMPLS stops with a clear error rather than silently
-substituting PLS-SVD. CUDA SIMPLS-LDA uses SIMPLS latent scores.
+All public PLS routes use randomized SVD. It is an approximate solver, and
+\code{diagnostics} records the effective controls and structural checks for the
+fitted route. Compare repeated seeds or an independent high-accuracy fit
+when results are close to a decision boundary or the data are strongly
+ill-conditioned. Explicit \code{oversample}, \code{power}, and \code{seed} values supplied
+through \code{...} override the automatic controls.
 
-The rSVD SIMPLS route is an approximate execution of the de Jong component
-sequence. Component-wise CPU, CUDA, and Metal routes generate a fresh seeded
-sketch for each component from the current deflated cross-covariance
-operator. When the explicit
-predictor-response cross-covariance would exceed 512 MiB, CPU, Metal, and
-CUDA float64 use a fresh seeded rank-one randomized direction for
-every component; CUDA keeps the matrices and component state resident on the
-device. For massive float32 regression, CUDA can refresh up to eight fresh
-candidate directions at a time through component 64 and then returns to
-component-wise direction calculations. Eligible
-large CPU, CUDA, and Metal classification workloads can instead refresh a small block
-of candidates, which are accepted sequentially by the standard SIMPLS
-orthogonalization and deflation updates. This block route preserves the
-supervised update geometry but is not claimed to reproduce a fresh dominant-
-direction solve after every deflation. PLS-SVD uses 32 oversampling
-directions and five power iterations by default. For ordinary matrix shapes,
-accelerated SIMPLS, OPLS, and kernel-PLS use 32 directions and five power
-iterations. When the explicit cross-covariance exceeds 512 MiB, the
-SIMPLS-family profile requests \code{oversample = 12} and \code{power = 1}; the
-executed refresh width and effective controls are recorded separately in
-\code{diagnostics}.
-Explicit controls supplied through \code{...} override this
-policy. \code{fastsvd()} also uses 32 oversampling directions and five power
-iterations. Only native rSVD is available through the public interface.
-
-Like reference SIMPLS software, one fit supplies the sequential component
-path through the largest requested component count; fastPLS does not claim
-this path construction as a novelty. Additional optimizations include cached
-rank-one deflation products, incremental coefficient and fitted-value
-updates, conditional cross-product caching, compact latent prediction, and
-matrix-free cross-covariance products. When the response dimension is no
-larger than the predictor dimension and is at most 512, the randomized
-direction calculation can operate through the response-side Gram matrix
-\verb{S' S}. After each accepted SIMPLS component this smaller matrix receives a
-rank-one update, avoiding repeated tall cross-covariance sketches while
-retaining the same subsequent orthogonalization and deflation sequence.
-
-Randomized SVD is an approximate solver. The returned \code{diagnostics}
-performs inexpensive structural checks for finite latent factors and the
-requested effective component count. These checks do not establish agreement
-with an independent reference fit. Use an independent reference for
-confirmatory
-inference,
-coefficient or subspace interpretation, ill-conditioned or rank-deficient
-matrices, slowly decaying singular spectra, or whenever repeated rSVD seeds
-give materially different predictions. The package validation treats an
-rSVD approximation as outside the numerical screen when relative prediction
-or score error exceeds 0.01, the corresponding correlation is below 0.995,
-a latent-subspace angle exceeds 0.1 degrees, classification-label agreement
-is below 0.995, or the absolute predictive-metric difference exceeds 0.005
-relative to a matched independent high-accuracy fit.
-
-For latent-space LDA, the pooled covariance is computed as
-\eqn{(T^T T - \sum_c n_c \mu_c \mu_c^T) / \max(1, n-C)} without creating
-centered class blocks. Class coefficients are obtained by Cholesky
-factorization and triangular solves, never by explicit covariance
-inversion. Let \eqn{s = \mathrm{trace}(\Sigma)/q}, with \eqn{s=1} when the
-scale is non-finite or non-positive. The implementation tries
-\eqn{\lambda=\rho s} for \eqn{\rho} equal to \code{1e-8}, \code{1e-6},
-\code{1e-5}, \code{1e-4}, \code{1e-3}, and \code{1e-2}, in that order, and
-advances only after Cholesky failure. This is a deterministic numerical
-fallback, not a fitted hyperparameter. Prediction uses
-\eqn{t^T w_c - 0.5\mu_c^T w_c + \log(n_c/n)}.
+LDA uses a regularized pooled within-class covariance calculation with
+Cholesky solves. Regularization increases through a fixed internal sequence
+only when factorization fails and is not user-tuned.
 }
 \examples{
 X <- as.matrix(mtcars[, c("disp", "hp", "wt", "qsec")])

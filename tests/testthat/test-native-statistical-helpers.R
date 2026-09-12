@@ -85,7 +85,6 @@ test_that("float32 CV returns the native aggregate regression metrics", {
         reference <- evaluate(
             observed,
             fit$pred[, , index],
-            task = "regression",
             ytrain = observed,
             bycol = FALSE
         )$metrics

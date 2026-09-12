@@ -6,7 +6,7 @@ test_that("fastPLS backend precedence is explicit, option, environment, CPU", {
     if (is.na(old_env)) Sys.unsetenv("FASTPLS_BACKEND") else Sys.setenv(FASTPLS_BACKEND = old_env)
   }, add = TRUE)
   options(backend = NULL); Sys.unsetenv("FASTPLS_BACKEND")
-  expect_identical(fastPLS_backend(), "cpu")
+  expect_identical(fastPLS:::.fastpls_resolve_backend(NULL), "cpu")
   Sys.setenv(FASTPLS_BACKEND = "metal")
   expect_identical(fastPLS:::.fastpls_resolve_backend(NULL), "metal")
   options(backend = "cuda")
@@ -29,27 +29,29 @@ test_that("generic backend option controls fastPLS and explicit values win", {
 })
 
 test_that("CPU core option is validated and applied to thread runtimes", {
-  old_cores <- getOption("cores", NULL)
+  old_cores <- getOption("n.cores", NULL)
   variables <- c("OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS", "GOTO_NUM_THREADS",
                  "MKL_NUM_THREADS", "BLIS_NUM_THREADS", "VECLIB_MAXIMUM_THREADS")
   old_environment <- Sys.getenv(variables, unset = NA_character_)
   on.exit({
-    options(cores = old_cores)
+    options(n.cores = old_cores)
     for (variable in variables) {
       value <- old_environment[[variable]]
       if (is.na(value)) Sys.unsetenv(variable) else do.call(Sys.setenv,
         stats::setNames(list(value), variable))
     }
   }, add = TRUE)
-  options(cores = 3L)
+  options(n.cores = 3L)
   expect_identical(fastPLS:::.fastpls_apply_cpu_cores(), 3L)
   expect_true(all(Sys.getenv(variables) == "3"))
+  expect_identical(fastPLS:::.fastpls_apply_cpu_cores(2L), 2L)
+  expect_true(all(Sys.getenv(variables) == "2"))
   expect_type(fastPLS:::set_cpu_threads_cpp(2L), "character")
   expect_error(
     fastPLS:::set_cpu_threads_cpp(0L),
     "positive integer"
   )
-  options(cores = 1.5)
+  options(n.cores = 1.5)
   expect_error(fastPLS:::.fastpls_apply_cpu_cores(), "positive integer")
 })
 
@@ -59,6 +61,68 @@ test_that("public fitting functions defer omitted backends", {
   expect_null(formals(pls.single.cv)$backend)
   expect_null(formals(pls.double.cv)$backend)
   expect_null(formals(getS3method("predict", "fastPLS"))$backend)
+  expect_null(formals(fastsvd)$n.cores)
+  expect_null(formals(pls)$n.cores)
+  expect_null(formals(pls.single.cv)$n.cores)
+  expect_null(formals(pls.double.cv)$n.cores)
+  expect_null(formals(getS3method("predict", "fastPLS"))$n.cores)
+  expect_null(formals(getS3method("predict", "fastPLSKernel"))$n.cores)
+  expect_null(formals(getS3method("predict", "fastPLSOpls"))$n.cores)
+  expect_null(formals(fastcor)$n.cores)
+})
+
+test_that("explicit n.cores overrides the session option in public functions", {
+  old_cores <- getOption("n.cores", NULL)
+  old_openblas <- Sys.getenv("OPENBLAS_NUM_THREADS", unset = NA_character_)
+  on.exit({
+    options(n.cores = old_cores)
+    if (is.na(old_openblas)) {
+      Sys.unsetenv("OPENBLAS_NUM_THREADS")
+    } else {
+      Sys.setenv(OPENBLAS_NUM_THREADS = old_openblas)
+    }
+  }, add = TRUE)
+
+  options(n.cores = 1L)
+  fastcor(matrix(as.numeric(seq_len(12)), 3L), n.cores = 2L)
+  expect_identical(Sys.getenv("OPENBLAS_NUM_THREADS"), "2")
+
+  fastcor(matrix(as.numeric(seq_len(12)), 3L))
+  expect_identical(Sys.getenv("OPENBLAS_NUM_THREADS"), "1")
+})
+
+test_that("n.cores is retained through fitting, prediction, and CV", {
+  old_cores <- getOption("n.cores", NULL)
+  old_openblas <- Sys.getenv("OPENBLAS_NUM_THREADS", unset = NA_character_)
+  on.exit({
+    options(n.cores = old_cores)
+    if (is.na(old_openblas)) {
+      Sys.unsetenv("OPENBLAS_NUM_THREADS")
+    } else {
+      Sys.setenv(OPENBLAS_NUM_THREADS = old_openblas)
+    }
+  }, add = TRUE)
+
+  options(n.cores = 1L)
+  set.seed(4)
+  X <- matrix(rnorm(60), 15L, 4L)
+  y <- rnorm(15L)
+  expect_threads <- function(expression) {
+    force(expression)
+    expect_identical(Sys.getenv("OPENBLAS_NUM_THREADS"), "2")
+  }
+
+  expect_threads(fastsvd(X, ncomp = 1L, n.cores = 2L))
+  fit <- pls(X, y, ncomp = 1L, n.cores = 2L, return_variance = FALSE)
+  expect_identical(Sys.getenv("OPENBLAS_NUM_THREADS"), "2")
+  expect_threads(predict(fit, X[1:3, , drop = FALSE], n.cores = 2L))
+  expect_threads(pls.single.cv(
+    X, y, ncomp = 1L, kfold = 3L, fit = TRUE, n.cores = 2L
+  ))
+  expect_threads(pls.double.cv(
+    X, y, ncomp = 1L, kfold_inner = 2L, kfold_outer = 2L,
+    runn = 1L, n.cores = 2L
+  ))
 })
 
 test_that("backend availability guard never substitutes CPU", {
@@ -82,40 +146,6 @@ test_that("backend availability guard never substitutes CPU", {
     ),
     "backend='metal'.*No CPU fallback"
   )
-})
-
-test_that("the backend setter rejects unavailable accelerators immediately", {
-  unavailable <- if (!isTRUE(has_cuda())) {
-    "cuda"
-  } else if (!isTRUE(has_metal())) {
-    "metal"
-  } else {
-    skip("Both optional accelerator backends are available")
-  }
-  old_option <- getOption("backend", NULL)
-  on.exit(options(backend = old_option), add = TRUE)
-
-  expect_error(
-    fastPLS_backend(unavailable),
-    "No CPU fallback"
-  )
-  expect_identical(getOption("backend", NULL), old_option)
-})
-
-test_that("the backend getter rejects an unavailable configured accelerator", {
-  unavailable <- if (!isTRUE(has_cuda())) {
-    "cuda"
-  } else if (!isTRUE(has_metal())) {
-    "metal"
-  } else {
-    skip("Both optional accelerator backends are available")
-  }
-  old_option <- getOption("backend", NULL)
-  on.exit(options(backend = old_option), add = TRUE)
-  options(backend = unavailable)
-
-  expect_error(fastPLS_backend(), "No CPU fallback")
-  expect_identical(getOption("backend"), unavailable)
 })
 
 test_that("each unavailable accelerator stops public operations", {
@@ -318,7 +348,7 @@ test_that("model-aware prediction does not fall back from an unavailable backend
   )
 
   expect_error(
-    fastPLS:::.prediction_route(model, matrix(0, 1, 1), "auto", NULL),
+    fastPLS:::.prediction_route(model, matrix(0, 1, 1), "auto"),
     "No CPU fallback"
   )
 })
@@ -331,12 +361,12 @@ test_that("omitted prediction backend follows the session configuration", {
 
   options(backend = "cpu")
   expect_identical(
-    fastPLS:::.prediction_route(model, X, NULL, NULL)$selected,
+    fastPLS:::.prediction_route(model, X, NULL)$selected,
     "cpu"
   )
 
   expect_identical(
-    fastPLS:::.prediction_route(model, X, "auto", NULL)$selected,
+    fastPLS:::.prediction_route(model, X, "auto")$selected,
     "cpu"
   )
 })

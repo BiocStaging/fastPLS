@@ -499,20 +499,6 @@
 
 .fixed_lda_relative_ridge <- 1e-8
 
-.resolve_deprecated_lda_ridge <- function(value, supplied, context) {
-    if (isTRUE(supplied) && !is.null(value)) {
-        message_format <- paste0(
-            "%s argument 'lda_ridge' is deprecated and ignored; PLS-LDA ",
-            "uses the fixed scale-normalized Cholesky fallback sequence."
-        )
-        warning(
-            sprintf(message_format, context),
-            call. = FALSE
-        )
-    }
-    .fixed_lda_relative_ridge
-}
-
 .normalize_classifier_public <- function(classifier) {
     if (length(classifier) > 1L) {
         classifier <- classifier[1L]
@@ -558,13 +544,13 @@
 !is.null(classifier) && classifier %in% c("lda_cpp", "lda_cuda", "lda_metal")
 }
 
-.resolve_top_k <- function(top = 1L, top5 = FALSE) {
+.resolve_top_k <- function(top = NULL) {
+    if (is.null(top)) {
+        return(1L)
+    }
     top <- as.integer(top)[1L]
     if (!is.finite(top) || is.na(top) || top < 1L) {
         stop("top must be a positive integer", call. = FALSE)
-    }
-    if (isTRUE(top5)) {
-        top <- max(top, 5L)
     }
     top
 }
@@ -1419,9 +1405,7 @@ if (is.null(trainer) || is.null(model$R_predict) || is.null(model$R_offset)) {
             }
             else {
                 .float32_to_numeric_matrix(predicted_i)
-            }, task = if (classification)
-                "classification"
-            else "regression", ytrain = ytrain_eval, bycol = isTRUE(bycol)),
+            }, ytrain = ytrain_eval, bycol = isTRUE(bycol)),
         error = function(e) {
             list(task = if (classification) "classification" else "regression",
                 error = conditionMessage(e))
@@ -1555,7 +1539,6 @@ if (is.null(trainer) || is.null(model$R_predict) || is.null(model$R_offset)) {
         evaluate(
             observed = Ydata,
             predicted = predicted,
-            task = if (classification) "classification" else "regression",
             ytrain = NULL,
             bycol = isTRUE(bycol)
         ),
@@ -2150,6 +2133,25 @@ print.fastPLS <- function(x, ...) {
     x
 }
 
+.fastpls_finalize_prediction <- function(result, object, Ytest) {
+    result <- .fastpls_public_predict_output(result, object$ncomp)
+    if (is.null(Ytest)) {
+        return(result)
+    }
+    training_reference <- if (isTRUE(object$classification)) {
+        NULL
+    } else {
+        .float32_to_numeric_matrix(object$mY)
+    }
+    result$metrics <- evaluate(
+        observed = Ytest,
+        predicted = result,
+        ytrain = training_reference,
+        bycol = FALSE
+    )
+    result
+}
+
 .float32_prediction_input <- function(object, newdata) {
     X <- .as_float32_matrix(newdata, "newdata")
     .float32_standardize(X, object$mX, object$vX)
@@ -2180,7 +2182,7 @@ print.fastPLS <- function(x, ...) {
     )
 }
 
-.float32_prediction_block_size <- function(object, rows) {
+.prediction_block_size <- function(object, rows) {
     block_size <- object$flash_block_size
     if (is.null(block_size) || !length(block_size) || is.na(block_size)) {
         block_size <- 4096L
@@ -2218,7 +2220,7 @@ print.fastPLS <- function(x, ...) {
         NA_real_,
         dim = c(nrow(Xtest), keep, length(ncomp))
     )
-    block_size <- .float32_prediction_block_size(object, nrow(Xtest))
+    block_size <- .prediction_block_size(object, nrow(Xtest))
     predict_fun <- .float32_lda_predict_fun(object)
     max_components <- max(ncomp)
 
@@ -2269,7 +2271,7 @@ print.fastPLS <- function(x, ...) {
         NA_real_,
         dim = c(nrow(Xtest), keep, length(ncomp))
     )
-    block_size <- .float32_prediction_block_size(object, nrow(Xtest))
+    block_size <- .prediction_block_size(object, nrow(Xtest))
     incremental <- !identical(object$pls_method, "plssvd") &&
         !is.null(object$Q) &&
         length(ncomp) > 0L &&
@@ -2590,12 +2592,10 @@ print.fastPLS <- function(x, ...) {
     Ytest = NULL,
     proj = FALSE,
     top = 1L,
-    top5 = FALSE,
     raw_scores = FALSE,
     backend = "cpu"
 ) {
     .require_float_package()
-    top <- .resolve_top_k(top, top5)
     compact <- object$classification &&
         identical(backend, "cpu") &&
         is.null(Ytest) &&
@@ -2604,7 +2604,7 @@ print.fastPLS <- function(x, ...) {
         !raw_scores
     if (compact) {
         input <- .as_float32_matrix(newdata, "newdata")
-        block_size <- .float32_prediction_block_size(object, nrow(input))
+        block_size <- .prediction_block_size(object, nrow(input))
         use_lda <- .is_lda_classifier(
             object$classification_rule %||% "argmax"
         )
@@ -2999,9 +2999,6 @@ print.fastPLS <- function(x, ...) {
         backend,
         c("cpu", "cuda", "metal")
     )
-    if (identical(backend, "cpu")) {
-        .fastpls_apply_cpu_cores()
-    }
     backend
 }
 
@@ -4814,7 +4811,7 @@ print.fastPLS <- function(x, ...) {
     )
 }
 
-.prediction_route <- function(object, Xtest, backend, block_size) {
+.prediction_route <- function(object, Xtest, backend) {
     stored <- .model_public_backend(object)
     selected <- if (identical(backend, "auto")) {
         stored
@@ -4838,25 +4835,166 @@ print.fastPLS <- function(x, ...) {
     } else {
         selected
     }
-    if (identical(operation_backend, "cpu")) {
-        .fastpls_apply_cpu_cores()
-    }
-    if (is.null(block_size)) {
-        block_size <- object$flash_block_size
-    }
-    if (is.null(block_size) || !length(block_size) || is.na(block_size)) {
-        block_size <- 4096L
-    }
     list(
         backend = operation_backend,
         selected = selected,
-        block_size = as.integer(block_size),
         cuda = identical(selected, "cuda"),
         metal = identical(selected, "metal")
     )
 }
 
+.double_lda_topk_prediction <- function(
+    object,
+    Xtest,
+    Ttest = NULL,
+    top,
+    keep_ttest = FALSE
+) {
+    context <- .lda_prediction_context(object, return_scores = TRUE)
+    components <- context$components
+    keep <- min(as.integer(top)[1L], length(object$lev))
+    sample_count <- nrow(Xtest)
+    block_size <- .prediction_block_size(object, sample_count)
+    top_index <- array(
+        NA_integer_,
+        dim = c(sample_count, keep, length(components))
+    )
+    top_score <- array(
+        NA_real_,
+        dim = c(sample_count, keep, length(components))
+    )
+    supplied_scores <- if (!is.null(Ttest) && length(Ttest)) {
+        as.matrix(Ttest)[, seq_len(context$max), drop = FALSE]
+    } else {
+        NULL
+    }
+    projected <- if (isTRUE(keep_ttest)) {
+        matrix(NA_real_, nrow = sample_count, ncol = context$max)
+    } else {
+        NULL
+    }
+
+    for (start in seq.int(1L, sample_count, by = block_size)) {
+        rows <- start:min(sample_count, start + block_size - 1L)
+        block_scores <- if (is.null(supplied_scores)) {
+            .lda_prediction_scores(
+                object,
+                Xtest[rows, , drop = FALSE],
+                NULL,
+                context
+            )
+        } else {
+            supplied_scores[rows, , drop = FALSE]
+        }
+        if (isTRUE(keep_ttest)) {
+            projected[rows, ] <- block_scores
+        }
+        for (index in seq_along(components)) {
+            component <- components[[index]]
+            lda <- object$lda$models[[as.character(component)]]
+            if (is.null(lda)) {
+                stop(
+                    "No fitted LDA classifier for ncomp=", component,
+                    call. = FALSE
+                )
+            }
+            value <- lda_predict_cpp(
+                block_scores[, seq_len(component), drop = FALSE],
+                lda
+            )
+            ranked <- double_topk_cpp(value$scores, keep)
+            top_index[rows, , index] <- ranked$top_index
+            top_score[rows, , index] <- ranked$top_score
+        }
+    }
+
+    result <- .class_topk_to_labels(
+        top_index,
+        top_score,
+        object$lev,
+        object$ncomp
+    )
+    if (isTRUE(keep_ttest)) {
+        result$Ttest <- projected
+    }
+    result
+}
+
+.double_classification_q2_from_scores <- function(object, scores, Ytest) {
+    codes <- match(as.character(Ytest), object$lev)
+    if (length(codes) != nrow(scores)) {
+        stop("Ytest must contain one label per prediction row", call. = FALSE)
+    }
+    known <- !is.na(codes)
+    response_mean <- as.numeric(object$mY)
+    denominator <- length(codes) * sum(response_mean^2) + sum(known) -
+        2 * sum(response_mean[codes[known]])
+    if (!is.finite(denominator) || denominator <= .Machine$double.eps) {
+        return(rep(NA_real_, length(object$ncomp)))
+    }
+    block_size <- .prediction_block_size(object, nrow(scores))
+    squared_error <- numeric(length(object$ncomp))
+    component_specific <- is.list(object$W_latent)
+    for (start in seq.int(1L, nrow(scores), by = block_size)) {
+        rows <- start:min(nrow(scores), start + block_size - 1L)
+        for (index in seq_along(object$ncomp)) {
+            component <- as.integer(object$ncomp[[index]])
+            score_block <- scores[rows, seq_len(component), drop = FALSE]
+            prediction <- if (component_specific) {
+                score_block %*% object$W_latent[[
+                    .fastpls_ncomp_names(component)
+                ]]
+            } else {
+                score_block %*%
+                    t(object$Q[, seq_len(component), drop = FALSE])
+            }
+            prediction <- sweep(
+                prediction,
+                2L,
+                response_mean,
+                "+",
+                check.margin = FALSE
+            )
+            squared_error[[index]] <- squared_error[[index]] +
+                sum(prediction^2)
+            known_rows <- which(known[rows])
+            squared_error[[index]] <- squared_error[[index]] +
+                length(known_rows) -
+                2 * sum(prediction[cbind(
+                    known_rows,
+                    codes[rows][known_rows]
+                )])
+        }
+    }
+    1 - squared_error / denominator
+}
+
 .predict_lda_result <- function(object, Xtest, Ytest, proj, top, raw_scores) {
+    if (top > 1L && !raw_scores) {
+        result <- .double_lda_topk_prediction(
+            object,
+            Xtest,
+            Ttest = NULL,
+            top = top,
+            keep_ttest = proj || !is.null(Ytest)
+        )
+        result$Q2Y <- NULL
+        if (!is.null(Ytest)) {
+            result$accuracy <- .fastpls_accuracy_from_class_labels(
+                Ytest,
+                result$Ypred
+            )
+            result$Q2Y <- .double_classification_q2_from_scores(
+                object,
+                result$Ttest,
+                Ytest
+            )
+            if (!proj) {
+                result$Ttest <- NULL
+            }
+        }
+        return(result)
+    }
     response <- if (!is.null(Ytest)) {
         pls_labels_core_predict_cpp(object, Xtest, TRUE)
     } else {
@@ -4907,9 +5045,7 @@ print.fastPLS <- function(x, ...) {
     route
 ) {
     eligible <- object$classification &&
-        is.null(Ytest) &&
         !raw_scores &&
-        !is.list(object$W_latent) &&
         !route$cuda &&
         !route$metal &&
         (is.null(object$classification_rule) ||
@@ -4917,8 +5053,27 @@ print.fastPLS <- function(x, ...) {
     if (!eligible) {
         return(NULL)
     }
-    result <- .class_topk_predict(object, Xtest, top, proj)
+    result <- .class_topk_predict(
+        object,
+        Xtest,
+        top,
+        proj = proj || !is.null(Ytest)
+    )
     result$Q2Y <- NULL
+    if (!is.null(Ytest)) {
+        result$accuracy <- .fastpls_accuracy_from_class_labels(
+            Ytest,
+            result$Ypred
+        )
+        result$Q2Y <- .double_classification_q2_from_scores(
+            object,
+            result$Ttest,
+            Ytest
+        )
+        if (!proj) {
+            result$Ttest <- NULL
+        }
+    }
     result
 }
 
@@ -5006,8 +5161,10 @@ print.fastPLS <- function(x, ...) {
 #'
 #' @param object A fitted `fastPLS`, `fastPLSKernel`, or `fastPLSOpls` object.
 #' @param newdata Numeric predictor matrix.
-#' @param Ytest Optional observed response used to compute independent-test
-#'   `Q2Y` relative to the response mean stored from model training.
+#' @param Ytest Optional observed response. When supplied, the predictions are
+#'   passed to `evaluate()` and its complete result is returned in `metrics`.
+#'   Regression `Q2Y` is referenced to the response mean stored during model
+#'   training.
 #' @param proj Logical; return projected `Ttest` when `TRUE`.
 #' @param backend Prediction backend: `"cpu"`, `"cuda"`, or `"metal"`.
 #'   Operation-split Metal models predict on CPU because their retained
@@ -5016,20 +5173,26 @@ print.fastPLS <- function(x, ...) {
 #'   When omitted, the session backend setting is used. `"auto"` retains the
 #'   backend stored in the fitted model. An unavailable CUDA or Metal selection
 #'   raises an error; prediction is never silently moved to CPU.
-#' @param flash.block_size Row block size for \code{cpu_flash} prediction.
-#' @param top Number of ranked classes to return for classification. Rank 1 is
-#'   the ordinary predicted class stored in `Ypred`; ranks 2, 3, and so on are
-#'   lower-scoring alternatives returned in `Ypred_top` when `top > 1`.
-#' @param top5 Convenience flag equivalent to `top = max(top, 5)`, useful for
-#'   reporting ImageNet-style top-5 candidate labels.
+#' @param n.cores Number of CPU cores requested for compiled host operations.
+#'   An explicit value takes precedence over `options(n.cores = ...)`.
+#'   This controls supported BLAS/OpenMP host work and does not set CUDA or
+#'   Metal device parallelism.
+#' @param top Number of ranked classes to return for classification. The
+#'   default `NULL` returns only the predicted class in `Ypred`. A positive
+#'   integer greater than one additionally returns that many ordered classes
+#'   per sample in `Ypred_top`; `top = 5`, for example, returns five classes.
+#'   This argument is ignored with a warning for regression models.
 #' @param raw_scores If `TRUE`, keep raw classification score cubes as
 #'   `Yscore` when available. This can require substantial memory. With
-#'   float32 inputs and `raw_scores = FALSE`, ranked prediction is evaluated in
-#'   bounded row blocks and only the requested ranks are retained.
+#'   `raw_scores = FALSE`, ranked classification is evaluated in bounded row
+#'   blocks for both float64 and float32 inputs, and only the requested ranks
+#'   are retained.
 #' @param ... Unused.
 #' @return A list containing `Ypred`, optional independent-test `Q2Y`, optional
 #'   `Ttest`, optional `Ypred_top` and `Ypred_top_score` ranked-class outputs,
-#'   and optional raw classification scores.
+#'   and optional raw classification scores. When `Ytest` is supplied,
+#'   `metrics` contains the complete result returned by `evaluate()` for every
+#'   requested component count.
 #' @examples
 #' X <- as.matrix(mtcars[, c("disp", "hp", "wt", "qsec")])
 #' y <- mtcars$mpg
@@ -5041,13 +5204,36 @@ print.fastPLS <- function(x, ...) {
 #' pred$Ypred
 #' @export
 predict.fastPLS <- function(object, newdata, Ytest = NULL, proj = FALSE,
-    backend = NULL,
-    flash.block_size = NULL, top = 1L, top5 = FALSE, raw_scores = FALSE, ...) {
+    backend = NULL, n.cores = NULL,
+    top = NULL, raw_scores = FALSE, ...) {
+    n.cores <- .fastpls_apply_cpu_cores(n.cores)
     if (!is(object, "fastPLS")) {
         stop("object is not a fastPLS object")
     }
+    dots <- list(...)
+    if (length(dots)) {
+        dot_names <- names(dots)
+        if (is.null(dot_names)) {
+            dot_names <- rep("<unnamed>", length(dots))
+        } else {
+            dot_names[!nzchar(dot_names)] <- "<unnamed>"
+        }
+        stop(
+            "Unknown argument",
+            if (length(dots) == 1L) "" else "s",
+            " in predict(): ", paste(dot_names, collapse = ", "),
+            call. = FALSE
+        )
+    }
     object <- .fastpls_restore_internal_output_fields(object)
-    top <- .resolve_top_k(top, top5)
+    top_requested <- !missing(top) && !is.null(top)
+    top <- .resolve_top_k(top)
+    if (!isTRUE(object$classification) && top_requested) {
+        warning(
+            "top is ignored for regression models; ranked classes are available only for classification.",
+            call. = FALSE
+        )
+    }
     if (!is.null(object$resident_state)) {
         resident_backend <- object$resident_backend %||% "cuda"
         if (!identical(resident_backend, "cuda")) {
@@ -5070,21 +5256,29 @@ predict.fastPLS <- function(object, newdata, Ytest = NULL, proj = FALSE,
                 call. = FALSE
             )
         }
-        return(.resident_cuda_predict(object, newdata, Ytest, proj, top, raw_scores))
+        result <- .resident_cuda_predict(
+            object,
+            newdata,
+            Ytest,
+            proj,
+            top,
+            raw_scores
+        )
+        return(.fastpls_finalize_prediction(result, object, Ytest))
     }
-    route <- .prediction_route(object, newdata, backend, flash.block_size)
+    route <- .prediction_route(object, newdata, backend)
     newdata <- .fastpls_predictor_input(newdata, "newdata")
     if (object$precision %||% "double" == "float32") {
         result <- .predict_fastpls_float32(object, newdata, Ytest, proj, top,
             raw_scores = raw_scores, backend = route$backend)
-        return(.fastpls_public_predict_output(result, object$ncomp))
+        return(.fastpls_finalize_prediction(result, object, Ytest))
     }
     Xtest <- as.matrix(newdata)
     rule <- object$classification_rule %||% "argmax"
     if (object$classification && .is_lda_classifier(rule)) {
         result <- .predict_lda_result(object, Xtest, Ytest, proj, top,
             raw_scores)
-        return(.fastpls_public_predict_output(result, object$ncomp))
+        return(.fastpls_finalize_prediction(result, object, Ytest))
     }
     result <- .predict_argmax_shortcut(object, Xtest, Ytest, proj, top,
         raw_scores,
@@ -5095,7 +5289,7 @@ predict.fastPLS <- function(object, newdata, Ytest = NULL, proj = FALSE,
         result <- .predict_classification_result(result, object, Xtest, Ytest,
             proj, top, raw_scores)
     }
-    .fastpls_public_predict_output(result, object$ncomp)
+    .fastpls_finalize_prediction(result, object, Ytest)
 }
 
 .fastpls_preprocess_train <- function(X, scaling) {
@@ -5285,7 +5479,8 @@ predict.fastPLS <- function(object, newdata, Ytest = NULL, proj = FALSE,
 
 .kernel_pls_fit <- function(Xtrain, Ytrain, Xtest, Ytest, ncomp, scaling,
     kernel,
-    gamma, degree, coef0, fit, proj, kernel_engine, fit_fun, inner_args) {
+    gamma, degree, coef0, fit, proj, kernel_engine, fit_fun, inner_args,
+    n.cores = NULL) {
     kernel <- match.arg(kernel, c("linear", "rbf", "poly"))
     if (identical(kernel, "linear")) {
         return(.kernel_pls_linear_fit(Xtrain, Ytrain, Xtest, Ytest, ncomp,
@@ -5315,7 +5510,8 @@ predict.fastPLS <- function(object, newdata, Ytest = NULL, proj = FALSE,
             Xtest,
             Ytest = Ytest,
             proj = proj,
-            backend = .model_public_backend(inner)
+            backend = .model_public_backend(inner),
+            n.cores = n.cores
         )
         out <- c(out, res)
         class(out) <- c("fastPLSKernel", "fastPLS")
@@ -5345,7 +5541,7 @@ predict.fastPLS <- function(object, newdata, Ytest = NULL, proj = FALSE,
     svd.method = "cpu_rsvd", rsvd_oversample = 32L,
     rsvd_power = 5L, svds_tol = 0,
     seed = 1L, classifier = c("argmax", "lda"), lda_ridge = 1e-08, fit = FALSE,
-    return_variance = TRUE, proj = FALSE) {
+    return_variance = TRUE, proj = FALSE, n.cores = NULL) {
     classifier <- .resolve_classifier_for_backend(classifier, "cpu")
     svd.method <- match.arg(.normalize_svd_method(svd.method), c("cpu_rsvd"))
     .kernel_pls_fit(Xtrain, Ytrain, Xtest, Ytest, ncomp, match.arg(scaling),
@@ -5353,14 +5549,15 @@ predict.fastPLS <- function(object, newdata, Ytest = NULL, proj = FALSE,
         gamma, degree, coef0, fit, proj, "cpp", pls, list(method = "simpls",
             rsvd_oversample = rsvd_oversample, rsvd_power = rsvd_power,
             seed = seed,
-            classifier = classifier,
-            return_variance = return_variance))
+            classifier = classifier, n.cores = n.cores,
+            return_variance = return_variance), n.cores)
 }
 
 #' @exportS3Method
 #' @noRd
 predict.fastPLSKernel <- function(object, newdata, Ytest = NULL, proj = FALSE,
-    ...) {
+    n.cores = NULL, ...) {
+    n.cores <- .fastpls_apply_cpu_cores(n.cores)
     if (!is(object, "fastPLSKernel")) {
         stop("object is not a fastPLSKernel object", call. = FALSE)
     }
@@ -5381,7 +5578,7 @@ predict.fastPLSKernel <- function(object, newdata, Ytest = NULL, proj = FALSE,
             object$kernel_center$grand_mean)
         centered <- .float32_from_bits(centered_raw$K)
         return(predict.fastPLS(object$inner_model, centered, Ytest = Ytest,
-            proj = proj,
+            proj = proj, n.cores = n.cores,
             ...))
     }
     Xnew <- .fastpls_preprocess_test(newdata, object$mX, object$vX)
@@ -5400,11 +5597,12 @@ predict.fastPLSKernel <- function(object, newdata, Ytest = NULL, proj = FALSE,
         Ktest <- center_kernel_test_cpp(Ktest, object$kernel_center$col_means,
             object$kernel_center$grand_mean)
     }
-    predict.fastPLS(object$inner_model, Ktest, Ytest = Ytest, proj = proj, ...)
+    predict.fastPLS(object$inner_model, Ktest, Ytest = Ytest, proj = proj,
+        n.cores = n.cores, ...)
 }
 
 .opls_fit <- function(Xtrain, Ytrain, Xtest, Ytest, ncomp, scaling, north, fit,
-    proj, filter_engine, fit_fun, inner_args) {
+    proj, filter_engine, fit_fun, inner_args, n.cores = NULL) {
     scaling_id <- pmatch(scaling, c("centering", "autoscaling", "none"))[1]
     if (is.factor(Ytrain) || is.character(Ytrain)) {
         labels <- droplevels(factor(Ytrain))
@@ -5440,7 +5638,8 @@ predict.fastPLSKernel <- function(object, newdata, Ytest = NULL, proj = FALSE,
             Xtest,
             Ytest = Ytest,
             proj = proj,
-            backend = .model_public_backend(inner)
+            backend = .model_public_backend(inner),
+            n.cores = n.cores
         )
         out <- c(out, res)
         class(out) <- c("fastPLSOpls", "fastPLS")
@@ -5464,7 +5663,7 @@ predict.fastPLSKernel <- function(object, newdata, Ytest = NULL, proj = FALSE,
     scaling = c("centering", "autoscaling", "none"), svd.method = "cpu_rsvd",
     rsvd_oversample = 32L, rsvd_power = 5L, svds_tol = 0,
     seed = 1L, classifier = c("argmax", "lda"), lda_ridge = 1e-08, fit = FALSE,
-    return_variance = TRUE, proj = FALSE) {
+    return_variance = TRUE, proj = FALSE, n.cores = NULL) {
     classifier <- .resolve_classifier_for_backend(classifier, "cpu")
     svd.method <- match.arg(.normalize_svd_method(svd.method), c("cpu_rsvd"))
     .opls_fit(Xtrain, Ytrain, Xtest, Ytest, ncomp, match.arg(scaling), north,
@@ -5472,13 +5671,15 @@ predict.fastPLSKernel <- function(object, newdata, Ytest = NULL, proj = FALSE,
         proj, "cpp", pls, list(method = "simpls",
             rsvd_oversample = rsvd_oversample,
             rsvd_power = rsvd_power, seed = seed, classifier = classifier,
-            return_variance = return_variance))
+            n.cores = n.cores,
+            return_variance = return_variance), n.cores)
 }
 
 #' @exportS3Method
 #' @noRd
 predict.fastPLSOpls <- function(object, newdata, Ytest = NULL, proj = FALSE,
-    ...) {
+    n.cores = NULL, ...) {
+    n.cores <- .fastpls_apply_cpu_cores(n.cores)
     if (!is(object, "fastPLSOpls")) {
         stop("object is not a fastPLSOpls object", call. = FALSE)
     }
@@ -5497,7 +5698,7 @@ predict.fastPLSOpls <- function(object, newdata, Ytest = NULL, proj = FALSE,
         )
         filtered <- .float32_from_bits(raw$X)
         return(predict.fastPLS(object$inner_model, filtered, Ytest = Ytest,
-            proj = proj,
+            proj = proj, n.cores = n.cores,
             ...))
     }
     Xnew <- if (identical(object$opls_engine, "metal")) {
@@ -5509,17 +5710,77 @@ predict.fastPLSOpls <- function(object, newdata, Ytest = NULL, proj = FALSE,
             object$W_orth,
             object$P_orth)
     }
-    predict.fastPLS(object$inner_model, Xnew, Ytest = Ytest, proj = proj, ...)
+    predict.fastPLS(object$inner_model, Xnew, Ytest = Ytest, proj = proj,
+        n.cores = n.cores, ...)
 }
 
-.cv_normalize_selection_metric <- function(selection_metric = NULL) {
-    if (is.null(selection_metric) || !length(selection_metric)) {
+.cv_classification_selection_metrics_available <- c(
+    "accuracy", "balanced_accuracy", "lift_accuracy", "macro_precision",
+    "macro_recall", "macro_f1", "kappa", "r2y", "q2y"
+)
+
+.cv_regression_selection_metrics_available <- c(
+    "r2y", "q2y", "rmsd", "mae", "mape_percent", "rpd",
+    "pearson_r", "spearman_r"
+)
+
+.cv_selection_label <- function(metric) {
+    switch(
+        metric,
+        r2y = "R2Y",
+        q2y = "Q2Y",
+        rmsd = "RMSD",
+        mae = "MAE",
+        mre_percent = "MRE_percent",
+        mape_percent = "MAPE_percent",
+        rpd = "RPD",
+        pearson_r = "Pearson_r",
+        spearman_r = "Spearman_r",
+        metric
+    )
+}
+
+.cv_selection_is_loss <- function(metric) {
+    metric %in% c("rmsd", "mae", "mape_percent")
+}
+
+.cv_metric_key <- function(metric) {
+    key <- tolower(gsub("[[:space:]-]+", "_", as.character(metric[[1L]])))
+    switch(
+        key,
+        r2 = "r2y",
+        q2 = "q2y",
+        rmse = "rmsd",
+        key
+    )
+}
+
+.cv_evaluate_metric <- function(observed, predicted, metric) {
+    evaluated <- evaluate(
+        observed = observed,
+        predicted = predicted,
+        ytrain = observed,
+        bycol = FALSE
+    )
+    field <- .cv_selection_label(metric)
+    value <- evaluated$metrics[[field]]
+    if (is.null(value) || length(value) != 1L) {
+        stop(
+            sprintf("evaluate() did not return selection metric '%s'.", field),
+            call. = FALSE
+        )
+    }
+    as.numeric(value)
+}
+
+.cv_normalize_selection_metric <- function(selection = NULL) {
+    if (is.null(selection) || !length(selection)) {
         return("auto")
     }
     metric <- tolower(gsub(
         "[[:space:]-]+",
         "_",
-        as.character(selection_metric[[1L]])
+        as.character(selection[[1L]])
     ))
     aliases <- c(
         auto = "auto",
@@ -5531,30 +5792,89 @@ predict.fastPLSOpls <- function(object, newdata, Ytest = NULL, proj = FALSE,
         balancedaccuracy = "balanced_accuracy",
         bacc = "balanced_accuracy",
         balanced_accuracy = "balanced_accuracy",
-        r2 = "r2",
-        r_squared = "r2",
-        rsquared = "r2",
-        q2 = "q2",
-        q_squared = "q2",
+        lift = "lift_accuracy",
+        lift_accuracy = "lift_accuracy",
+        macro_precision = "macro_precision",
+        macro_recall = "macro_recall",
+        macro_f1 = "macro_f1",
+        kappa = "kappa",
+        r2y = "r2y",
+        q2y = "q2y",
         rmsd = "rmsd",
-        rmse = "rmsd"
+        mae = "mae",
+        mape = "mape_percent",
+        mape_percent = "mape_percent",
+        rpd = "rpd",
+        pearson = "pearson_r",
+        pearson_r = "pearson_r",
+        spearman = "spearman_r",
+        spearman_r = "spearman_r"
     )
+    if (metric %in% c("r2", "r_squared", "rsquared")) {
+        stop("selection = 'r2' is ambiguous; use 'R2Y'.", call. = FALSE)
+    }
+    if (metric %in% c("q2", "q_squared")) {
+        stop("selection = 'q2' is ambiguous; use 'Q2Y'.", call. = FALSE)
+    }
+    if (identical(metric, "rmse")) {
+        stop("selection = 'RMSE' duplicates RMSD; use 'RMSD'.", call. = FALSE)
+    }
+    if (metric %in% c("bias", "mre", "mre_percent")) {
+        selection_label <- as.character(selection[[1L]])
+        reason <- "is signed and has no unambiguous optimization direction"
+        stop(
+            sprintf("selection = '%s' %s; use MAE or MAPE_percent.",
+                selection_label, reason),
+            call. = FALSE
+        )
+    }
+    if (metric %in% c("n", "no_information_rate")) {
+        stop(
+            "The requested value is descriptive and cannot select a model.",
+            call. = FALSE
+        )
+    }
     if (metric %in% names(aliases)) {
         metric <- unname(aliases[[metric]])
     }
-    if (
-    !metric %in% c("auto", "accuracy", "balanced_accuracy", "r2", "q2", "rmsd")
-    ) {
+    valid <- c(
+        "auto",
+        .cv_classification_selection_metrics_available,
+        .cv_regression_selection_metrics_available
+    )
+    if (!metric %in% valid) {
         stop(
-            sprintf(
-                "%s%s",
-                "selection_metric must be one of 'auto', 'accuracy', ",
-                "'balanced_accuracy', 'r2', 'q2', or 'rmsd'."
-            ),
+            "Unknown selection metric. See ?pls.single.cv for the task-specific choices.",
             call. = FALSE
         )
     }
     metric
+}
+
+.cv_validate_selection_for_task <- function(selection, classification) {
+    if (identical(selection, "auto")) {
+        return(selection)
+    }
+    allowed <- if (classification) {
+        .cv_classification_selection_metrics_available
+    } else {
+        .cv_regression_selection_metrics_available
+    }
+    if (!selection %in% allowed) {
+        task <- if (classification) "classification" else "regression"
+        choices <- paste(
+            vapply(allowed, .cv_selection_label, character(1L)),
+            collapse = ", "
+        )
+        stop(
+            sprintf(
+                "selection = '%s' is not valid for %s. Available metrics: %s.",
+                .cv_selection_label(selection), task, choices
+            ),
+            call. = FALSE
+        )
+    }
+    selection
 }
 
 .cv_balanced_accuracy <- function(observed, predicted, levels = NULL) {
@@ -5572,29 +5892,13 @@ predict.fastPLSOpls <- function(object, newdata, Ytest = NULL, proj = FALSE,
     if (any(is.finite(recalls))) mean(recalls, na.rm = TRUE) else NA_real_
 }
 
-.cv_selection_metric_from_dots <- function(dots) {
-    if (!is.list(dots)) {
-        dots <- list()
-    }
-    keys <- intersect(
-        c("selection_metric", "metric", "opt_metric", "criterion"),
-        names(dots)
-    )
-    if (!length(keys)) {
-        return(list(metric = "auto", dots = dots))
-    }
-    metric <- dots[[keys[[1L]]]]
-    dots[keys] <- NULL
-    list(metric = .cv_normalize_selection_metric(metric), dots = dots)
-}
-
 .cv_metric_from_matrix <- function(
     Ytrue,
     Ypred,
     Ytrain = NULL,
     metric = "auto"
 ) {
-    metric <- .cv_normalize_selection_metric(metric)
+    metric <- .cv_metric_key(metric)
     Ytrue <- .float32_to_numeric_matrix(Ytrue)
     Ypred <- .float32_to_numeric_matrix(Ypred)
     if (!all(dim(Ytrue) == dim(Ypred))) {
@@ -5605,7 +5909,7 @@ predict.fastPLSOpls <- function(object, newdata, Ytest = NULL, proj = FALSE,
         )
     }
     if (identical(metric, "auto")) {
-        metric <- if (ncol(Ytrue) == 1L) "q2" else "rmsd"
+        metric <- if (ncol(Ytrue) == 1L) "q2y" else "rmsd"
     }
     if (metric %in% c("accuracy", "balanced_accuracy")) {
         stop(
@@ -5615,11 +5919,11 @@ predict.fastPLSOpls <- function(object, newdata, Ytest = NULL, proj = FALSE,
     }
     if (identical(metric, "rmsd")) {
         return(list(
-            metric_name = "rmsd",
+            metric_name = "RMSD",
             metric_value = sqrt(mean((Ypred - Ytrue)^2, na.rm = TRUE))
         ))
     }
-    if (identical(metric, "q2") && is.null(Ytrain)) {
+    if (identical(metric, "q2y") && is.null(Ytrain)) {
         stop(
             "Q2 requires an explicit training-response reference; use the ",
             "fold-aware Q2 helper for cross-validation.",
@@ -5635,7 +5939,7 @@ predict.fastPLSOpls <- function(object, newdata, Ytest = NULL, proj = FALSE,
     press <- sum((Ypred - Ytrue)^2, na.rm = TRUE)
     tss <- sum(sweep(Ytrue, 2L, center, "-")^2, na.rm = TRUE)
     list(
-        metric_name = metric,
+        metric_name = .cv_selection_label(metric),
         metric_value = if (is.finite(tss) && tss > 0) {
             1 - press / tss
         } else {
@@ -5649,7 +5953,7 @@ predict.fastPLSOpls <- function(object, newdata, Ytest = NULL, proj = FALSE,
         Ytrue,
         Ypred,
         Ytrain = Ytrain,
-        metric = "q2"
+        metric = "q2y"
     )$metric_value
     rmsd <- .cv_metric_from_matrix(
         Ytrue,
@@ -5680,7 +5984,7 @@ predict.fastPLSOpls <- function(object, newdata, Ytest = NULL, proj = FALSE,
                 Ytrue = Ymat,
                 Ypred = pred_i,
                 Ytrain = Ymat,
-                metric = "q2"
+                metric = "q2y"
             )$metric_value
         },
         numeric(1)
@@ -5698,7 +6002,7 @@ predict.fastPLSOpls <- function(object, newdata, Ytest = NULL, proj = FALSE,
 }
 
 .cv_training_fit_summary <- function(Xdata, Ydata, ncomp, scaling, method,
-    backend,
+    backend, n.cores,
     svd.method, rsvd_oversample, rsvd_power, svds_tol, seed, north, kernel,
     gamma, degree,
     coef0) {
@@ -5710,7 +6014,8 @@ predict.fastPLSOpls <- function(object, newdata, Ytest = NULL, proj = FALSE,
             rsvd_power = rsvd_power, seed = seed,
             fit = TRUE, return_variance = FALSE,
             proj = FALSE,
-            backend = backend, north = north, kernel = kernel, gamma = gamma,
+            backend = backend, n.cores = n.cores, north = north,
+            kernel = kernel, gamma = gamma,
             degree = degree,
             coef0 = coef0)
         r2 <- fit$R2Y
@@ -5762,6 +6067,7 @@ predict.fastPLSOpls <- function(object, newdata, Ytest = NULL, proj = FALSE,
             perm.test = options$perm.test,
             times = options$times,
             backend = params$backend %||% "cpu",
+            n.cores = options$n.cores,
             north = params$north %||% 1L,
             kernel = params$kernel %||% "linear",
             gamma = params$gamma,
@@ -5783,7 +6089,8 @@ predict.fastPLSOpls <- function(object, newdata, Ytest = NULL, proj = FALSE,
     return_loadings = FALSE,
     proj = FALSE,
     perm.test = FALSE,
-    times = 100
+    times = 100,
+    n.cores = NULL
 ) {
     fit_data <- attr(cv, "fit_data", exact = TRUE)
 if (is.null(fit_data) || is.null(fit_data$Xdata) || is.null(fit_data$Ydata)) {
@@ -5809,7 +6116,8 @@ if (is.null(fit_data) || is.null(fit_data$Xdata) || is.null(fit_data$Ydata)) {
         return_loadings = return_loadings,
         proj = proj,
         perm.test = perm.test,
-        times = times
+        times = times,
+        n.cores = n.cores
     )
     args <- .pls_cv_refit_args(cv, fit_data, Xtest, Ytest, options)
     model <- do.call(pls, args)
@@ -5839,66 +6147,64 @@ if (is.null(fit_data) || is.null(fit_data$Xdata) || is.null(fit_data$Ydata)) {
     selection_metric) {
     if (identical(selection_metric, "auto")) selection_metric <- "accuracy"
     if (identical(selection_metric, "accuracy")) {
+        cv_res$metrics$metric_name <- "accuracy"
         return(cv_res$metrics)
     }
-    if (identical(selection_metric, "balanced_accuracy")) {
-        predictions <- cv_res$pred
-        if (is.null(predictions)) {
-            stop(
-                "Stored class predictions are required to optimize ",
-                "selection_metric = 'balanced_accuracy'.",
-                call. = FALSE
-            )
-        }
-        if (!is.list(predictions)) predictions <- list(predictions)
-        values <- vapply(predictions, function(predicted) {
-            .cv_balanced_accuracy(Ydata, predicted, levels = cv_res$levels)
-        }, numeric(1L))
-        return(.cv_metric_frame(values, "balanced_accuracy"))
-    }
-    if (identical(selection_metric, "q2")) {
+    if (identical(selection_metric, "q2y")) {
         if (is.null(cv_res$Ypred)) {
             stop(
                 "Stored classification scores are required to optimize ",
-                "selection_metric = 'q2'.",
+                "selection = 'Q2Y'.",
                 call. = FALSE
             )
         }
         q2 <- .cv_classification_q2_path(Ydata, cv_res$Ypred, cv_res$levels,
             fold = cv_res$fold)
-        return(.cv_metric_frame(q2, "q2"))
+        return(.cv_metric_frame(q2, "Q2Y"))
     }
-    if (!identical(selection_metric, "r2")) {
+    if (identical(selection_metric, "r2y")) {
+        stop("R2Y selection requires the full-data fitted-response path.",
+            call. = FALSE)
+    }
+    predictions <- cv_res$pred
+    if (is.null(predictions)) {
         stop(
-            "Classification CV can optimize selection_metric = ",
-            "'accuracy', 'balanced_accuracy', or 'q2'.",
+            "Stored class predictions are required to optimize selection = '",
+            .cv_selection_label(selection_metric), "'.",
             call. = FALSE
         )
     }
-    stop("Classification selection_metric = 'r2' is based on the full-data ",
-        "training fit and cannot be optimized by held-out folds.",
-        call. = FALSE)
+    if (is.matrix(predictions)) {
+        predictions <- lapply(seq_len(ncol(predictions)), function(index) {
+            predictions[, index]
+        })
+    } else if (!is.list(predictions)) {
+        predictions <- list(predictions)
+    }
+    values <- vapply(predictions, function(predicted) {
+        .cv_evaluate_metric(Ydata, predicted, selection_metric)
+    }, numeric(1L))
+    .cv_metric_frame(values, .cv_selection_label(selection_metric))
 }
 
 .cv_regression_selection_metrics <- function(cv_res, Ydata, selection_metric) {
     if (identical(selection_metric, "auto")) selection_metric <- "rmsd"
-    if (selection_metric %in% c("accuracy", "balanced_accuracy")) {
-        stop(
-            "Regression CV can only optimize selection_metric = 'r2', 'q2', ",
-            "or 'rmsd'.",
-            call. = FALSE
-        )
+    if (identical(selection_metric, "r2y")) {
+        stop("R2Y selection requires the full-data fitted-response path.",
+            call. = FALSE)
     }
     native_values <- switch(
         selection_metric,
-        r2 = cv_res$CV_R2,
-        q2 = cv_res$Q2Y,
+        q2y = cv_res$Q2Y,
         rmsd = cv_res$RMSD,
         NULL
     )
     if (!is.null(native_values) && length(native_values) == length(cv_res$ncomp) &&
         any(is.finite(native_values))) {
-        return(.cv_metric_frame(as.numeric(native_values), selection_metric))
+        return(.cv_metric_frame(
+            as.numeric(native_values),
+            .cv_selection_label(selection_metric)
+        ))
     }
     if (!is.null(cv_res$metrics) && is.null(cv_res$Ypred)) {
         return(cv_res$metrics)
@@ -5917,17 +6223,20 @@ if (is.null(fit_data) || is.null(fit_data$Xdata) || is.null(fit_data$Ydata)) {
     metrics <- .cv_empty_metric_frame(dims[[3L]])
     for (i in seq_len(dims[[3L]])) {
         mat <- cv_res$Ypred[, , i, drop = TRUE]
-    metric <- if (identical(selection_metric, "q2") && !is.null(cv_res$fold)) {
+        metric <- if (identical(selection_metric, "q2y") &&
+            !is.null(cv_res$fold)) {
             list(
-                metric_name = "q2",
-            metric_value = .fastpls_fold_q2_path(Ydata, mat, cv_res$fold)[[1L]]
+                metric_name = "Q2Y",
+                metric_value = .fastpls_fold_q2_path(
+                    Ydata, mat, cv_res$fold
+                )[[1L]]
             )
         } else {
-            .cv_metric_from_matrix(
-                Ydata,
-                mat,
-                Ytrain = Ydata,
-                metric = selection_metric
+            list(
+                metric_name = .cv_selection_label(selection_metric),
+                metric_value = .cv_evaluate_metric(
+                    Ydata, mat, selection_metric
+                )
             )
         }
         metrics$metric_name[[i]] <- metric$metric_name
@@ -6626,6 +6935,7 @@ if (is.null(fit_data) || is.null(fit_data$Xdata) || is.null(fit_data$Ydata)) {
     scaling = c("centering", "autoscaling", "none"), method = c("plssvd",
         "simpls",
         "opls", "kernelpls"), backend = c("cpp", "cuda", "metal"),
+    n.cores = NULL,
     svd.method = "rsvd", rsvd_oversample = 32L,
     rsvd_power = 5L, svds_tol = 0,
     seed = 1L, xprod = NULL, north = 1L, kernel = "linear", gamma = NULL,
@@ -6633,6 +6943,7 @@ if (is.null(fit_data) || is.null(fit_data$Xdata) || is.null(fit_data$Ydata)) {
     classifier = c("argmax", "lda"), lda_ridge = 1e-08,
     store_predictions = TRUE,
     selection_metric = "auto") {
+    .fastpls_apply_cpu_cores(n.cores)
     context <- .compiled_cv_context(Xdata, Ydata, constrain, ncomp, scaling,
         method,
         backend, svd.method, xprod, classifier, kernel)
@@ -6872,7 +7183,7 @@ stop("Could not extract regression predictions from fold fit.", call. = FALSE)
 
 .via_pls_context <- function(Xdata, Ydata, constrain, ncomp, kfold, scaling,
     method,
-    backend, svd.method, seed, xprod, kernel, classifier, dots) {
+    backend, svd.method, seed, xprod, kernel, classifier, dots, n.cores) {
     method <- match.arg(method, c("plssvd", "simpls", "opls", "kernelpls"))
     backend <- match.arg(
         backend,
@@ -6923,7 +7234,7 @@ stop("Could not extract regression predictions from fold fit.", call. = FALSE)
         ncomp = ncomp, fold = fold, scaling = scaling, method = method,
         backend = backend,
         kernel = match.arg(kernel, c("linear", "rbf", "poly")),
-        classifier = classifier, control = control)
+        classifier = classifier, control = control, n.cores = n.cores)
 }
 
 .via_pls_state <- function(context, store_predictions, selection_metric) {
@@ -7036,6 +7347,7 @@ stop("Could not extract regression predictions from fold fit.", call. = FALSE)
         proj = FALSE,
         return_variance = FALSE,
         backend = context$backend,
+        n.cores = context$n.cores,
         north = config$north,
         kernel = context$kernel,
         gamma = config$gamma,
@@ -7077,10 +7389,11 @@ stop("Could not extract regression predictions from fold fit.", call. = FALSE)
             # Q2 uses dummy-response PLS predictions, not LDA scores.
             score_fit <- internal_fit
             score_fit$classification_rule <- "argmax"
-            classified <- predict(fit, Xtest, backend = prediction_backend)
+            classified <- predict(fit, Xtest, backend = prediction_backend,
+                n.cores = context$n.cores)
             raw <- predict(
                 score_fit, Xtest, raw_scores = TRUE,
-                backend = prediction_backend
+                backend = prediction_backend, n.cores = context$n.cores
             )
             list(classified = classified, raw = raw)
         }
@@ -7320,7 +7633,7 @@ stop("Could not extract regression predictions from fold fit.", call. = FALSE)
     scaling = c("centering", "autoscaling", "none"), method = c("plssvd",
         "simpls",
         "opls", "kernelpls"),
-    backend = c("cpu", "cuda", "metal"),
+    backend = c("cpu", "cuda", "metal"), n.cores = NULL,
     svd.method = "rsvd", seed = 1L, xprod = NULL, north = 1L,
     kernel = c("linear",
         "rbf",
@@ -7331,7 +7644,7 @@ stop("Could not extract regression predictions from fold fit.", call. = FALSE)
     context <- .via_pls_context(Xdata, Ydata, constrain, ncomp, kfold, scaling,
         method, backend, if (missing(svd.method))
             NULL
-        else svd.method, seed, xprod, kernel, classifier, list(...))
+        else svd.method, seed, xprod, kernel, classifier, list(...), n.cores)
     config <- list(north = north, gamma = gamma, degree = degree,
         coef0 = coef0,
         lda_ridge = lda_ridge, return_scores = return_scores)
@@ -7432,16 +7745,15 @@ stop("Could not extract regression predictions from fold fit.", call. = FALSE)
     x,
     k,
     backend,
-    svd.method,
     oversample,
     power,
     seed,
     left_only = FALSE
 ) {
-    if (!identical(backend, "cpu") || !identical(svd.method, "cpu_rsvd")) {
+    if (!identical(backend, "cpu")) {
         stop(
             "The portable Windows float32 implementation supports ",
-            "backend = 'cpu' and method = 'rsvd' only. ",
+            "backend = 'cpu' only. ",
             "No CPU fallback is performed.",
             call. = FALSE
         )
@@ -7459,7 +7771,7 @@ stop("Could not extract regression predictions from fold fit.", call. = FALSE)
         U = raw$u,
         s = as.vector(raw$d),
         Vt = if (isTRUE(left_only)) NULL else .float32_transpose(raw$v),
-        method = svd.method,
+        method = "cpu_rsvd",
         elapsed = as.numeric(t_elapsed),
         precision = "float32",
         case_audited = isTRUE(raw$case_audited),
@@ -7475,7 +7787,7 @@ stop("Could not extract regression predictions from fold fit.", call. = FALSE)
     seed,
     left_only = FALSE) {
     if (identical(.Platform$OS.type, "windows")) {
-        return(.fastsvd_float32_windows(x, k, backend, svd.method, oversample,
+        return(.fastsvd_float32_windows(x, k, backend, oversample,
             power, seed, left_only))
     }
     if (identical(backend, "cpu")) {
@@ -7610,17 +7922,14 @@ stop("Could not extract regression predictions from fold fit.", call. = FALSE)
     out
 }
 
-.fastsvd_resolve_solver <- function(float32, backend, method) {
+.fastsvd_resolve_solver <- function(backend) {
     backend <- .normalize_public_backend(backend)
-    if (!identical(method, "rsvd")) {
-        stop("fastsvd() supports method = 'rsvd' only.", call. = FALSE)
-    }
     solver <- switch(backend, cpu = "cpu_rsvd", cuda = "cuda_rsvd",
         metal = "metal_rsvd")
-    list(backend = backend, method = method, solver = solver)
+    list(backend = backend, method = "rsvd", solver = solver)
 }
 
-.fastsvd_validate_solver <- function(float32, backend, method, solver) {
+.fastsvd_validate_solver <- function(backend, solver) {
     .fastpls_require_backend_available(backend, "fastsvd()")
     if (solver %in% c("cuda_rsvd", "metal_rsvd")) {
         stop(
@@ -7635,21 +7944,18 @@ stop("Could not extract regression predictions from fold fit.", call. = FALSE)
 }
 
 .fastsvd_randomized_control <- function(
-    method,
     backend,
     oversample,
     power,
     supplied
 ) {
-    if (method == "rsvd") {
-        control <- .svd_control_defaults()
-        control$rsvd_oversample <- as.integer(oversample)[1L]
-        control$rsvd_power <- as.integer(power)[1L]
-        control$supplied <- supplied
-        control <- .apply_backend_rsvd_controls(control, backend, "fastsvd()")
-        oversample <- control$rsvd_oversample
-        power <- control$rsvd_power
-    }
+    control <- .svd_control_defaults()
+    control$rsvd_oversample <- as.integer(oversample)[1L]
+    control$rsvd_power <- as.integer(power)[1L]
+    control$supplied <- supplied
+    control <- .apply_backend_rsvd_controls(control, backend, "fastsvd()")
+    oversample <- control$rsvd_oversample
+    power <- control$rsvd_power
     list(oversample = oversample, power = power)
 }
 
@@ -7679,7 +7985,6 @@ stop("Could not extract regression predictions from fold fit.", call. = FALSE)
     nv,
     ncomp,
     backend,
-    method,
     oversample,
     power,
     supplied
@@ -7688,15 +7993,12 @@ stop("Could not extract regression predictions from fold fit.", call. = FALSE)
     .fastpls_require_backend_available(backend, "fastsvd()")
     float32 <- .is_float32(x)
     rank <- .fastsvd_rank_configuration(x, nu, nv, ncomp, float32)
-    resolved <- .fastsvd_resolve_solver(float32, backend, method)
+    resolved <- .fastsvd_resolve_solver(backend)
     .fastsvd_validate_solver(
-        float32,
         resolved$backend,
-        resolved$method,
         resolved$solver
     )
     control <- .fastsvd_randomized_control(
-        resolved$method,
         resolved$backend,
         oversample,
         power,
@@ -7716,9 +8018,7 @@ stop("Could not extract regression predictions from fold fit.", call. = FALSE)
 }
 
 .fastsvd_compute <- function(x, config, seed) {
-    if (config$method == "rsvd") {
-        try(rsvd_audit_reset_debug(), silent = TRUE)
-    }
+    try(rsvd_audit_reset_debug(), silent = TRUE)
     if (config$float32) {
         return(.fastsvd_float32(
             x,
@@ -7797,16 +8097,17 @@ stop("Could not extract regression predictions from fold fit.", call. = FALSE)
     result
 }
 
-#' Singular value decomposition through fastPLS backends
+#' Native randomized singular value decomposition
 #'
-#' Computes a truncated singular value decomposition of a dense numeric matrix
-#' with the CPU backend. The result contains singular
-#' values, requested singular vectors, decomposition rank, elapsed time, and
-#' backend metadata.
+#' Computes a truncated randomized singular value decomposition (rSVD) with
+#' the CPU backend. Ordinary R numeric matrices use float64 calculations;
+#' `float::float32` matrices automatically use the native float32 path without
+#' conversion to float64.
 #'
-#' @param x Numeric matrix to decompose, with observations or rows in rows and
-#'   variables or columns in columns. Sparse matrices should be converted by the
-#'   caller; `fastsvd()` currently works on a dense numeric matrix.
+#' @param x Dense matrix to decompose. A base R numeric matrix is processed in
+#'   float64. A `float::float32` matrix is processed end to end in float32 and
+#'   returns float32 left and right singular vectors. Sparse matrices should be
+#'   converted by the caller.
 #' @param nu Number of left singular vectors to return. If `NULL`, the function
 #'   uses the largest feasible rank implied by the matrix dimensions. When
 #'   `ncomp` is supplied, `ncomp` controls the decomposition rank and `nu`
@@ -7823,12 +8124,13 @@ stop("Could not extract regression predictions from fold fit.", call. = FALSE)
 #'   are not fully device-native for every matrix shape; both accelerators
 #'   remain available for supported resident PLS fits. When omitted, the
 #'   function uses `options(backend = ...)`, then `FASTPLS_BACKEND`, then CPU.
-#'   For CPU execution, `options(cores = n)` requests `n` BLAS/OpenMP threads.
 #'   An unavailable or unsupported accelerator selection raises an error; no
 #'   CPU fallback is
 #'   performed.
-#' @param method SVD algorithm. Only \code{rsvd}, the native randomized SVD,
-#'   is supported on the selected backend.
+#' @param n.cores Number of CPU cores requested for supported BLAS/OpenMP host
+#'   operations. An explicit value takes precedence over
+#'   `options(n.cores = ...)`. The setting does not control CUDA or Metal
+#'   device parallelism.
 #' @param oversample Non-negative oversampling dimension used by
 #'   randomized SVD. The sketch dimension is approximately
 #'   `ncomp + oversample`, capped by the matrix rank. Larger values can improve
@@ -7846,10 +8148,12 @@ stop("Could not extract regression predictions from fold fit.", call. = FALSE)
 #'   sketch. It affects \code{rsvd} results and is ignored by deterministic
 #'   backends.
 #' @return A list compatible with `base::svd()` containing `d`, `u`, and `v`,
-#'   plus backend metadata and numerical `diagnostics`. Both CPU precisions
-#'   receive a native case-specific rSVD audit. For float32, that audit remains
-#'   in single precision and the R layer does not convert the input to double
-#'   solely to calculate diagnostics. Double-precision input additionally
+#'   plus backend metadata and numerical `diagnostics`. For base R numeric
+#'   input, `u` and `v` are float64 matrices. For `float::float32` input, `u`
+#'   and `v` remain float32 matrices. Both CPU precisions receive a native
+#'   case-specific rSVD audit. The float32 audit remains in single precision,
+#'   and the R layer does not convert the input to float64 solely to calculate
+#'   diagnostics. Float64 input additionally
 #'   receives normalized singular-triplet residuals for the first, middle, and
 #'   last returned components. A residual above 0.01 produces a warning status
 #'   and a residual above 0.1 is classified as a numerical failure.
@@ -7867,14 +8171,20 @@ stop("Could not extract regression predictions from fold fit.", call. = FALSE)
 #' @examples
 #' set.seed(1)
 #' x <- matrix(rnorm(12 * 5), 12, 5)
-#' s <- fastsvd(x, ncomp = 2, backend = "cpu", method = "rsvd", seed = 1)
-#' s$d
+#' s64 <- fastsvd(x, ncomp = 2, backend = "cpu", seed = 1)
+#' s64$d
+#'
+#' x32 <- float::fl(x)
+#' s32 <- fastsvd(x32, ncomp = 2, backend = "cpu", seed = 1)
+#' s32$d
 #' @export
 fastsvd <- function(x, nu = NULL, nv = NULL, ncomp = NULL, backend = NULL,
-    method = "rsvd", oversample = 32L, power = 5L, seed = 1L) {
+    n.cores = NULL,
+    oversample = 32L, power = 5L, seed = 1L) {
+    n.cores <- .fastpls_apply_cpu_cores(n.cores)
     supplied <- c(if (!missing(oversample)) "rsvd_oversample",
         if (!missing(power)) "rsvd_power")
-    config <- .fastsvd_configuration(x, nu, nv, ncomp, backend, method,
+    config <- .fastsvd_configuration(x, nu, nv, ncomp, backend,
         oversample,
         power, supplied)
     out <- .fastsvd_compute(x, config, seed)
@@ -7888,13 +8198,8 @@ fastsvd <- function(x, nu = NULL, nv = NULL, ncomp = NULL, backend = NULL,
     if (!is.null(v) && ncol(v) > config$nv) {
         v <- v[, seq_len(config$nv), drop = FALSE]
     }
-    diagnostics <- .fastsvd_numerical_diagnostics(x, out,
-        randomized = config$method ==
-            "rsvd")
-    if (config$method == "rsvd") {
-        diagnostics <- .fastsvd_audit_diagnostics(diagnostics, out, config,
-            seed)
-    }
+    diagnostics <- .fastsvd_numerical_diagnostics(x, out, randomized = TRUE)
+    diagnostics <- .fastsvd_audit_diagnostics(diagnostics, out, config, seed)
     .fastsvd_result(out, u, v, config, diagnostics)
 }
 
@@ -8809,7 +9114,8 @@ plot.permutation <- function(
         model$Yfit <- predict(
             model,
             context$Xtrain,
-            backend = context$backend
+            backend = context$backend,
+            n.cores = config$n.cores
         )$Ypred
     }
     if (!is.null(context$Xtest)) {
@@ -8819,7 +9125,8 @@ plot.permutation <- function(
             context$Xtest,
             Ytest = context$Ytest,
             proj = config$proj,
-            backend = context$backend
+            backend = context$backend,
+            n.cores = config$n.cores
         )
         model <- c(model, predicted)
         class(model) <- original_class
@@ -8856,6 +9163,7 @@ plot.permutation <- function(
         fit = config$fit,
         proj = config$proj,
         classifier = context$classifier,
+        n.cores = config$n.cores,
         lda_ridge = config$lda_ridge,
         return_variance = config$return_variance
     )
@@ -9097,7 +9405,8 @@ plot.permutation <- function(
                 fit,
                 context$Xtest,
                 context$Ytest,
-                backend = "cpu"
+                backend = "cpu",
+                n.cores = config$n.cores
             )
             list(r2 = fit$R2Y, q2 = predicted$Q2Y, error = NA_character_)
         },
@@ -9173,7 +9482,8 @@ plot.permutation <- function(
                 as.matrix(context$Xtest),
                 context$Ytest,
                 proj = config$proj,
-                backend = "cpu"
+                backend = "cpu",
+                n.cores = config$n.cores
             )
         )
         if (config$perm.test) {
@@ -9182,7 +9492,8 @@ plot.permutation <- function(
     }
     if (cpu$response$classification && config$fit) {
         class(model) <- "fastPLS"
-        model$Yfit <- predict.fastPLS(model, cpu$X, backend = "cpu")$Ypred
+        model$Yfit <- predict.fastPLS(model, cpu$X, backend = "cpu",
+            n.cores = config$n.cores)$Ypred
     }
     class(model) <- "fastPLS"
     model
@@ -9232,114 +9543,36 @@ plot.permutation <- function(
 #' model can include predictions for held-out samples, latent scores, fitted
 #' values, variance summaries, and optional classification heads.
 #'
-#' The compiled CPU backend uses Apple Accelerate by default on macOS. Linux
-#' and Windows prefer OpenBLAS when it is available and otherwise use the
-#' BLAS/LAPACK supplied by R. Eligible products can use several CPU cores when
-#' the selected library supports runtime thread control, but the SIMPLS
-#' deflation sequence remains serial and additional threads are not guaranteed
-#' to reduce runtime. Use [fastPLS_blas()] to identify the library selected at
-#' compilation.
+#' @details The CPU backend uses Apple Accelerate on macOS, prefers OpenBLAS
+#'   when available on Linux and Windows, and otherwise uses the numerical
+#'   libraries supplied by R. Use [fastPLS_blas()] to report the library chosen
+#'   at compilation. `options(n.cores = n)` requests CPU threads when supported
+#'   by that library; additional threads are not guaranteed to improve every
+#'   fit.
 #'
-#' Supplying `float::float32` predictors or responses requests single-precision
-#' execution without silent promotion to double. Float32 is route-specific,
-#' however, rather than a package-wide speed or memory guarantee. CPU, CUDA,
-#' and Metal rSVD PLS-SVD and SIMPLS have current route-level validation.
-#' CUDA provides fully device-resident float32 and float64 routes for all four
-#' PLS families. `backend = "metal"` is a float32 Apple-silicon route. It
-#' uses one operation-split implementation rather than selecting a complete
-#' CPU or Metal estimator from dataset dimensions. CPU code handles
-#' preprocessing, QR and reduced decompositions, sequential orthogonalization,
-#' deflation bookkeeping, LDA, and coefficient assembly. Persistent Metal
-#' workspaces handle fitting products involving the training sample matrix,
-#' including
-#' explicit cross-covariance formation, fused score/loading products, and
-#' randomized range-finder products for an implicit cross-covariance operator.
-#' CPU code retains the smaller cross-covariance and component-state products.
-#' Prediction uses the compact host
-#' factors. Its CPU/Metal assignment is independent of dataset shape. Apple
-#' GPUs do not provide the native float64 arithmetic required here.
+#'   Base R numeric matrices use float64. Supplying `float::float32` predictors
+#'   or numeric responses requests float32 execution without silent promotion.
+#'   CUDA supports float32 and float64. The Apple Metal route requires float32
+#'   and divides work between CPU code and persistent Metal workspaces.
+#'   Unsupported backend and precision combinations stop rather than silently
+#'   falling back to CPU.
 #'
-#' Float64 remains the baseline precision. Raw float32 matrices require about
-#' half the input storage, but paired tests show route-dependent runtime,
-#' incremental host RSS, and device-memory behavior. `pls()` therefore warns
-#' for experimental or measured-risk regimes, including nonlinear kernels
-#' and extreme multivariate responses. For
-#' numeric responses with at least 10,000 columns and at least 50 components,
-#' PLS-SVD and SIMPLS-derived routes warn about observed performance, memory,
-#' or precision risk in regimes for which current validation remains limited.
-#' Unsupported combinations stop before allocation.
+#'   `method` selects PLS-SVD, SIMPLS, OPLS, or kernel PLS. Classification can
+#'   use response-score argmax or LDA on latent scores. PLS-SVD classification
+#'   cannot return more than one fewer component than the number of response
+#'   classes. The requested model family is never silently replaced by another
+#'   family.
 #'
-#' For a factor response with \eqn{C} levels, centred dummy coding has rank at
-#' most \eqn{C-1}; consequently, \code{method = "plssvd"} caps the effective
-#' component count at \eqn{C-1}. The requested PLS estimator is always
-#' enforced: `method = "simpls"` fits SIMPLS and `method = "plssvd"` fits
-#' PLS-SVD. If a large CUDA classification response would exceed the guarded
-#' dense-indicator path, SIMPLS stops with a clear error rather than silently
-#' substituting PLS-SVD. CUDA SIMPLS-LDA uses SIMPLS latent scores.
+#'   All public PLS routes use randomized SVD. It is an approximate solver, and
+#'   `diagnostics` records the effective controls and structural checks for the
+#'   fitted route. Compare repeated seeds or an independent high-accuracy fit
+#'   when results are close to a decision boundary or the data are strongly
+#'   ill-conditioned. Explicit `oversample`, `power`, and `seed` values supplied
+#'   through `...` override the automatic controls.
 #'
-#' The rSVD SIMPLS route is an approximate execution of the de Jong component
-#' sequence. Component-wise CPU, CUDA, and Metal routes generate a fresh seeded
-#' sketch for each component from the current deflated cross-covariance
-#' operator. When the explicit
-#' predictor-response cross-covariance would exceed 512 MiB, CPU, Metal, and
-#' CUDA float64 use a fresh seeded rank-one randomized direction for
-#' every component; CUDA keeps the matrices and component state resident on the
-#' device. For massive float32 regression, CUDA can refresh up to eight fresh
-#' candidate directions at a time through component 64 and then returns to
-#' component-wise direction calculations. Eligible
-#' large CPU, CUDA, and Metal classification workloads can instead refresh a small block
-#' of candidates, which are accepted sequentially by the standard SIMPLS
-#' orthogonalization and deflation updates. This block route preserves the
-#' supervised update geometry but is not claimed to reproduce a fresh dominant-
-#' direction solve after every deflation. PLS-SVD uses 32 oversampling
-#' directions and five power iterations by default. For ordinary matrix shapes,
-#' accelerated SIMPLS, OPLS, and kernel-PLS use 32 directions and five power
-#' iterations. When the explicit cross-covariance exceeds 512 MiB, the
-#' SIMPLS-family profile requests `oversample = 12` and `power = 1`; the
-#' executed refresh width and effective controls are recorded separately in
-#' `diagnostics`.
-#' Explicit controls supplied through `...` override this
-#' policy. `fastsvd()` also uses 32 oversampling directions and five power
-#' iterations. Only native rSVD is available through the public interface.
-#'
-#' Like reference SIMPLS software, one fit supplies the sequential component
-#' path through the largest requested component count; fastPLS does not claim
-#' this path construction as a novelty. Additional optimizations include cached
-#' rank-one deflation products, incremental coefficient and fitted-value
-#' updates, conditional cross-product caching, compact latent prediction, and
-#' matrix-free cross-covariance products. When the response dimension is no
-#' larger than the predictor dimension and is at most 512, the randomized
-#' direction calculation can operate through the response-side Gram matrix
-#' `S' S`. After each accepted SIMPLS component this smaller matrix receives a
-#' rank-one update, avoiding repeated tall cross-covariance sketches while
-#' retaining the same subsequent orthogonalization and deflation sequence.
-#'
-#' Randomized SVD is an approximate solver. The returned `diagnostics`
-#' performs inexpensive structural checks for finite latent factors and the
-#' requested effective component count. These checks do not establish agreement
-#' with an independent reference fit. Use an independent reference for
-#' confirmatory
-#' inference,
-#' coefficient or subspace interpretation, ill-conditioned or rank-deficient
-#' matrices, slowly decaying singular spectra, or whenever repeated rSVD seeds
-#' give materially different predictions. The package validation treats an
-#' rSVD approximation as outside the numerical screen when relative prediction
-#' or score error exceeds 0.01, the corresponding correlation is below 0.995,
-#' a latent-subspace angle exceeds 0.1 degrees, classification-label agreement
-#' is below 0.995, or the absolute predictive-metric difference exceeds 0.005
-#' relative to a matched independent high-accuracy fit.
-#'
-#' @details For latent-space LDA, the pooled covariance is computed as
-#'   \eqn{(T^T T - \sum_c n_c \mu_c \mu_c^T) / \max(1, n-C)} without creating
-#'   centered class blocks. Class coefficients are obtained by Cholesky
-#'   factorization and triangular solves, never by explicit covariance
-#'   inversion. Let \eqn{s = \mathrm{trace}(\Sigma)/q}, with \eqn{s=1} when the
-#'   scale is non-finite or non-positive. The implementation tries
-#'   \eqn{\lambda=\rho s} for \eqn{\rho} equal to \code{1e-8}, \code{1e-6},
-#'   \code{1e-5}, \code{1e-4}, \code{1e-3}, and \code{1e-2}, in that order, and
-#'   advances only after Cholesky failure. This is a deterministic numerical
-#'   fallback, not a fitted hyperparameter. Prediction uses
-#'   \eqn{t^T w_c - 0.5\mu_c^T w_c + \log(n_c/n)}.
+#'   LDA uses a regularized pooled within-class covariance calculation with
+#'   Cholesky solves. Regularization increases through a fixed internal sequence
+#'   only when factorization fails and is not user-tuned.
 #'
 #' @param Xtrain Numeric training predictor matrix, a `float::float32`
 #'   predictor matrix for the supported float32 route, or a
@@ -9362,9 +9595,6 @@ plot.permutation <- function(
 #' @param classifier Classification decision rule. \code{argmax} keeps the
 #'   standard PLS-DA response-score argmax. \code{lda} fits a regularized LDA
 #'   classifier on the PLS latent scores.
-#' @param lda_ridge Deprecated compatibility argument. It is ignored and emits
-#'   a warning when supplied. PLS-LDA uses a fixed, scale-normalized Cholesky
-#'   fallback sequence rather than a user-tuned ridge.
 #' @param fit Return fitted values and `R2Y` when `TRUE`.
 #' @param bycol For matrix-valued regression responses, calculate response-wise
 #'   metrics in `metrics`. The default `FALSE` returns only aggregate metrics.
@@ -9388,9 +9618,12 @@ plot.permutation <- function(
 #'   \code{cuda} for CUDA-native fitting, or \code{metal} for operation-split
 #'   float32 CPU/Metal fitting on Apple silicon. When omitted,
 #'   `options(backend = ...)`
-#'   defines the session default. For CPU execution, `options(cores = n)`
-#'   requests `n` BLAS/OpenMP threads. Selecting unavailable CUDA or Metal
+#'   defines the session default. Selecting unavailable CUDA or Metal
 #'   support raises an error without a CPU fallback.
+#' @param n.cores Number of CPU cores requested for supported BLAS/OpenMP host
+#'   operations. An explicit value takes precedence over
+#'   `options(n.cores = ...)`. CUDA and Metal device parallelism is managed by
+#'   their native runtimes; `n.cores` applies only to their host-side stages.
 #' @param north Number of orthogonal components removed by OPLS.
 #'   The predictive count `ncomp` must fit within the predictor rank remaining
 #'   after filtering. Requests above this bound raise an error, including
@@ -9514,16 +9747,16 @@ pls <- function(Xtrain, Ytrain, Xtest = NULL, Ytest = NULL, ncomp = 2,
     scaling = c("centering",
         "autoscaling", "none"), method = c("simpls", "plssvd", "opls",
         "kernelpls"),
-    classifier = c("argmax", "lda"), lda_ridge = NULL,
+    classifier = c("argmax", "lda"),
     fit = FALSE, bycol = FALSE, return_variance = TRUE,
     return_loadings = FALSE,
-    proj = FALSE, perm.test = FALSE, times = 100, backend = NULL, north = 1L,
+    proj = FALSE, perm.test = FALSE, times = 100, backend = NULL,
+    n.cores = NULL, north = 1L,
     kernel = c("linear",
         "rbf", "poly"), gamma = NULL, degree = 3L, coef0 = 1, ...) {
+    n.cores <- .fastpls_apply_cpu_cores(n.cores)
     dots <- list(...)
     .reject_removed_svd_method(dots, "pls()")
-    lda_ridge <- .resolve_deprecated_lda_ridge(lda_ridge, !missing(lda_ridge),
-        "pls()")
     if (.is_single_pls_cv_result(Xtrain)) {
         cv_Xtest <- if (!missing(Ytrain) && missing(Xtest)) {
             Ytrain
@@ -9538,7 +9771,8 @@ pls <- function(Xtrain, Ytrain, Xtest = NULL, Ytest = NULL, ncomp = 2,
             Ytest = if (missing(Ytest)) NULL else Ytest,
             fit = fit, bycol = bycol, return_variance = return_variance,
             return_loadings = return_loadings,
-            proj = proj, perm.test = perm.test, times = times))
+            proj = proj, perm.test = perm.test, times = times,
+            n.cores = n.cores))
     }
     ncomp <- .fastpls_validate_ncomp(ncomp)
     north <- .fastpls_validate_integer_control(north, "north", 0L)
@@ -9562,10 +9796,11 @@ pls <- function(Xtrain, Ytrain, Xtest = NULL, Ytest = NULL, ncomp = 2,
             kernel = component_kernel
         )$ncomp
     }
-    config <- list(ncomp = ncomp, lda_ridge = lda_ridge, fit = fit,
+    config <- list(ncomp = ncomp,
+        lda_ridge = .fixed_lda_relative_ridge, fit = fit,
         bycol = bycol,
         return_variance = return_variance, return_loadings = return_loadings,
-        proj = proj,
+        proj = proj, n.cores = n.cores,
         perm.test = perm.test, times = times, north = north,
         kernel = kernel,
         gamma = gamma, degree = degree, coef0 = coef0)
@@ -9576,41 +9811,38 @@ pls <- function(Xtrain, Ytrain, Xtest = NULL, Ytest = NULL, ncomp = 2,
 .cv_best_index <- function(metrics, selection_metric = "auto") {
     selection_metric <- .cv_normalize_selection_metric(selection_metric)
     values <- as.numeric(metrics$metric_value)
-    metric_names <- tolower(as.character(metrics$metric_name))
+    metric_names <- vapply(
+        as.character(metrics$metric_name),
+        .cv_metric_key,
+        character(1L)
+    )
     finite <- is.finite(values)
     if (!any(finite)) {
         return(1L)
     }
     if (!identical(selection_metric, "auto")) {
-        target_names <- switch(
-            selection_metric,
-            accuracy = "accuracy",
-            balanced_accuracy = "balanced_accuracy",
-            r2 = "r2",
-            q2 = "q2",
-            rmsd = c("rmsd", "rmse"),
-            character(0)
-        )
-        finite <- finite & metric_names %in% target_names
+        finite <- finite & metric_names == selection_metric
         if (!any(finite)) {
             available_metrics <- paste(unique(metric_names), collapse = ", ")
             message_format <- paste0(
-                "selection_metric = '%s' is unavailable in these CV results. ",
+                "selection = '%s' is unavailable in these CV results. ",
                 "Available metrics: %s."
             )
             stop(
                 sprintf(
                     message_format,
-                    selection_metric,
+                    .cv_selection_label(selection_metric),
                     available_metrics
                 ),
                 call. = FALSE
             )
         }
     }
-    loss_metric <- any(
-        metric_names[finite] %in% c("rmsd", "rmse", "mae", "mse")
-    )
+    loss_metric <- if (identical(selection_metric, "auto")) {
+        any(vapply(metric_names[finite], .cv_selection_is_loss, logical(1L)))
+    } else {
+        .cv_selection_is_loss(selection_metric)
+    }
     idx <- if (loss_metric) {
         which.min(ifelse(finite, values, Inf))
     } else {
@@ -9649,7 +9881,7 @@ pls <- function(Xtrain, Ytrain, Xtest = NULL, Ytest = NULL, ncomp = 2,
     if (isTRUE(classification)) {
         return(1L)
     }
-    switch(metric, r2 = 2L, q2 = 3L, rmsd = 4L, auto = 4L, 4L)
+    switch(metric, r2y = 2L, q2y = 3L, rmsd = 4L, auto = 4L, 4L)
 }
 
 .cv_grid_choice_values <- function(
@@ -9809,7 +10041,7 @@ pls <- function(Xtrain, Ytrain, Xtest = NULL, Ytest = NULL, ncomp = 2,
         as.character))
 }
 
-.cv_scalar_grid <- function(north, gamma, degree, coef0, xprod) {
+.cv_scalar_grid <- function(north, gamma, degree, coef0) {
     list(
         north = .cv_grid_scalar_values(
             north,
@@ -9829,8 +10061,7 @@ pls <- function(Xtrain, Ytrain, Xtest = NULL, Ytest = NULL, ncomp = 2,
             name = "coef0",
             cast = as.numeric,
             allow_null = FALSE
-        ),
-        xprod = .cv_grid_scalar_values(xprod, name = "xprod")
+        )
     )
 }
 
@@ -9838,7 +10069,7 @@ pls <- function(Xtrain, Ytrain, Xtest = NULL, Ytest = NULL, ncomp = 2,
     method_missing,
     backend, backend_missing, svd.method, svd_missing, north, kernel,
     kernel_missing,
-    gamma, degree, coef0, classifier, classifier_missing, xprod, dots = list(),
+    gamma, degree, coef0, classifier, classifier_missing, dots = list(),
     context = "cross-validation") {
     dots <- .cv_normalize_svd_grid_dots(dots, context = context)
     dots <- dots[setdiff(names(dots), "seed")]
@@ -9851,7 +10082,7 @@ pls <- function(Xtrain, Ytrain, Xtest = NULL, Ytest = NULL, ncomp = 2,
         backend, backend_missing, svd.method, svd_missing, kernel,
         kernel_missing,
         classifier, classifier_missing), .cv_scalar_grid(north, gamma, degree,
-        coef0, xprod), dot_params)
+        coef0), dot_params)
     configs <- .cv_expand_prediction_grid(params)
     dot_names <- names(dot_params)
     configs <- lapply(configs, function(cfg) {
@@ -9898,7 +10129,7 @@ pls <- function(Xtrain, Ytrain, Xtest = NULL, Ytest = NULL, ncomp = 2,
 }
 
 .cv_prune_config_for_output <- function(cfg) {
-keep <- c("scaling", "method", "backend", "classifier", "xprod")
+keep <- c("scaling", "method", "backend", "classifier")
     if (identical(cfg$method, "opls")) {
         keep <- c(keep, "north")
     }
@@ -10020,14 +10251,10 @@ keep <- c("scaling", "method", "backend", "classifier", "xprod")
     unique(unlist(vals[nonnull], recursive = FALSE, use.names = FALSE))
 }
 
-.single_cv_selection <- function(selection_metric, missing_metric, dots) {
-    from_dots <- .cv_selection_metric_from_dots(dots)
-    if (missing_metric) {
-        return(from_dots)
-    }
+.single_cv_selection <- function(selection, dots) {
     list(
-        metric = .cv_normalize_selection_metric(selection_metric),
-        dots = from_dots$dots
+        metric = .cv_normalize_selection_metric(selection),
+        dots = dots
     )
 }
 
@@ -10051,8 +10278,8 @@ keep <- c("scaling", "method", "backend", "classifier", "xprod")
             classifier = config$classifier,
             fit = parameters$fit,
             bycol = parameters$bycol,
-            xprod = config$xprod,
-            selection_metric = selection_metric
+            selection = selection_metric,
+            n.cores = parameters$n.cores
         ),
         config$svd_dots
     )
@@ -10183,7 +10410,7 @@ keep <- c("scaling", "method", "backend", "classifier", "xprod")
             result$balanced_accuracy,
             "balanced_accuracy"
         ),
-        q2 = .cv_metric_frame(result$Q2Y, "q2"),
+        q2y = .cv_metric_frame(result$Q2Y, "Q2Y"),
         stop(
             "Shared classifier tuning received an unsupported metric.",
             call. = FALSE
@@ -10193,7 +10420,7 @@ keep <- c("scaling", "method", "backend", "classifier", "xprod")
     selected <- as.numeric(selection$metric_value)
     result$best_ncomp <- as.integer(result$ncomp[[index]])
     result$best_index <- index
-    result$selection_metric <- selection_metric
+    result$selection_metric <- .cv_selection_label(selection_metric)
     result$selection_metrics <- selection
     result$selection_values <- selected
     result$best_metric_name <- .cv_metric_name_at(selection, index)
@@ -10218,7 +10445,10 @@ keep <- c("scaling", "method", "backend", "classifier", "xprod")
         if (handled[[index]]) next
         config <- grid[[index]]
         partner <- integer(0)
-        if (classification && config$classifier %in% c("argmax", "lda")) {
+        if (classification && config$classifier %in% c("argmax", "lda") &&
+            selection_metric %in% c(
+                "auto", "accuracy", "balanced_accuracy", "q2y"
+            )) {
             opposite <- if (identical(config$classifier, "argmax")) {
                 "lda"
             } else {
@@ -10325,7 +10555,7 @@ keep <- c("scaling", "method", "backend", "classifier", "xprod")
 }
 
 .single_cv_context <- function(Xdata, Ydata, constrain, config, seed,
-    selection_metric) {
+    selection_metric, n.cores) {
     backend <- .normalize_public_backend(config$backend)
     control <- .resolve_svd_control(
         svd.method = config$svd.method,
@@ -10367,7 +10597,8 @@ keep <- c("scaling", "method", "backend", "classifier", "xprod")
         control = control,
         float32 = float32,
         classification = is.factor(Ydata) || is.character(Ydata),
-        selection_metric = selection_metric
+        selection_metric = selection_metric,
+        n.cores = n.cores
     )
 }
 
@@ -10383,6 +10614,7 @@ keep <- c("scaling", "method", "backend", "classifier", "xprod")
         scaling = config$scaling,
         method = config$method,
         backend = context$backend,
+        n.cores = context$n.cores,
         svd.method = control$svd.method,
         rsvd_oversample = control$rsvd_oversample,
         rsvd_power = control$rsvd_power,
@@ -10475,27 +10707,32 @@ keep <- c("scaling", "method", "backend", "classifier", "xprod")
 }
 
 .single_cv_attach_selection <- function(result, context, paths) {
+    metric_for_cv <- if (identical(context$selection_metric, "r2y")) {
+        "auto"
+    } else {
+        context$selection_metric
+    }
     selection <- .cv_selection_metrics(
         result,
         context$Y,
         context$classification,
-        context$selection_metric
+        metric_for_cv
     )
-    native_metric <- context$selection_metric %in% c("auto", "accuracy") ||
+    native_metric <- metric_for_cv %in% c("auto", "accuracy") ||
         (!context$classification &&
-            context$selection_metric %in% c("q2", "rmsd", "r2"))
+            metric_for_cv %in% c("q2y", "rmsd"))
     native_index <- as.integer(result$native_best_index %||% NA_integer_)
     index <- if (native_metric && length(native_index) == 1L &&
         is.finite(native_index) && native_index >= 1L &&
         native_index <= nrow(selection)) {
         native_index
     } else {
-        .cv_best_index(selection, context$selection_metric)
+        .cv_best_index(selection, metric_for_cv)
     }
     selected <- as.numeric(selection$metric_value)
     result$best_ncomp <- as.integer(result$ncomp[[index]])
     result$best_index <- index
-    result$selection_metric <- context$selection_metric
+    result$selection_metric <- .cv_selection_label(context$selection_metric)
     result$selection_metrics <- selection
     result$selection_values <- selected
     result$best_metric_name <- .cv_metric_name_at(selection, index)
@@ -10546,6 +10783,7 @@ keep <- c("scaling", "method", "backend", "classifier", "xprod")
         scaling = config$scaling,
         method = config$method,
         backend = context$backend,
+        n.cores = context$n.cores,
         svd.method = control$svd.method,
         rsvd_oversample = control$rsvd_oversample,
         rsvd_power = control$rsvd_power,
@@ -10563,6 +10801,17 @@ keep <- c("scaling", "method", "backend", "classifier", "xprod")
     training <- .single_cv_training_fit(context, result, fit)
     result$R2Y <- training$R2Y
     result$Yfit <- training$Yfit
+    if (identical(context$selection_metric, "r2y")) {
+        selection <- .cv_metric_frame(as.numeric(result$R2Y), "R2Y")
+        index <- .cv_best_index(selection, "r2y")
+        result$best_ncomp <- as.integer(result$ncomp[[index]])
+        result$best_index <- index
+        result$selection_metric <- "R2Y"
+        result$selection_metrics <- selection
+        result$selection_values <- as.numeric(selection$metric_value)
+        result$best_metric_name <- "R2Y"
+        result$best_metric_value <- selection$metric_value[[index]]
+    }
     result$Ypred_optim <- .cv_extract_prediction_at(
         result,
         result$best_index
@@ -10595,8 +10844,8 @@ keep <- c("scaling", "method", "backend", "classifier", "xprod")
 #'
 #' Performs grouped k-fold or leave-one-out cross-validation over candidate
 #' component counts and, when vector-valued predictive arguments are supplied,
-#' over a compact hyperparameter grid. The selection can be based on
-#' cross-validated accuracy, balanced accuracy, R2, Q2, or RMSD.
+#' over a compact hyperparameter grid. Selection uses a task-appropriate metric
+#' returned by [evaluate()] or the fitted-response R2Y path.
 #'
 #' @inheritParams pls
 #' @param Xdata Predictor matrix.
@@ -10619,37 +10868,39 @@ keep <- c("scaling", "method", "backend", "classifier", "xprod")
 #'   \code{metal}. Multiple values are treated as a tuning grid. Metal requires
 #'   float32 input and uses fixed CPU/Metal operation splitting with CPU fold
 #'   orchestration and prediction. When omitted,
-#'   `options(backend = ...)` defines the session default; `options(cores = n)`
-#'   controls the CPU thread request. Every requested backend must be available;
+#'   `options(backend = ...)` defines the session default. Every requested
+#'   backend must be available;
 #'   unavailable accelerator entries raise an error instead of using CPU.
 #' @param seed Random seed used for fold assignment and randomized SVD steps.
 #' @param gamma Kernel scale. Defaults internally to `1 / ncol(Xdata)`. For
 #'   \code{method = "kernelpls"}, multiple values are treated as a tuning grid.
 #' @param classifier Classification rule for factor responses: `"argmax"` or
 #'   latent-space `"lda"`. Multiple values are treated as a tuning grid.
-#' @param lda_ridge Deprecated compatibility argument. It is ignored and emits
-#'   a warning when supplied. LDA regularization follows the fixed numerical
-#'   fallback sequence documented in [pls()].
 #' @param fit Fit one additional model on the full dataset and return its
 #'   fitted values (`Yfit`) and training `R2Y` path. The default is `TRUE` for
 #'   backward compatibility. Set to `FALSE` to skip this extra full-data fit;
 #'   held-out cross-validated `Q2Y` and `RMSD` are still calculated.
+#'   Selecting `R2Y` overrides `fit = FALSE` because fitted responses are
+#'   required for that criterion.
 #' @param bycol For matrix-valued regression responses, calculate response-wise
 #'   metrics in the returned `metrics` list. The default `FALSE` returns only
 #'   aggregate metrics.
-#' @param selection_metric Metric used to select predictive settings from
-#'   held-out folds. Use `"auto"` (accuracy for classification and RMSD for
-#'   regression), `"accuracy"`, `"balanced_accuracy"`, `"r2"`, `"q2"`, or
-#'   `"rmsd"`. For numeric responses, `"r2"` is calculated from held-out
-#'   predictions relative to the mean of all observed responses, whereas
-#'   `"q2"` uses the corresponding fold-training response mean. The
-#'   full-data training `R2Y` returned when `fit = TRUE` is descriptive and is
-#'   not used for component selection. Classification can use accuracy,
-#'   balanced accuracy, or dummy-response Q2, but not training R2. Balanced
-#'   accuracy is the unweighted mean of class-specific recalls and is
-#'   appropriate when class frequencies are unequal.
-#' @param xprod Use the matrix-free cross-product route where available.
-#'   `NULL` applies fastPLS defaults.
+#' @param selection Metric used to select settings. `"auto"` uses accuracy for
+#'   classification and RMSD for regression. Classification also supports
+#'   `"balanced_accuracy"`, `"lift_accuracy"`, `"macro_precision"`,
+#'   `"macro_recall"`, `"macro_f1"`, `"kappa"`, `"R2Y"`, and `"Q2Y"`.
+#'   Regression also supports `"R2Y"`, `"Q2Y"`, `"RMSD"`, `"MAE"`,
+#'   `"MAPE_percent"`, `"RPD"`, `"Pearson_r"`, and
+#'   `"Spearman_r"`. R2Y uses a model fitted to the complete supplied dataset
+#'   and therefore forces `fit = TRUE`; as a training criterion, it is usually
+#'   less suitable for complexity selection than a held-out criterion. Q2Y
+#'   uses out-of-fold predictions and each fold's training-response mean. The
+#'   remaining metrics use the aggregate definitions in [evaluate()] on the
+#'   out-of-fold predictions. RMSD, MAE, and MAPE_percent are
+#'   minimized; all other criteria are maximized. Classification R2Y and Q2Y
+#'   operate on dummy-coded responses, not decoded labels. Incompatible
+#'   task/metric combinations raise an error before fitting. The former names
+#'   `"r2"` and `"q2"` are rejected as ambiguous.
 #' @param ... Optional SVD tuning controls forwarded to the selected backend.
 #'   Use the same compact names documented in [fastsvd()], such as
 #'   `oversample` and `power`. Vector values are included in the tuning grid.
@@ -10735,16 +10986,14 @@ pls.single.cv <- function(Xdata, Ydata, ncomp = 2, constrain = NULL,
     scaling = c("centering",
         "autoscaling", "none"), method = c("simpls", "plssvd", "opls",
         "kernelpls"),
-    backend = NULL, seed = 1L, kfold = 10,
+    backend = NULL, n.cores = NULL, seed = 1L, kfold = 10,
     north = 1L,
     kernel = c("linear", "rbf", "poly"), gamma = NULL, degree = 3L, coef0 = 1,
-    classifier = c("argmax", "lda"), lda_ridge = NULL, fit = TRUE,
-    bycol = FALSE,
-    xprod = NULL, selection_metric = "auto", ...) {
+    classifier = c("argmax", "lda"), fit = TRUE, bycol = FALSE,
+    selection = "auto", ...) {
+    n.cores <- .fastpls_apply_cpu_cores(n.cores)
     dots <- list(...)
     .reject_removed_svd_method(dots, "pls.single.cv()")
-    .resolve_deprecated_lda_ridge(lda_ridge, !missing(lda_ridge),
-        "pls.single.cv()")
     if (sum(is.na(Xdata)) > 0) {
         stop("Missing values are present")
     }
@@ -10761,24 +11010,30 @@ pls.single.cv <- function(Xdata, Ydata, ncomp = 2, constrain = NULL,
         Ydata <- droplevels(factor(Ydata))
     }
     .fastpls_validate_cv_groups(constrain, nrow(Xdata))
-    selection <- .single_cv_selection(selection_metric,
-        missing(selection_metric),
-        dots)
+    selection <- .single_cv_selection(selection, dots)
+    selection$metric <- .cv_validate_selection_for_task(
+        selection$metric,
+        is.factor(Ydata)
+    )
+    if (identical(selection$metric, "r2y")) {
+        fit <- TRUE
+    }
     grid <- .cv_make_prediction_grid(scaling, missing(scaling), method,
         missing(method),
         backend, missing(backend), "cpu_rsvd", TRUE, north,
         kernel,
         missing(kernel), gamma, degree, coef0, classifier, missing(classifier),
-        xprod, selection$dots, "pls.single.cv()")
+        selection$dots, "pls.single.cv()")
     .cv_require_backends_available(grid, "pls.single.cv()")
     parameters <- list(Xdata = Xdata, Ydata = Ydata, ncomp = ncomp,
         constrain = constrain,
-        seed = seed, kfold = kfold, fit = fit, bycol = bycol)
+        seed = seed, kfold = kfold, fit = fit, bycol = bycol,
+        n.cores = n.cores)
     if (length(grid) > 1L) {
         return(.single_cv_run_grid(grid, parameters, selection$metric))
     }
     context <- .single_cv_context(Xdata, Ydata, constrain, grid[[1L]], seed,
-        selection$metric)
+        selection$metric, n.cores)
     result <- .single_cv_run_engine(context, ncomp, kfold)
     paths <- .single_cv_metric_paths(result, context)
     result <- .single_cv_attach_selection(result, context, paths)
@@ -10869,7 +11124,8 @@ pls.single.cv <- function(Xdata, Ydata, ncomp = 2, constrain = NULL,
     ncomp,
     grid,
     selection_metric,
-    seed
+    seed,
+    n.cores
 ) {
     base <- grid[[1L]]
     float32 <- .has_float32_input(Xdata, Ydata)
@@ -10897,6 +11153,7 @@ pls.single.cv <- function(Xdata, Ydata, ncomp = 2, constrain = NULL,
             Ydata
         ),
         seed = seed,
+        n.cores = n.cores,
         defaults = list(
             scaling = base$scaling,
             method = base$method,
@@ -10949,7 +11206,7 @@ pls.single.cv <- function(Xdata, Ydata, ncomp = 2, constrain = NULL,
             auto = 1L,
             accuracy = 1L,
             balanced_accuracy = 2L,
-            q2 = 3L,
+            q2y = 3L,
             stop("Unsupported classification selection metric.",
                 call. = FALSE)
         ))
@@ -10958,10 +11215,17 @@ pls.single.cv <- function(Xdata, Ydata, ncomp = 2, constrain = NULL,
         metric,
         auto = 4L,
         rmsd = 4L,
-        q2 = 3L,
-        r2 = 2L,
+        q2y = 3L,
         stop("Unsupported regression selection metric.", call. = FALSE)
     )
+}
+
+.double_cv_native_selection_supported <- function(metric, classification) {
+    if (classification) {
+        metric %in% c("auto", "accuracy", "balanced_accuracy", "q2y")
+    } else {
+        metric %in% c("auto", "q2y", "rmsd")
+    }
 }
 
 .double_cv_config_context <- function(context, base) {
@@ -11062,6 +11326,11 @@ pls.single.cv <- function(Xdata, Ydata, ncomp = 2, constrain = NULL,
         backend = switch(backend, cpu = 0L, metal = 2L),
         classification = context$response$classification
     )
+    selection_label <- if (identical(context$selection_metric, "auto")) {
+        if (context$response$classification) "accuracy" else "RMSD"
+    } else {
+        .cv_selection_label(context$selection_metric)
+    }
     native$results <- lapply(native$results, function(result) {
         if (context$response$classification) {
             result$Ypred <- factor(
@@ -11072,6 +11341,11 @@ pls.single.cv <- function(Xdata, Ydata, ncomp = 2, constrain = NULL,
         }
         result$backend <- backend
         result$method <- base$method
+        result$metric_name <- selection_label
+        result$inner <- lapply(result$inner, function(inner) {
+            inner$selection_metric <- selection_label
+            inner
+        })
         result
     })
     aggregate <- native$aggregate
@@ -11114,7 +11388,10 @@ pls.single.cv <- function(Xdata, Ydata, ncomp = 2, constrain = NULL,
     aggregate$bcomp <- as.character(aggregate$bcomp)
     aggregate$backend <- backend
     aggregate$method <- base$method
-    aggregate$selection_metric <- context$selection_metric
+    aggregate$selection_metric <- .cv_selection_label(
+        context$selection_metric
+    )
+    aggregate$metric_name <- rep(selection_label, length(native$results))
     aggregate
 }
 
@@ -11213,12 +11490,12 @@ pls.single.cv <- function(Xdata, Ydata, ncomp = 2, constrain = NULL,
             metric_name <- if (identical(
                 context$selection_metric, "balanced_accuracy"
             )) "balanced_accuracy" else if (identical(
-                context$selection_metric, "q2"
-            )) "q2" else "accuracy"
+                context$selection_metric, "q2y"
+            )) "Q2Y" else "accuracy"
             metric_value <- switch(
                 metric_name,
                 balanced_accuracy = balanced,
-                q2 = mean(fold_q2, na.rm = TRUE),
+                Q2Y = mean(fold_q2, na.rm = TRUE),
                 accuracy
             )
             return(list(
@@ -11249,18 +11526,15 @@ pls.single.cv <- function(Xdata, Ydata, ncomp = 2, constrain = NULL,
             prediction,
             context$response$data
         )$RMSD
-        metric_name <- if (context$selection_metric %in%
-            c("r2", "q2", "rmsd")) context$selection_metric else "rmsd"
+        metric_name <- if (identical(context$selection_metric, "q2y")) {
+            "Q2Y"
+        } else {
+            "RMSD"
+        }
         metric_value <- switch(
             metric_name,
-            r2 = .cv_metric_from_matrix(
-                context$response$data,
-                prediction,
-                Ytrain = context$response$data,
-                metric = "r2"
-            )$metric_value,
-            q2 = q2,
-            rmsd
+            Q2Y = q2,
+            RMSD = rmsd
         )
         list(
             Ypred = prediction,
@@ -11321,6 +11595,7 @@ pls.single.cv <- function(Xdata, Ydata, ncomp = 2, constrain = NULL,
             scaling = grid$scaling,
             method = grid$method,
             backend = grid$backend,
+            n.cores = context$n.cores,
             seed = as.integer(context$seed) + 1000L * run_index + fold_index,
             kfold = config$kfold_inner,
             north = grid$north,
@@ -11330,7 +11605,7 @@ pls.single.cv <- function(Xdata, Ydata, ncomp = 2, constrain = NULL,
             coef0 = grid$coef0,
             classifier = grid$classifier,
             bycol = config$bycol,
-            selection_metric = context$selection_metric
+            selection = context$selection_metric
         ),
         grid$svd_dots
     )
@@ -11392,6 +11667,7 @@ pls.single.cv <- function(Xdata, Ydata, ncomp = 2, constrain = NULL,
         fit = TRUE,
         proj = FALSE,
         backend = config$backend,
+        n.cores = context$n.cores,
         north = config$north,
         kernel = config$kernel,
         gamma = config$gamma,
@@ -11475,11 +11751,23 @@ pls.single.cv <- function(Xdata, Ydata, ncomp = 2, constrain = NULL,
     } else {
         NA_real_
     }
-    metric_name <- switch(
-        context$selection_metric,
-        balanced_accuracy = "balanced_accuracy",
-        q2 = "q2",
+    r2y <- if (any(is.finite(state$train_r2))) {
+        mean(state$train_r2, na.rm = TRUE)
+    } else {
+        NA_real_
+    }
+    metric <- if (identical(context$selection_metric, "auto")) {
         "accuracy"
+    } else {
+        context$selection_metric
+    }
+    metric_value <- switch(
+        metric,
+        accuracy = accuracy,
+        balanced_accuracy = balanced,
+        q2y = q2,
+        r2y = r2y,
+        .cv_evaluate_metric(response$original, prediction, metric)
     )
     list(
         Ypred = prediction,
@@ -11488,45 +11776,43 @@ pls.single.cv <- function(Xdata, Ydata, ncomp = 2, constrain = NULL,
         best_ncomp = state$best_comp,
         best_parameters = state$parameters,
         inner = state$inner,
-        metric_name = metric_name,
-        metric_value = switch(
-            metric_name,
-            balanced_accuracy = balanced,
-            q2 = q2,
-            accuracy
-        ),
+        metric_name = .cv_selection_label(metric),
+        metric_value = metric_value,
         accuracy = accuracy,
         balanced_accuracy = balanced,
         Q2Y = q2,
-        R2Y = if (any(is.finite(state$train_r2))) {
-            mean(state$train_r2, na.rm = TRUE)
-        } else {
-            NA_real_
-        },
+        R2Y = r2y,
         RMSD = NA_real_
     )
 }
 
 .double_cv_regression_run <- function(state, context) {
     response <- context$response$data
-    selection <- if (context$selection_metric %in% c("r2", "q2", "rmsd")) {
-        context$selection_metric
+    selection <- if (identical(context$selection_metric, "auto")) {
+        "rmsd"
     } else {
-        "auto"
+        context$selection_metric
     }
     q2 <- .fastpls_fold_q2_path(
         response,
         state$prediction,
         state$fold
     )[[1L]]
-    metric <- if (identical(selection, "q2")) {
-        list(metric_name = "q2", metric_value = q2)
+    r2y <- if (any(is.finite(state$train_r2))) {
+        mean(state$train_r2, na.rm = TRUE)
     } else {
-        .cv_metric_from_matrix(
-            response,
-            state$prediction,
-            Ytrain = response,
-            metric = selection
+        NA_real_
+    }
+    metric <- if (identical(selection, "q2y")) {
+        list(metric_name = "Q2Y", metric_value = q2)
+    } else if (identical(selection, "r2y")) {
+        list(metric_name = "R2Y", metric_value = r2y)
+    } else {
+        list(
+            metric_name = .cv_selection_label(selection),
+            metric_value = .cv_evaluate_metric(
+                response, state$prediction, selection
+            )
         )
     }
     list(
@@ -11539,11 +11825,7 @@ pls.single.cv <- function(Xdata, Ydata, ncomp = 2, constrain = NULL,
         metric_name = metric$metric_name,
         metric_value = metric$metric_value,
         Q2Y = q2,
-        R2Y = if (any(is.finite(state$train_r2))) {
-            mean(state$train_r2, na.rm = TRUE)
-        } else {
-            NA_real_
-        },
+        R2Y = r2y,
         RMSD = .cv_regression_q2_rmsd(
             response,
             state$prediction,
@@ -11659,14 +11941,16 @@ pls.single.cv <- function(Xdata, Ydata, ncomp = 2, constrain = NULL,
     output$bcomp <- names(which.max(table(components)))
     output$backend <- context$base$backend
     output$method <- context$base$method
-    output$selection_metric <- context$selection_metric
+    output$selection_metric <- .cv_selection_label(context$selection_metric)
     output
 }
 
 .double_cv_metric_values <- function(object, metric) {
-    heldout_r2 <- if (!is.null(object$results)) {
+    metric <- .cv_normalize_selection_metric(metric)
+    values <- if (!is.null(object$results)) {
         vapply(object$results, function(run) {
-            if (identical(tolower(run$metric_name %||% ""), "r2")) {
+            run_metric <- .cv_metric_key(run$metric_name %||% "")
+            if (identical(run_metric, metric)) {
                 as.numeric(run$metric_value)
             } else {
                 NA_real_
@@ -11675,20 +11959,11 @@ pls.single.cv <- function(Xdata, Ydata, ncomp = 2, constrain = NULL,
     } else {
         NULL
     }
-    values <- switch(
-        metric,
-        accuracy = object$accuracy,
-        balanced_accuracy = object$balanced_accuracy,
-        r2 = heldout_r2,
-        q2 = object$Q2Y,
-        rmsd = object$RMSD,
-        NULL
-    )
     if (is.null(values) || !length(values)) {
         stop(
             sprintf(
                 "Permutation metric '%s' is unavailable.",
-                metric
+                .cv_selection_label(metric)
             ),
             call. = FALSE
         )
@@ -11707,6 +11982,7 @@ pls.single.cv <- function(Xdata, Ydata, ncomp = 2, constrain = NULL,
         scaling = base$scaling,
         method = base$method,
         backend = base$backend,
+        n.cores = context$n.cores,
         rsvd_oversample = control$rsvd_oversample,
         rsvd_power = control$rsvd_power,
         seed = control$seed,
@@ -11721,7 +11997,7 @@ pls.single.cv <- function(Xdata, Ydata, ncomp = 2, constrain = NULL,
         coef0 = base$coef0,
         classifier = base$classifier,
         bycol = config$bycol,
-        selection_metric = context$selection_metric
+        selection = context$selection_metric
     )
 }
 
@@ -11737,7 +12013,7 @@ pls.single.cv <- function(Xdata, Ydata, ncomp = 2, constrain = NULL,
         .double_cv_metric_values(result, metric),
         na.rm = TRUE
     )
-    result$permutation_metric <- metric
+    result$permutation_metric <- .cv_selection_label(metric)
     result$permutation_observed <- observed
     result$permutation_sampled <- sampled
     result$permutation_unit <- if (
@@ -11758,13 +12034,13 @@ pls.single.cv <- function(Xdata, Ydata, ncomp = 2, constrain = NULL,
     result$permutation_completed <- sum(is.finite(sampled))
     result$permutation_failed <- times - result$permutation_completed
     result$permutation_errors <- errors
-    if (identical(metric, "q2")) {
+    if (identical(metric, "q2y")) {
         result$Q2Ysampled <- sampled
     }
     result$p.value <- .fastpls_permutation_pvalue(
         sampled,
         observed,
-        lower_tail = metric %in% c("rmsd", "rmse", "mae", "mse")
+        lower_tail = .cv_selection_is_loss(metric)
     )
     result
 }
@@ -11838,8 +12114,8 @@ pls.single.cv <- function(Xdata, Ydata, ncomp = 2, constrain = NULL,
 #'   CUDA uses the R coordinator around CUDA-native single-CV and outer-fit
 #'   kernels; supported CUDA fits do not substitute a CPU estimator. Metal uses
 #'   the same fixed operation split as `pls()`. When omitted,
-#'   `options(backend = ...)` defines the session default; `options(cores = n)`
-#'   controls the CPU thread request. Every requested backend must be available;
+#'   `options(backend = ...)` defines the session default. Every requested
+#'   backend must be available;
 #'   unavailable accelerator entries raise an error instead of using CPU.
 #' @param seed Random seed used for outer/inner fold assignment and randomized
 #'   SVD steps.
@@ -11848,14 +12124,22 @@ pls.single.cv <- function(Xdata, Ydata, ncomp = 2, constrain = NULL,
 #' @param bycol For matrix-valued regression responses, calculate response-wise
 #'   metrics in the returned `metrics` list. The default `FALSE` returns only
 #'   aggregate metrics.
-#' @param selection_metric Metric used by inner CV and by the permutation test.
-#'   Use `"auto"` (accuracy for classification and RMSD for regression),
-#'   `"accuracy"`, `"balanced_accuracy"`, `"r2"`, `"q2"`, or `"rmsd"`.
-#'   For numeric responses, `"r2"` is an observed-mean held-out endpoint and
-#'   `"q2"` uses fold-training response means. Training `R2Y` is descriptive
-#'   and is never optimized. Classification can use accuracy, balanced
-#'   accuracy, or dummy-response Q2, but not training R2. Balanced accuracy
-#'   gives each observed class equal weight.
+#' @param selection Metric used by inner CV and by the permutation test.
+#'   `"auto"` uses accuracy for classification and RMSD for regression.
+#'   Classification also supports `"balanced_accuracy"`, `"lift_accuracy"`,
+#'   `"macro_precision"`, `"macro_recall"`, `"macro_f1"`, `"kappa"`,
+#'   `"R2Y"`, and `"Q2Y"`. Regression also supports `"R2Y"`, `"Q2Y"`,
+#'   `"RMSD"`, `"MAE"`, `"MAPE_percent"`, `"RPD"`,
+#'   `"Pearson_r"`, and `"Spearman_r"`. R2Y uses fitted responses for inner
+#'   selection and is averaged across the selected outer training fits for the
+#'   reported endpoint; as a training criterion, it can favor more complex
+#'   models. Q2Y and the other predictive criteria use held-out predictions.
+#'   Q2Y uses fold-training response means; the remaining metrics use the
+#'   aggregate definitions in [evaluate()]. RMSD, MAE, and
+#'   MAPE_percent are minimized; all other criteria are maximized. R2Y and Q2Y
+#'   for classification operate on dummy-coded responses. Incompatible
+#'   task/metric combinations raise an error before fitting. The former names
+#'   `"r2"` and `"q2"` are rejected as ambiguous.
 #' @param perm.test Run a nested-CV permutation test. Independent rows are
 #'   permuted individually. With repeated `constrain` values, complete blocks
 #'   are exchanged only among groups with the same number of rows, preserving
@@ -11903,7 +12187,8 @@ pls.single.cv <- function(Xdata, Ydata, ncomp = 2, constrain = NULL,
 #'     selected outer-fold models.
 #'   * `RMSD`: one held-out RMSD value per repeated run for numeric responses;
 #'     `NA` for classification.
-#'   * `metric_name`: held-out metric used for each repeated run.
+#'   * `metric_name`: metric used for each repeated run. It is held-out unless
+#'     `selection = "R2Y"` explicitly requests the fitted-response criterion.
 #'   * `bcomp`: most frequently selected component count across outer folds and
 #'     repeated runs.
 #'   * `backend`, `method`: default backend and PLS method supplied to the call.
@@ -11948,23 +12233,15 @@ pls.double.cv <- function(Xdata, Ydata, ncomp = 2,
     constrain = seq_len(nrow(Xdata)),
     scaling = c("centering", "autoscaling", "none"), method = c("simpls",
         "plssvd",
-        "opls", "kernelpls"), backend = NULL,
+        "opls", "kernelpls"), backend = NULL, n.cores = NULL,
     seed = 1L, perm.test = FALSE, times = 100, runn = 1, kfold_inner = 10,
     kfold_outer = 10,
     north = 1L, kernel = c("linear", "rbf", "poly"), gamma = NULL, degree = 3L,
-    coef0 = 1, classifier = c("argmax", "lda"), lda_ridge = NULL,
-    bycol = FALSE,
-    selection_metric = "auto", ...) {
+    coef0 = 1, classifier = c("argmax", "lda"), bycol = FALSE,
+    selection = "auto", ...) {
+    n.cores <- .fastpls_apply_cpu_cores(n.cores)
     dots <- list(...)
     .reject_removed_svd_method(dots, "pls.double.cv()")
-    if ("xprod" %in% names(dots)) {
-        stop(
-            "xprod has been removed from pls.double.cv(); the compiled engine selects its numerical route automatically.",
-            call. = FALSE
-        )
-    }
-    .resolve_deprecated_lda_ridge(lda_ridge, !missing(lda_ridge),
-        "pls.double.cv()")
     if (sum(is.na(Xdata)) > 0) {
         stop("Missing values are present")
     }
@@ -11988,22 +12265,27 @@ pls.double.cv <- function(Xdata, Ydata, ncomp = 2,
         Ydata <- droplevels(factor(Ydata))
     }
     .fastpls_validate_cv_groups(constrain, nrow(Xdata))
-    selection <- .single_cv_selection(selection_metric,
-        missing(selection_metric),
-        dots)
+    selection <- .single_cv_selection(selection, dots)
+    selection$metric <- .cv_validate_selection_for_task(
+        selection$metric,
+        is.factor(Ydata)
+    )
     grid <- .cv_make_prediction_grid(scaling, missing(scaling), method,
         missing(method),
         backend, missing(backend), "cpu_rsvd", TRUE, north,
         kernel,
         missing(kernel), gamma, degree, coef0, classifier, missing(classifier),
-        NULL, selection$dots, "pls.double.cv()")
+        selection$dots, "pls.double.cv()")
     .cv_require_backends_available(grid, "pls.double.cv()")
     context <- .double_cv_context(Xdata, Ydata, constrain, ncomp, grid,
         selection$metric,
-        seed)
+        seed, n.cores)
     config <- list(kfold_inner = kfold_inner, kfold_outer = kfold_outer,
         bycol = bycol)
-    native_nested <- !any(vapply(
+    native_nested <- .double_cv_native_selection_supported(
+        selection$metric,
+        is.factor(Ydata)
+    ) && !any(vapply(
         grid,
         function(candidate) identical(candidate$backend, "cuda"),
         logical(1L)
@@ -12068,14 +12350,58 @@ pls.double.cv <- function(Xdata, Ydata, ncomp = 2,
     )
 }
 
-.evaluate_classification <- function(observed, predicted, top_k, na.rm) {
-    inputs <- .evaluate_class_inputs(observed, predicted, na.rm)
-    classes <- levels(inputs$observed)
+.evaluate_ranked_topk <- function(observed, ranked, levels_ref, keep) {
+    ranked <- as.matrix(ranked)
+    if (!ncol(ranked)) {
+        return(NULL)
+    }
+    observed_labels <- .evaluate_class_labels(observed, levels_ref)
+    if (nrow(ranked) != length(observed_labels)) {
+        stop(
+            "observed and ranked predictions must have the same number of samples.",
+            call. = FALSE
+        )
+    }
+    ranked_labels <- matrix(
+        as.character(ranked),
+        nrow = nrow(ranked),
+        ncol = ncol(ranked)
+    )
+    keep <- keep & !is.na(observed_labels) & !is.na(ranked_labels[, 1L])
+    classes <- unique(c(levels_ref, observed_labels, as.vector(ranked_labels)))
+    classes <- classes[!is.na(classes)]
+    observed_codes <- match(observed_labels[keep], classes)
+    ranked_codes <- matrix(
+        match(as.vector(ranked_labels[keep, , drop = FALSE]), classes),
+        nrow = sum(keep),
+        ncol = ncol(ranked_labels)
+    )
+    data.frame(
+        k = seq_len(ncol(ranked_codes)),
+        accuracy = evaluate_ranked_accuracy_cpp(
+            observed_codes,
+            ranked_codes
+        )
+    )
+}
+
+.evaluate_classification <- function(observed, predicted, na.rm,
+    ranked = NULL) {
     score <- NULL
-    score_observed <- integer()
     if ((is.matrix(predicted) || is.data.frame(predicted)) &&
         is.numeric(as.matrix(predicted))) {
         score <- as.matrix(predicted)
+    } else if ((is.matrix(predicted) || is.data.frame(predicted)) &&
+        ncol(predicted) > 1L) {
+        ranked <- predicted
+        predicted <- predicted[, 1L]
+    }
+    inputs <- .evaluate_class_inputs(observed, predicted, na.rm)
+    classes <- levels(inputs$observed)
+    score_observed <- integer()
+    top_k <- integer()
+    if (!is.null(score)) {
+        top_k <- seq_len(ncol(score))
         score_labels <- colnames(score) %||%
             inputs$levels %||% as.character(seq_len(ncol(score)))
         observed_labels <- .evaluate_class_labels(observed, score_labels)
@@ -12115,6 +12441,14 @@ pls.double.cv <- function(Xdata, Ydata, ncomp = 2,
         k = as.integer(top_k),
         accuracy = as.numeric(summary$top_accuracy)
     )
+    if (!is.null(ranked)) {
+        topk <- .evaluate_ranked_topk(
+            observed,
+            ranked,
+            inputs$levels %||% classes,
+            inputs$keep
+        )
+    }
     list(
         task = "classification",
         metrics = metrics,
@@ -12217,12 +12551,129 @@ pls.double.cv <- function(Xdata, Ydata, ncomp = 2,
     output
 }
 
+.evaluate_prediction_components <- function(predicted, classification) {
+    value <- predicted$Ypred
+    if (is.null(value)) {
+        stop("The prediction result does not contain Ypred.", call. = FALSE)
+    }
+    if (is.list(value) && !is.data.frame(value)) {
+        components <- value
+    } else if (isTRUE(classification) &&
+        (is.data.frame(value) || is.matrix(value))) {
+        components <- lapply(seq_len(ncol(value)), function(index) {
+            value[, index]
+        })
+        names(components) <- colnames(value)
+    } else if (is.array(value) && length(dim(value)) == 3L) {
+        components <- lapply(seq_len(dim(value)[3L]), function(index) {
+            value[, , index, drop = TRUE]
+        })
+        names(components) <- dimnames(value)[[3L]]
+    } else {
+        components <- list(value)
+    }
+    if (is.null(names(components)) || anyNA(names(components)) ||
+        any(!nzchar(names(components)))) {
+        names(components) <- paste0("component=", seq_along(components))
+    }
+    components
+}
+
+.evaluate_ranked_component <- function(predicted, name, index) {
+    ranked <- predicted$Ypred_top
+    if (is.null(ranked)) {
+        return(NULL)
+    }
+    if (is.list(ranked) && !is.data.frame(ranked)) {
+        if (!is.null(names(ranked)) && name %in% names(ranked)) {
+            return(ranked[[name]])
+        }
+        if (length(ranked) >= index) {
+            return(ranked[[index]])
+        }
+        return(NULL)
+    }
+    if (index == 1L) ranked else NULL
+}
+
+.evaluate_prediction_result <- function(observed, predicted, classification,
+    ytrain, bycol, relative_epsilon, na.rm) {
+    if (!classification) {
+        observed <- .float32_to_numeric_matrix(observed)
+        if (!is.null(ytrain)) {
+            ytrain <- .float32_to_numeric_matrix(ytrain)
+        }
+    }
+    components <- .evaluate_prediction_components(predicted, classification)
+    results <- lapply(seq_along(components), function(index) {
+        if (classification) {
+            .evaluate_classification(
+                observed,
+                components[[index]],
+                na.rm,
+                ranked = .evaluate_ranked_component(
+                    predicted,
+                    names(components)[[index]],
+                    index
+                )
+            )
+        } else {
+            .evaluate_regression(
+                observed,
+                .float32_to_numeric_matrix(components[[index]]),
+                ytrain,
+                bycol,
+                relative_epsilon,
+                na.rm
+            )
+        }
+    })
+    names(results) <- names(components)
+    if (length(results) == 1L) {
+        return(results[[1L]])
+    }
+    metrics <- do.call(rbind, lapply(results, function(result) {
+        result$metrics
+    }))
+    rownames(metrics) <- names(results)
+    list(
+        task = if (classification) "classification" else "regression",
+        metrics = metrics,
+        metric_definitions = results[[1L]]$metric_definitions,
+        by_component = results
+    )
+}
+
+.evaluate_prediction_is_classification <- function(observed, predicted) {
+    onehot <- (is.matrix(observed) || is.data.frame(observed)) &&
+        .evaluate_is_onehot(observed)
+    if (is.factor(observed) || is.character(observed) || onehot) {
+        return(TRUE)
+    }
+    probe <- if (is.list(predicted) && !is.data.frame(predicted) &&
+        !is.null(predicted$Ypred)) {
+        predicted$Ypred
+    } else {
+        predicted
+    }
+    if (is.factor(probe) || is.character(probe)) {
+        return(TRUE)
+    }
+    if (is.data.frame(probe) && ncol(probe)) {
+        return(is.factor(probe[[1L]]) || is.character(probe[[1L]]))
+    }
+    if (is.list(probe) && length(probe)) {
+        return(is.factor(probe[[1L]]) || is.character(probe[[1L]]))
+    }
+    FALSE
+}
+
 #' Evaluate prediction performance
 #'
 #' Computes common classification or regression performance metrics from
-#'  observed and predicted values. The function accepts two vectors, two
-#' matrices,
-#' or classification score matrices. For NMR-style multivariate regression, it
+#' observed and predicted values. The function accepts vectors, matrices,
+#' classification score/rank matrices, or complete fastPLS prediction results.
+#' For NMR-style multivariate regression, it
 #' reports RMSE/RMSD, R2, Q2, MAE, median relative error percentage, RPD, and
 #' correlations. For classification, it reports accuracy, balanced accuracy,
 #' macro precision, macro recall, macro F1, Cohen's kappa, and the confusion
@@ -12234,27 +12685,25 @@ pls.double.cv <- function(Xdata, Ydata, ncomp = 2,
 #'   classification, a numeric vector/matrix for regression, or a one-hot
 #'   matrix for classification.
 #' @param predicted Predicted values. Use a factor/character vector for
-#'   predicted classes, a numeric vector/matrix for regression, or a class-score
-#'   matrix for classification.
-#' @param task One of `"auto"`, `"classification"`, or `"regression"`.
-#'   `"auto"` treats factor/character observed values as classification and
-#'   numeric values as regression, unless a one-hot observed matrix is detected.
+#'   predicted classes, a numeric vector/matrix for regression, a class-score
+#'   or ranked-label matrix for classification, or the complete object returned
+#'   by `predict()` for a fitted fastPLS model.
 #' @param ytrain Optional training response for independent-test regression Q2.
 #'   When supplied, each response is centered on its corresponding training
 #'   mean before the denominator sums are aggregated across responses.
 #'   When omitted, Q2 is returned as `NA` rather than being silently equated
 #'   with R2.
-#' @param top_k Integer vector of top-k classification accuracies to compute
-#'   when `predicted` is a class-score matrix.
 #' @param bycol For multivariate regression, calculate and return metrics for
 #'   each response column. The default is `TRUE` for direct `evaluate()` calls.
 #' @param relative_epsilon Values with absolute observed response below this
 #'   threshold are ignored for relative-error metrics.
 #' @param na.rm Remove incomplete observations before computing metrics.
-#'  @return A list with `task`, `metrics`, `metric_definitions`, and optionally
-#' `per_response`,
-#'   `per_class`, `confusion`, and `topk`. A `notes` element is included only
-#'   when the evaluation has an explanatory note to report.
+#' @return A list with `task`, `metrics`, `metric_definitions`, and optionally
+#'   `per_response`, `per_class`, `confusion`, and `topk`. Top-k ranks are
+#'   inferred from score or ranked-prediction columns. For a prediction object
+#'   with several component counts, `metrics` has one row per count and
+#'   `by_component` contains each complete evaluation. A `notes` element is
+#'   included only when the evaluation has an explanatory note to report.
 #' @examples
 #' evaluate(iris$Species, iris$Species)
 #'
@@ -12266,22 +12715,29 @@ pls.double.cv <- function(Xdata, Ydata, ncomp = 2,
 evaluate <- function(
     observed,
     predicted,
-    task = c("auto", "classification", "regression"),
     ytrain = NULL,
-    top_k = c(1L, 5L),
     bycol = TRUE,
     relative_epsilon = .Machine$double.eps,
     na.rm = TRUE
 ) {
-    task <- match.arg(task)
-    if (identical(task, "auto")) {
-        classification <- is.factor(observed) ||
-            is.character(observed) ||
-            .evaluate_is_onehot(observed)
-        task <- if (classification) "classification" else "regression"
+    classification <- .evaluate_prediction_is_classification(
+        observed,
+        predicted
+    )
+    if (is.list(predicted) && !is.data.frame(predicted) &&
+        !is.null(predicted$Ypred)) {
+        return(.evaluate_prediction_result(
+            observed,
+            predicted,
+            classification,
+            ytrain,
+            bycol,
+            relative_epsilon,
+            na.rm
+        ))
     }
-    if (identical(task, "classification")) {
-        return(.evaluate_classification(observed, predicted, top_k, na.rm))
+    if (classification) {
+        return(.evaluate_classification(observed, predicted, na.rm))
     }
     .evaluate_regression(
         observed,
@@ -12328,6 +12784,9 @@ ViP <- function(model) {
 #' @param byrow Logical; correlate rows when `TRUE` and columns when `FALSE`.
 #' @param diag Logical; when `b` is supplied and `diag = TRUE`, return only
 #'   correlations between matching rows or columns.
+#' @param n.cores Number of CPU cores requested for the compiled matrix
+#'   operations. An explicit value takes precedence over
+#'   `options(n.cores = ...)`.
 #' @return A correlation matrix, or a numeric vector of matching correlations
 #'   when `b` is supplied with `diag = TRUE`.
 #' @author Stefano Cacciatore, Leonardo Tenori, Dupe Ojo, Alessia Vignoli
@@ -12337,7 +12796,9 @@ ViP <- function(model) {
 #' x <- as.matrix(iris[1:10, -5])
 #' fastcor(x)
 #' @export
-fastcor <- function(a, b = NULL, byrow = TRUE, diag = TRUE) {
+fastcor <- function(a, b = NULL, byrow = TRUE, diag = TRUE,
+    n.cores = NULL) {
+    .fastpls_apply_cpu_cores(n.cores)
     result <- fastcor_core_cpp(a, b, byrow, diag)
     labels_a <- if (isTRUE(byrow)) rownames(a) else colnames(a)
     labels_b <- if (is.null(b)) {

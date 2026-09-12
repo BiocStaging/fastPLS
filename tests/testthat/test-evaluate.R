@@ -26,10 +26,61 @@ test_that("evaluate computes top-k accuracy from score matrices", {
     dimnames = list(NULL, c("a", "b", "c"))
   )
 
-  res <- evaluate(observed, scores, top_k = c(1L, 3L))
+  res <- evaluate(observed, scores)
 
   expect_equal(res$metrics$accuracy, 2 / 3)
+  expect_equal(res$topk$k, 1:3)
   expect_equal(res$topk$accuracy[res$topk$k == 3L], 1)
+})
+
+test_that("evaluate infers ranks from ranked label matrices", {
+  observed <- factor(c("a", "b", "c"))
+  ranked <- matrix(c(
+    "a", "b", "c",
+    "a", "b", "c",
+    "b", "a", "c"
+  ), nrow = 3, byrow = TRUE)
+
+  result <- evaluate(observed, ranked)
+
+  expect_equal(result$metrics$accuracy, 1 / 3)
+  expect_equal(result$topk$k, 1:3)
+  expect_equal(result$topk$accuracy, c(1 / 3, 2 / 3, 1))
+})
+
+test_that("evaluate accepts complete classification prediction results", {
+  set.seed(41)
+  X <- as.matrix(iris[, seq_len(4)])
+  y <- iris$Species
+  fit <- pls(X[-seq_len(15), ], y[-seq_len(15)], ncomp = 1:2,
+    method = "plssvd", backend = "cpu", seed = 8)
+  prediction <- predict(fit, X[seq_len(15), ], top = 2)
+
+  result <- evaluate(y[seq_len(15)], prediction)
+
+  expect_identical(result$task, "classification")
+  expect_equal(rownames(result$metrics), c("ncomp=1", "ncomp=2"))
+  expect_named(result$by_component, c("ncomp=1", "ncomp=2"))
+  expect_equal(result$by_component[[1]]$topk$k, 1:2)
+})
+
+test_that("evaluate accepts complete regression prediction results", {
+  X <- as.matrix(mtcars[, c("disp", "hp", "wt", "qsec")])
+  y <- mtcars$mpg
+  fit <- pls(X[-seq_len(6), ], y[-seq_len(6)], ncomp = 1:2,
+    method = "simpls", backend = "cpu", seed = 12)
+  prediction <- predict(fit, X[seq_len(6), ])
+
+  result <- evaluate(y[seq_len(6)], prediction, ytrain = y[-seq_len(6)])
+
+  expect_identical(result$task, "regression")
+  expect_equal(nrow(result$metrics), 2L)
+  expect_true(all(is.finite(result$metrics$RMSD)))
+})
+
+test_that("evaluate no longer exposes task or top_k controls", {
+  expect_false("task" %in% names(formals(evaluate)))
+  expect_false("top_k" %in% names(formals(evaluate)))
 })
 
 test_that("evaluate computes regression and spectral metrics", {

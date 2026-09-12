@@ -119,7 +119,7 @@ test_that("unsupported backend labels are rejected", {
 })
 
 test_that("public PLS functions use rSVD without a solver argument", {
-  expect_identical(formals(fastsvd)$method, "rsvd")
+  expect_false("method" %in% names(formals(fastsvd)))
   expect_false("svd.method" %in% names(formals(pls)))
   expect_false("svd.method" %in% names(formals(pls.single.cv)))
   expect_false("svd.method" %in% names(formals(pls.double.cv)))
@@ -131,10 +131,9 @@ test_that("the fixed public PLS solver remains reproducible", {
   Y <- matrix(rnorm(48 * 2), ncol = 2)
 
   svd_default <- fastsvd(X, ncomp = 2, backend = "cpu", seed = 19)
-  svd_explicit <- fastsvd(
-    X, ncomp = 2, backend = "cpu", method = "rsvd", seed = 19
-  )
-  expect_equal(svd_default$d, svd_explicit$d, tolerance = 1e-12)
+  svd_repeat <- fastsvd(X, ncomp = 2, backend = "cpu", seed = 19)
+  expect_equal(svd_default$d, svd_repeat$d, tolerance = 1e-12)
+  expect_identical(svd_default$method, "rsvd")
 
   fit_default <- pls(X, Y, X, Y, ncomp = 1:2, backend = "cpu", seed = 19)
   fit_explicit <- pls(

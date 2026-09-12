@@ -10,9 +10,8 @@
   Ytest = NULL,
   proj = FALSE,
   backend = NULL,
-  flash.block_size = NULL,
-  top = 1L,
-  top5 = FALSE,
+  n.cores = NULL,
+  top = NULL,
   raw_scores = FALSE,
   ...
 )
@@ -22,8 +21,10 @@
 
 \item{newdata}{Numeric predictor matrix.}
 
-\item{Ytest}{Optional observed response used to compute independent-test
-\code{Q2Y} relative to the response mean stored from model training.}
+\item{Ytest}{Optional observed response. When supplied, the predictions are
+passed to \code{evaluate()} and its complete result is returned in \code{metrics}.
+Regression \code{Q2Y} is referenced to the response mean stored during model
+training.}
 
 \item{proj}{Logical; return projected \code{Ttest} when \code{TRUE}.}
 
@@ -35,26 +36,31 @@ When omitted, the session backend setting is used. \code{"auto"} retains the
 backend stored in the fitted model. An unavailable CUDA or Metal selection
 raises an error; prediction is never silently moved to CPU.}
 
-\item{flash.block_size}{Row block size for \code{cpu_flash} prediction.}
+\item{n.cores}{Number of CPU cores requested for compiled host operations.
+An explicit value takes precedence over \code{options(n.cores = ...)}.
+This controls supported BLAS/OpenMP host work and does not set CUDA or
+Metal device parallelism.}
 
-\item{top}{Number of ranked classes to return for classification. Rank 1 is
-the ordinary predicted class stored in \code{Ypred}; ranks 2, 3, and so on are
-lower-scoring alternatives returned in \code{Ypred_top} when \code{top > 1}.}
-
-\item{top5}{Convenience flag equivalent to \code{top = max(top, 5)}, useful for
-reporting ImageNet-style top-5 candidate labels.}
+\item{top}{Number of ranked classes to return for classification. The
+default \code{NULL} returns only the predicted class in \code{Ypred}. A positive
+integer greater than one additionally returns that many ordered classes
+per sample in \code{Ypred_top}; \code{top = 5}, for example, returns five classes.
+This argument is ignored with a warning for regression models.}
 
 \item{raw_scores}{If \code{TRUE}, keep raw classification score cubes as
 \code{Yscore} when available. This can require substantial memory. With
-float32 inputs and \code{raw_scores = FALSE}, ranked prediction is evaluated in
-bounded row blocks and only the requested ranks are retained.}
+\code{raw_scores = FALSE}, ranked classification is evaluated in bounded row
+blocks for both float64 and float32 inputs, and only the requested ranks
+are retained.}
 
 \item{...}{Unused.}
 }
 \value{
 A list containing \code{Ypred}, optional independent-test \code{Q2Y}, optional
 \code{Ttest}, optional \code{Ypred_top} and \code{Ypred_top_score} ranked-class outputs,
-and optional raw classification scores.
+and optional raw classification scores. When \code{Ytest} is supplied,
+\code{metrics} contains the complete result returned by \code{evaluate()} for every
+requested component count.
 }
 \description{
 Generates predictions for new samples from fitted PLS-SVD, SIMPLS, OPLS, or

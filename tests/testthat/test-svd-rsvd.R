@@ -4,7 +4,7 @@ test_that("cpu_rsvd approximates exact SVD on dense matrices", {
 
   exact <- base::svd(A, nu = 6L, nv = 6L)
   rsvd <- suppressWarnings(fastsvd(
-    A, ncomp = 6L, backend = "cpu", method = "rsvd",
+    A, ncomp = 6L, backend = "cpu",
     oversample = 12L, power = 2L, seed = 7L
   ))
 

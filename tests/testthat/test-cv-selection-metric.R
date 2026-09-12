@@ -11,17 +11,14 @@ test_that("pls.single.cv can optimize explicit regression metrics", {
     method = "simpls",
     backend = "cpu",
     seed = 11,
-    selection_metric = "r2"
+    selection = "R2Y",
+    fit = FALSE
   )
-  expect_identical(opt_r2$selection_metric, "r2")
-  expect_identical(opt_r2$best_metric_name, "r2")
+  expect_identical(opt_r2$selection_metric, "R2Y")
+  expect_identical(opt_r2$best_metric_name, "R2Y")
   expect_true(opt_r2$best_ncomp %in% 1:2)
-  expected_r2 <- vapply(seq_along(opt_r2$ncomp), function(i) {
-    pred <- matrix(opt_r2$Ypred[, , i], ncol = ncol(y))
-    1 - sum((y - pred)^2) / sum((y - mean(y))^2)
-  }, numeric(1L))
-  expect_equal(opt_r2$selection_metrics$metric_value, expected_r2)
-  expect_false(isTRUE(all.equal(opt_r2$selection_metrics$metric_value, opt_r2$R2Y)))
+  expect_equal(opt_r2$selection_metrics$metric_value, unname(opt_r2$R2Y))
+  expect_false(is.null(opt_r2$Yfit))
 
   opt_rmsd <- pls.single.cv(
     Xdata = X,
@@ -31,26 +28,26 @@ test_that("pls.single.cv can optimize explicit regression metrics", {
     method = "simpls",
     backend = "cpu",
     seed = 11,
-    selection_metric = "rmsd"
+    selection = "RMSD"
   )
-  expect_identical(opt_rmsd$selection_metric, "rmsd")
-  expect_identical(opt_rmsd$best_metric_name, "rmsd")
+  expect_identical(opt_rmsd$selection_metric, "RMSD")
+  expect_identical(opt_rmsd$best_metric_name, "RMSD")
   expect_true(opt_rmsd$best_ncomp %in% 1:2)
   expect_false(is.null(opt_rmsd$Ypred))
   expect_false(is.null(opt_rmsd$Ypred_optim))
 })
 
-test_that("R2 and Q2 selection never substitute for one another", {
-  q2_only <- data.frame(metric_name = "q2", metric_value = 0.4)
-  r2_only <- data.frame(metric_name = "r2", metric_value = 0.5)
+test_that("R2Y and Q2Y selection never substitute for one another", {
+  q2_only <- data.frame(metric_name = "Q2Y", metric_value = 0.4)
+  r2_only <- data.frame(metric_name = "R2Y", metric_value = 0.5)
 
   expect_error(
-    fastPLS:::.cv_best_index(q2_only, "r2"),
-    "selection_metric = 'r2' is unavailable"
+    fastPLS:::.cv_best_index(q2_only, "R2Y"),
+    "selection = 'R2Y' is unavailable"
   )
   expect_error(
-    fastPLS:::.cv_best_index(r2_only, "q2"),
-    "selection_metric = 'q2' is unavailable"
+    fastPLS:::.cv_best_index(r2_only, "Q2Y"),
+    "selection = 'Q2Y' is unavailable"
   )
 })
 
@@ -70,25 +67,26 @@ test_that("single CV metric paths are named by component count", {
   expect_identical(names(fit$RMSD), expected)
 })
 
-test_that("nested R2 permutation uses the held-out endpoint", {
+test_that("nested R2Y permutation uses the fitted endpoint", {
   set.seed(21012)
   X <- matrix(rnorm(48 * 5), nrow = 48, ncol = 5)
   y <- 0.7 * X[, 1] - 0.2 * X[, 2] + rnorm(48, sd = 0.3)
   fit <- pls.double.cv(
     X, y, ncomp = 1:2, kfold_inner = 3, kfold_outer = 3,
-    method = "simpls", backend = "cpu", selection_metric = "r2",
+    method = "simpls", backend = "cpu", selection = "R2Y",
     perm.test = TRUE, times = 2, seed = 17
   )
 
   heldout <- vapply(fit$results, `[[`, numeric(1L), "metric_value")
-  expect_identical(fit$permutation_metric, "r2")
+  expect_identical(fit$permutation_metric, "R2Y")
   expect_equal(fit$permutation_observed, median(heldout))
+  expect_equal(heldout, fit$R2Y)
 
   mock <- list(
-    results = list(list(metric_name = "r2", metric_value = 0.25)),
+    results = list(list(metric_name = "R2Y", metric_value = 0.25)),
     R2Y = 0.95
   )
-  expect_equal(fastPLS:::.double_cv_metric_values(mock, "r2"), 0.25)
+  expect_equal(fastPLS:::.double_cv_metric_values(mock, "R2Y"), 0.25)
 })
 
 test_that("a single selected regression path reuses its prediction cube", {
@@ -101,13 +99,12 @@ test_that("a single selected regression path reuses its prediction cube", {
   expect_identical(selected, prediction)
 })
 
-test_that("classification cannot select on descriptive training R2", {
+test_that("classification R2Y selection enables the fitted path", {
   set.seed(2105)
   X <- matrix(rnorm(36 * 5), nrow = 36, ncol = 5)
   y <- factor(rep(c("A", "B"), each = 18))
 
-  expect_error(
-    pls.single.cv(
+  fit <- pls.single.cv(
       Xdata = X,
       Ydata = y,
       ncomp = 1:2,
@@ -115,10 +112,12 @@ test_that("classification cannot select on descriptive training R2", {
       method = "simpls",
       backend = "cpu",
       seed = 15,
-      selection_metric = "r2"
-    ),
-    "cannot be optimized by held-out folds"
+      selection = "R2Y",
+      fit = FALSE
   )
+  expect_identical(fit$selection_metric, "R2Y")
+  expect_equal(fit$selection_values, unname(fit$R2Y))
+  expect_false(is.null(fit$Yfit))
 })
 
 test_that("classification CV selects by accuracy and nested CV forwards the rule", {
@@ -135,7 +134,7 @@ test_that("classification CV selects by accuracy and nested CV forwards the rule
     method = "plssvd",
     backend = "cpu",
     seed = 12,
-    selection_metric = "accuracy"
+    selection = "accuracy"
   )
   expect_identical(opt$selection_metric, "accuracy")
   expect_identical(opt$best_metric_name, "accuracy")
@@ -153,7 +152,7 @@ test_that("classification CV selects by accuracy and nested CV forwards the rule
     method = "plssvd",
     backend = "cpu",
     seed = 13,
-    selection_metric = "accuracy"
+    selection = "accuracy"
   )
   expect_identical(nested$selection_metric, "accuracy")
   expect_true(all(vapply(nested$results[[1]]$inner, function(x) {
@@ -176,7 +175,7 @@ test_that("balanced accuracy drives both classification selection and permutatio
     method = "plssvd",
     backend = "cpu",
     seed = 121,
-    selection_metric = "bacc",
+    selection = "bacc",
     fit = FALSE
   )
   expect_identical(single$selection_metric, "balanced_accuracy")
@@ -195,7 +194,7 @@ test_that("balanced accuracy drives both classification selection and permutatio
     backend = "cpu",
     classifier = "lda",
     seed = 122,
-    selection_metric = "balanced_accuracy",
+    selection = "balanced_accuracy",
     perm.test = TRUE,
     times = 2
   )
@@ -224,7 +223,7 @@ test_that("SIMPLS CV always stores prediction scores", {
     method = "simpls",
     backend = "cpu",
     seed = 21,
-    selection_metric = "rmsd"
+    selection = "rmsd"
   )
 
   expect_false(is.null(cv$Ypred))
@@ -268,7 +267,7 @@ test_that("regression CV reports distinct training R2 and held-out Q2", {
     method = "simpls",
     backend = "cpu",
     seed = 32,
-    selection_metric = "q2"
+    selection = "Q2Y"
   )
   expect_false(isTRUE(all.equal(single$Q2Y, single$R2Y)))
   expect_false(isTRUE(all.equal(single$Q2Y, single$RMSD)))
@@ -284,7 +283,7 @@ test_that("regression CV reports distinct training R2 and held-out Q2", {
     method = "simpls",
     backend = "cpu",
     seed = 33,
-    selection_metric = "q2"
+    selection = "Q2Y"
   )
   expect_false(isTRUE(all.equal(nested$Q2Y, nested$R2Y)))
   expect_false(isTRUE(all.equal(nested$Q2Y, nested$RMSD)))
@@ -445,9 +444,9 @@ test_that("RMSD selection does not overwrite Q2Y", {
     method = "simpls",
     backend = "cpu",
     seed = 34,
-    selection_metric = "rmsd"
+    selection = "RMSD"
   )
-  expect_identical(single$best_metric_name, "rmsd")
+  expect_identical(single$best_metric_name, "RMSD")
   expect_false(isTRUE(all.equal(single$Q2Y, single$RMSD)))
   expect_equal(single$selection_values, single$RMSD, tolerance = 1e-10)
 
@@ -461,9 +460,71 @@ test_that("RMSD selection does not overwrite Q2Y", {
     method = "simpls",
     backend = "cpu",
     seed = 35,
-    selection_metric = "rmsd"
+    selection = "RMSD"
   )
-  expect_identical(nested$metric_name[[1]], "rmsd")
+  expect_identical(nested$metric_name[[1]], "RMSD")
   expect_false(isTRUE(all.equal(nested$Q2Y, nested$RMSD)))
   expect_equal(nested$results[[1]]$metric_value, nested$RMSD[[1]], tolerance = 1e-10)
+})
+
+test_that("selection metrics are task specific and unambiguous", {
+  set.seed(2106)
+  X <- matrix(rnorm(42 * 5), nrow = 42)
+  y_reg <- X[, 1] + rnorm(42)
+  y_cls <- factor(rep(c("A", "B"), each = 21))
+
+  expect_error(
+    pls.single.cv(X, y_reg, ncomp = 1:2, kfold = 3,
+      selection = "accuracy"),
+    "not valid for regression"
+  )
+  expect_error(
+    pls.double.cv(X, y_cls, ncomp = 1:2, kfold_inner = 2,
+      kfold_outer = 2, selection = "RMSD"),
+    "not valid for classification"
+  )
+  expect_error(
+    pls.single.cv(X, y_reg, ncomp = 1:2, kfold = 3, selection = "r2"),
+    "use 'R2Y'"
+  )
+  expect_error(
+    pls.single.cv(X, y_reg, ncomp = 1:2, kfold = 3, selection = "q2"),
+    "use 'Q2Y'"
+  )
+  expect_error(
+    pls.single.cv(X, y_reg, ncomp = 1:2, kfold = 3,
+      selection = "MRE_percent"),
+    "signed and has no unambiguous optimization direction"
+  )
+  expect_error(
+    pls.single.cv(X, y_reg, ncomp = 1:2, kfold = 3, selection = "RMSE"),
+    "duplicates RMSD"
+  )
+})
+
+test_that("multivariate regression can select evaluate metrics", {
+  set.seed(2107)
+  X <- matrix(rnorm(54 * 7), nrow = 54)
+  Y <- cbind(
+    X[, 1] + rnorm(54, sd = 0.2),
+    2 * X[, 2] + rnorm(54, sd = 0.3),
+    X[, 3] - X[, 4] + rnorm(54, sd = 0.2)
+  )
+  single <- pls.single.cv(
+    X, Y, ncomp = 1:2, kfold = 3, fit = FALSE, selection = "MAE"
+  )
+  expect_identical(single$selection_metric, "MAE")
+  expect_true(all(single$selection_metrics$metric_name == "MAE"))
+  expect_equal(
+    single$best_index,
+    which.min(single$selection_metrics$metric_value)
+  )
+
+  nested <- pls.double.cv(
+    X, Y, ncomp = 1:2, kfold_inner = 2, kfold_outer = 2,
+    selection = "Pearson_r"
+  )
+  expect_identical(nested$selection_metric, "Pearson_r")
+  expect_identical(nested$metric_name[[1L]], "Pearson_r")
+  expect_true(is.finite(nested$results[[1L]]$metric_value))
 })

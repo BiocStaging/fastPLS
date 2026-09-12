@@ -15,36 +15,96 @@ test_that("top-k classification prediction preserves argmax by default", {
   fast <- predict(fit, X[idx, , drop = FALSE])
   full <- predict(fit, X[idx, , drop = FALSE], raw_scores = TRUE)
   expect_equal(fast$Ypred, full$Ypred)
+  expect_false("Ypred_top" %in% names(fast))
 
-  top5 <- predict(fit, X[idx, , drop = FALSE], top5 = TRUE)
+  top5 <- predict(fit, X[idx, , drop = FALSE], top = 5L)
   expect_true(is.list(top5$Ypred_top))
   expect_equal(dim(top5$Ypred_top[[1]]), c(length(idx), 5L))
   expect_equal(dim(top5$Ypred_top_score[[1]]), c(length(idx), 5L))
 })
 
-test_that("standalone SIMPLS top-k prediction matches the full score path", {
+test_that("float64 PLS top-k prediction matches the full score path", {
   set.seed(20260909)
   X <- matrix(rnorm(140 * 18), nrow = 140, ncol = 18)
   y <- factor(sample(paste0("C", seq_len(7)), 140, replace = TRUE))
   train <- seq_len(110)
   test <- X[-train, , drop = FALSE]
+  for (method in c("simpls", "plssvd")) {
+    fit <- pls(
+      X[train, , drop = FALSE], y[train], ncomp = c(1L, 3L, 5L),
+      method = method, backend = "cpu", seed = 91L
+    )
+    model <- fastPLS:::.fastpls_restore_internal_output_fields(fit)
+    compact <- fastPLS:::.class_topk_predict(
+      model, test, top = 3L, proj = TRUE, backend = "cpp"
+    )
+    full <- fastPLS:::pls_labels_core_predict_cpp(model, test, TRUE)
+    expected <- fastPLS:::.class_topk_from_score_cube(
+      full$Ypred, model$lev, model$ncomp, top = 3L
+    )
+
+    expect_identical(compact$Ypred, expected$Ypred, info = method)
+    expect_identical(compact$Ypred_top, expected$Ypred_top, info = method)
+    expect_equal(
+      compact$Ypred_top_score,
+      expected$Ypred_top_score,
+      tolerance = 2e-12,
+      info = method
+    )
+    expect_equal(compact$Ttest, full$Ttest, tolerance = 2e-12, info = method)
+    expect_identical(compact$predict_backend, "core_topk", info = method)
+
+    compact_evaluated <- predict(fit, test, y[-train], top = 3L)
+    full_evaluated <- predict(fit, test, y[-train], raw_scores = TRUE)
+    expect_equal(
+      compact_evaluated$Q2Y,
+      full_evaluated$Q2Y,
+      tolerance = 2e-12,
+      info = method
+    )
+    expect_identical(
+      compact_evaluated$accuracy,
+      full_evaluated$accuracy,
+      info = method
+    )
+    expect_equal(
+      compact_evaluated$metrics$by_component[[1L]]$topk$k,
+      1:3,
+      info = method
+    )
+  }
+})
+
+test_that("float64 LDA ranked prediction retains only bounded top ranks", {
+  set.seed(20260912)
+  X <- matrix(rnorm(180 * 20), nrow = 180, ncol = 20)
+  y <- factor(sample(paste0("C", seq_len(8)), 180, replace = TRUE))
+  train <- seq_len(140)
+  test <- X[-train, , drop = FALSE]
   fit <- pls(
-    X[train, , drop = FALSE], y[train], ncomp = c(1L, 3L, 5L),
-    method = "simpls", backend = "cpu", seed = 91L
+    X[train, , drop = FALSE], y[train], ncomp = c(2L, 4L, 6L),
+    method = "simpls", classifier = "lda", backend = "cpu", seed = 37L
   )
-  model <- fastPLS:::.fastpls_restore_internal_output_fields(fit)
-  compact <- fastPLS:::.class_topk_predict(
-    model, test, top = 3L, proj = TRUE, backend = "cpp"
-  )
-  full <- fastPLS:::pls_labels_core_predict_cpp(model, test, TRUE)
+  internal <- attr(fit, "fastPLS_internal")
+  internal$flash_block_size <- 7L
+  attr(fit, "fastPLS_internal") <- internal
+
+  blocked <- predict(fit, test, y[-train], top = 3L, proj = TRUE)
+  full <- predict(fit, test, y[-train], raw_scores = TRUE, proj = TRUE)
   expected <- fastPLS:::.class_topk_from_score_cube(
-    full$Ypred, model$lev, model$ncomp, top = 3L
+    full$LDA_scores,
+    fit$lev,
+    internal$ncomp,
+    top = 3L
   )
 
-  expect_identical(compact$Ypred, expected$Ypred)
-  expect_identical(compact$Ypred_top, expected$Ypred_top)
-  expect_equal(compact$Ypred_top_score, expected$Ypred_top_score,
+  expect_false("LDA_scores" %in% names(blocked))
+  expect_identical(blocked$Ypred, expected$Ypred)
+  expect_identical(blocked$Ypred_top, expected$Ypred_top)
+  expect_equal(blocked$Ypred_top_score, expected$Ypred_top_score,
                tolerance = 2e-12)
-  expect_equal(compact$Ttest, full$Ttest, tolerance = 2e-12)
-  expect_identical(compact$predict_backend, "core_topk")
+  expect_equal(blocked$Ttest, full$Ttest, tolerance = 2e-12)
+  expect_equal(blocked$Q2Y, full$Q2Y, tolerance = 2e-12)
+  expect_identical(blocked$accuracy, full$accuracy)
+  expect_equal(blocked$metrics$by_component[[1L]]$topk$k, 1:3)
 })

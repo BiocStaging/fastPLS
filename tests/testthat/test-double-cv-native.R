@@ -85,17 +85,18 @@ test_that("compiled nested CV preserves float32 dispatch", {
     expect_equal(single$R2Y, double$R2Y, tolerance = 1e-4)
 })
 
-test_that("nested CV rejects the retired xprod control explicitly", {
+test_that("nested CV does not expose the retired xprod control", {
     expect_false("xprod" %in% names(formals(pls.double.cv)))
+    index <- c(seq_len(10), 51:60, 101:110)
     expect_error(
         pls.double.cv(
-            as.matrix(iris[seq_len(30), seq_len(4)]),
-            droplevels(iris$Species[seq_len(30)]),
+            as.matrix(iris[index, seq_len(4)]),
+            droplevels(iris$Species[index]),
             ncomp = 1,
             kfold_inner = 2,
             kfold_outer = 2,
             xprod = FALSE
         ),
-        "xprod has been removed"
+        "Unknown entry"
     )
 })

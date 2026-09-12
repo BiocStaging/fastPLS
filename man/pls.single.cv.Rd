@@ -12,6 +12,7 @@ pls.single.cv(
   scaling = c("centering", "autoscaling", "none"),
   method = c("simpls", "plssvd", "opls", "kernelpls"),
   backend = NULL,
+  n.cores = NULL,
   seed = 1L,
   kfold = 10,
   north = 1L,
@@ -20,11 +21,9 @@ pls.single.cv(
   degree = 3L,
   coef0 = 1,
   classifier = c("argmax", "lda"),
-  lda_ridge = NULL,
   fit = TRUE,
   bycol = FALSE,
-  xprod = NULL,
-  selection_metric = "auto",
+  selection = "auto",
   ...
 )
 }
@@ -53,9 +52,14 @@ each sample is treated as its own group.}
 \code{metal}. Multiple values are treated as a tuning grid. Metal requires
 float32 input and uses fixed CPU/Metal operation splitting with CPU fold
 orchestration and prediction. When omitted,
-\code{options(backend = ...)} defines the session default; \code{options(cores = n)}
-controls the CPU thread request. Every requested backend must be available;
+\code{options(backend = ...)} defines the session default. Every requested
+backend must be available;
 unavailable accelerator entries raise an error instead of using CPU.}
+
+\item{n.cores}{Number of CPU cores requested for supported BLAS/OpenMP host
+operations. An explicit value takes precedence over
+\code{options(n.cores = ...)}. CUDA and Metal device parallelism is managed by
+their native runtimes; \code{n.cores} applies only to their host-side stages.}
 
 \item{seed}{Random seed used for fold assignment and randomized SVD steps.}
 
@@ -85,33 +89,33 @@ direction. Orthogonal components are not counted as predictive components.}
 \item{classifier}{Classification rule for factor responses: \code{"argmax"} or
 latent-space \code{"lda"}. Multiple values are treated as a tuning grid.}
 
-\item{lda_ridge}{Deprecated compatibility argument. It is ignored and emits
-a warning when supplied. LDA regularization follows the fixed numerical
-fallback sequence documented in \code{\link[=pls]{pls()}}.}
-
 \item{fit}{Fit one additional model on the full dataset and return its
 fitted values (\code{Yfit}) and training \code{R2Y} path. The default is \code{TRUE} for
 backward compatibility. Set to \code{FALSE} to skip this extra full-data fit;
-held-out cross-validated \code{Q2Y} and \code{RMSD} are still calculated.}
+held-out cross-validated \code{Q2Y} and \code{RMSD} are still calculated.
+Selecting \code{R2Y} overrides \code{fit = FALSE} because fitted responses are
+required for that criterion.}
 
 \item{bycol}{For matrix-valued regression responses, calculate response-wise
 metrics in the returned \code{metrics} list. The default \code{FALSE} returns only
 aggregate metrics.}
 
-\item{xprod}{Use the matrix-free cross-product route where available.
-\code{NULL} applies fastPLS defaults.}
-
-\item{selection_metric}{Metric used to select predictive settings from
-held-out folds. Use \code{"auto"} (accuracy for classification and RMSD for
-regression), \code{"accuracy"}, \code{"balanced_accuracy"}, \code{"r2"}, \code{"q2"}, or
-\code{"rmsd"}. For numeric responses, \code{"r2"} is calculated from held-out
-predictions relative to the mean of all observed responses, whereas
-\code{"q2"} uses the corresponding fold-training response mean. The
-full-data training \code{R2Y} returned when \code{fit = TRUE} is descriptive and is
-not used for component selection. Classification can use accuracy,
-balanced accuracy, or dummy-response Q2, but not training R2. Balanced
-accuracy is the unweighted mean of class-specific recalls and is
-appropriate when class frequencies are unequal.}
+\item{selection}{Metric used to select settings. \code{"auto"} uses accuracy for
+classification and RMSD for regression. Classification also supports
+\code{"balanced_accuracy"}, \code{"lift_accuracy"}, \code{"macro_precision"},
+\code{"macro_recall"}, \code{"macro_f1"}, \code{"kappa"}, \code{"R2Y"}, and \code{"Q2Y"}.
+Regression also supports \code{"R2Y"}, \code{"Q2Y"}, \code{"RMSD"}, \code{"MAE"},
+\code{"MAPE_percent"}, \code{"RPD"}, \code{"Pearson_r"}, and
+\code{"Spearman_r"}. R2Y uses a model fitted to the complete supplied dataset
+and therefore forces \code{fit = TRUE}; as a training criterion, it is usually
+less suitable for complexity selection than a held-out criterion. Q2Y
+uses out-of-fold predictions and each fold's training-response mean. The
+remaining metrics use the aggregate definitions in \code{\link[=evaluate]{evaluate()}} on the
+out-of-fold predictions. RMSD, MAE, and MAPE_percent are
+minimized; all other criteria are maximized. Classification R2Y and Q2Y
+operate on dummy-coded responses, not decoded labels. Incompatible
+task/metric combinations raise an error before fitting. The former names
+\code{"r2"} and \code{"q2"} are rejected as ambiguous.}
 
 \item{...}{Optional SVD tuning controls forwarded to the selected backend.
 Use the same compact names documented in \code{\link[=fastsvd]{fastsvd()}}, such as
@@ -171,8 +175,8 @@ refit the selected model on the full training data and predict new samples.
 \description{
 Performs grouped k-fold or leave-one-out cross-validation over candidate
 component counts and, when vector-valued predictive arguments are supplied,
-over a compact hyperparameter grid. The selection can be based on
-cross-validated accuracy, balanced accuracy, R2, Q2, or RMSD.
+over a compact hyperparameter grid. Selection uses a task-appropriate metric
+returned by \code{\link[=evaluate]{evaluate()}} or the fitted-response R2Y path.
 }
 \details{
 For LDA classification, each training fold uses only the classes

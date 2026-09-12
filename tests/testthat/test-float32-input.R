@@ -550,12 +550,12 @@ test_that("public CUDA float32 PLS is resident and standalone SVD is rejected", 
   set.seed(1234)
   A <- float::fl(matrix(rnorm(120), nrow = 20))
   expect_error(
-    fastsvd(A, ncomp = 3, backend = "cuda", method = "rsvd", seed = 9),
+    fastsvd(A, ncomp = 3, backend = "cuda", seed = 9),
     "fully device-native"
   )
   expect_error(
     fastsvd(A, ncomp = 3, backend = "cuda", method = "irlba", seed = 9),
-    "supports method = 'rsvd' only"
+    "unused argument"
   )
 
   X <- float::fl(as.matrix(iris[, 1:4]))
@@ -609,7 +609,7 @@ test_that("fastsvd supports public float32 CPU routes", {
   set.seed(127)
   A <- float::fl(matrix(rnorm(72), nrow = 12))
 
-  out_rsvd <- fastsvd(A, ncomp = 3, backend = "cpu", method = "rsvd", seed = 1)
+  out_rsvd <- fastsvd(A, ncomp = 3, backend = "cpu", seed = 1)
   expect_true(inherits(out_rsvd$u, "float32"))
   expect_true(inherits(out_rsvd$v, "float32"))
   expect_identical(out_rsvd$precision, "float32")
@@ -617,7 +617,7 @@ test_that("fastsvd supports public float32 CPU routes", {
   expect_equal(dim(out_rsvd$v), c(6L, 3L))
 
   expect_error(fastsvd(A, ncomp = 3, backend = "cpu", method = "irlba"),
-    "rsvd.*only")
+    "unused argument")
 })
 
 test_that("fastsvd rejects the hybrid float32 Metal rSVD route", {
@@ -627,7 +627,7 @@ test_that("fastsvd rejects the hybrid float32 Metal rSVD route", {
   set.seed(128)
   A <- float::fl(matrix(rnorm(72), nrow = 12))
   expect_error(
-    fastsvd(A, ncomp = 3, backend = "metal", method = "rsvd", seed = 1),
+    fastsvd(A, ncomp = 3, backend = "metal", seed = 1),
     "fully device-native"
   )
 })
@@ -645,7 +645,6 @@ test_that("float32 standalone accelerator rSVD rejects hybrid execution", {
       A,
       ncomp = 3L,
       backend = available[[1L]],
-      method = "rsvd",
       oversample = 32L,
       power = 5L,
       seed = 129L

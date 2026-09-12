@@ -5,9 +5,7 @@
 evaluate(
     observed,
     predicted,
-    task = c("auto", "classification", "regression"),
     ytrain = NULL,
-    top_k = c(1L, 5L),
     bycol = TRUE,
     relative_epsilon = .Machine$double.eps,
     na.rm = TRUE
@@ -19,21 +17,14 @@ classification, a numeric vector or matrix for regression, or a one-hot matrix
 for classification.}
 
 \item{predicted}{Predicted values. Use a factor or character vector for
-predicted classes, a numeric vector or matrix for regression, or a class-score
-matrix for classification.}
-
-\item{task}{One of \code{"auto"}, \code{"classification"}, or
-\code{"regression"}. \code{"auto"} treats factor or character observed values
-as classification and numeric values as regression, unless a one-hot observed
-matrix is detected.}
+predicted classes, a numeric vector or matrix for regression, a class-score or
+ranked-label matrix for classification, or the complete object returned by
+\code{predict()} for a fitted fastPLS model.}
 
 \item{ytrain}{Optional training response for independent-test regression Q2.
 When supplied, each response is centered on its corresponding training mean
 before denominator sums are aggregated across responses. When omitted, Q2 is
 returned as \code{NA} rather than being silently equated with R2.}
-
-\item{top_k}{Integer vector of top-k classification accuracies to compute when
-\code{predicted} is a class-score matrix.}
 
 \item{bycol}{For multivariate regression, calculate and return metrics for each
 response column. The default is \code{TRUE} for direct \code{evaluate()} calls.}
@@ -45,14 +36,17 @@ threshold are ignored for relative-error metrics.}
 }
 \value{
 A list with \code{task}, \code{metrics}, \code{metric_definitions}, and
-    optionally \code{per_response},
-\code{per_class}, \code{confusion}, and \code{topk}. A \code{notes} element is
-included only when the evaluation has an explanatory note to report.
+optionally \code{per_response}, \code{per_class}, \code{confusion}, and
+\code{topk}. Top-k ranks are inferred from score or ranked-prediction columns.
+For a prediction object with several component counts, \code{metrics} has one
+row per count and \code{by_component} contains each complete evaluation. A
+\code{notes} element is included only when the evaluation has an explanatory
+note to report.
 }
 \description{
 Computes common classification or regression performance metrics from observed
-and predicted values. The function accepts two vectors, two matrices, or
-classification score matrices.
+and predicted values. The function accepts vectors, matrices, classification
+score or rank matrices, or complete fastPLS prediction results.
 }
 \details{
 For classification, the returned metrics include accuracy, the no-information
@@ -60,8 +54,8 @@ rate, lift accuracy, balanced accuracy, macro precision, macro recall, macro
 F1, Cohen's kappa, and a confusion matrix. The no-information rate is the
 accuracy obtained by always predicting the most prevalent observed class. Lift
 accuracy is accuracy divided by this baseline; values above one indicate an
-improvement over the majority-class baseline. When predicted class scores are
-supplied, top-k accuracy is also reported.
+improvement over the majority-class baseline. When class scores or ranked
+labels are supplied, top-k accuracy is inferred and reported automatically.
 
 For regression, the returned metrics include R2, Q2, RMSD/RMSE, MAE, bias,
 median relative error percentage, mean absolute percentage error, ratio of

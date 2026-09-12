@@ -2,7 +2,7 @@
 \alias{fastcor}
 \title{Fast Pearson Correlation}
 \usage{
-fastcor(a, b = NULL, byrow = TRUE, diag = TRUE)
+fastcor(a, b = NULL, byrow = TRUE, diag = TRUE, n.cores = NULL)
 }
 \arguments{
 \item{a}{Numeric matrix.}
@@ -12,6 +12,9 @@ fastcor(a, b = NULL, byrow = TRUE, diag = TRUE)
 \code{FALSE}, columns are correlated.}
 \item{diag}{Logical; when \code{b} is supplied and \code{diag = TRUE}, return
 only the pairwise diagonal correlations between matching rows (or columns).}
+\item{n.cores}{Number of CPU cores requested for the compiled matrix
+operations. An explicit value takes precedence over
+\code{options(n.cores = ...)}.}
 }
 \value{
 A correlation matrix, or a numeric vector of diagonal correlations when
@@ -30,4 +33,3 @@ data(iris)
 x <- as.matrix(iris[1:10, -5])
 fastcor(x)
 }
-

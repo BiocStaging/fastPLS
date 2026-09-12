@@ -1,6 +1,6 @@
 \name{fastsvd}
 \alias{fastsvd}
-\title{Singular value decomposition through fastPLS backends}
+\title{Native Randomized Singular Value Decomposition}
 \usage{
 fastsvd(
     x,
@@ -8,16 +8,17 @@ fastsvd(
     nv = NULL,
     ncomp = NULL,
     backend = NULL,
-    method = "rsvd",
+    n.cores = NULL,
     oversample = 32L,
     power = 5L,
     seed = 1L
 )
 }
 \arguments{
-\item{x}{Numeric matrix to decompose, with observations or rows in rows and
-variables or columns in columns. Sparse matrices should be converted by the
-caller; \code{fastsvd()} currently works on a dense numeric matrix.}
+\item{x}{Dense matrix to decompose. A base R numeric matrix is processed in
+float64. A \code{float::float32} matrix is processed end to end in float32 and
+returns float32 left and right singular vectors. Sparse matrices should be
+converted by the caller.}
 
 \item{nu}{Number of left singular vectors to return. If \code{NULL}, the
     function
@@ -38,13 +39,14 @@ implied by \code{nu} and \code{nv}; the final rank is always capped at
 CUDA and Metal rSVD are unavailable because their reduced QR/SVD stages are
 not fully device-native for every matrix shape; both accelerators remain
 available for supported resident PLS fits. When omitted, the function uses
-\code{options(backend = ...)}, then \code{FASTPLS_BACKEND}, then CPU. For CPU
-execution, \code{options(cores = n)} requests \code{n} BLAS/OpenMP threads.
+\code{options(backend = ...)}, then \code{FASTPLS_BACKEND}, then CPU.
 An unavailable or unsupported accelerator selection raises an error; no CPU
 fallback is performed.}
 
-\item{method}{SVD algorithm. Only \code{rsvd}, the native randomized SVD,
-is supported on the selected backend.}
+\item{n.cores}{Number of CPU cores requested for supported BLAS/OpenMP host
+operations. An explicit value takes precedence over
+\code{options(n.cores = ...)}. The setting does not control CUDA or Metal
+device parallelism.}
 
 \item{oversample}{Non-negative oversampling dimension used by randomized SVD.
 The sketch dimension is approximately \code{ncomp + oversample}, capped by the
@@ -63,21 +65,22 @@ recovery. Each additional iteration adds matrix multiplications.}
 \value{
 A list compatible with \code{base::svd()} containing \code{d}, \code{u}, and
 \code{v}, plus backend metadata \code{backend}, \code{method},
-\code{svd.method}, \code{elapsed}, and \code{ncomp}. The
-\code{diagnostics} element reports rank and finiteness checks. Both CPU
-precisions receive the native case-specific rSVD audit, strengthened retries,
-and effective controls. For float32, the audit remains in single precision and
-the R layer does not convert the input to double solely for diagnostics.
-Double-precision input additionally reports selected singular-triplet residuals
-and left/right orthogonality errors. Recovery after failed CPU sketches uses
+\code{svd.method}, \code{elapsed}, \code{ncomp}, and \code{precision}. For base
+R numeric input, \code{u} and \code{v} are float64 matrices. For
+\code{float::float32} input, \code{u} and \code{v} remain float32 matrices.
+Both CPU precisions receive the native case-specific rSVD audit, strengthened
+retries, and effective controls. The float32 audit remains in single precision,
+and the R layer does not convert the input to float64 solely for diagnostics.
+Float64 input additionally reports selected singular-triplet residuals and
+left/right orthogonality errors. Recovery after failed CPU sketches uses
 strengthened native-rSVD attempts. These fields describe the numerical checks
 applied to the current decomposition.
 }
 \description{
-Computes a truncated singular value decomposition of a dense numeric matrix
-with the CPU backend. The result contains singular
-values, requested singular vectors, decomposition rank, elapsed time, and
-backend metadata.
+Computes a truncated randomized singular value decomposition (rSVD) with the
+CPU backend. Ordinary R numeric matrices use float64 calculations;
+\code{float::float32} matrices automatically use the native float32 path
+without conversion to float64.
 }
 \details{
 Randomized SVD is stochastic. CPU float32 and float64 execution audits each decomposition
@@ -101,7 +104,11 @@ and compare seeds when conclusions are near a decision boundary.
 \examples{
 set.seed(1)
 x <- matrix(rnorm(12 * 5), 12, 5)
-s <- fastsvd(x, ncomp = 2, backend = "cpu", method = "rsvd", seed = 1)
-s$d
+s64 <- fastsvd(x, ncomp = 2, backend = "cpu", seed = 1)
+s64$d
+
+x32 <- float::fl(x)
+s32 <- fastsvd(x32, ncomp = 2, backend = "cpu", seed = 1)
+s32$d
 
 }

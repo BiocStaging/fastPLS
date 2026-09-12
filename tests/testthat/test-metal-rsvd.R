@@ -8,7 +8,6 @@ test_that("standalone Metal rSVD rejects operation-split execution", {
       A,
       ncomp = 5,
       backend = "metal",
-      method = "rsvd",
       oversample = 8,
       power = 1,
       seed = 123

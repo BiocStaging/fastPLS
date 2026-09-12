@@ -11,6 +11,13 @@ test_that("public PLS APIs do not expose an SVD selector", {
     }
 })
 
+test_that("fastsvd exposes only the native rSVD route", {
+    X <- as.matrix(iris[, 1:4])
+    expect_false("method" %in% names(formals(fastsvd)))
+    expect_error(fastsvd(X, method = "rsvd"), "unused argument")
+    expect_error(fastsvd(X, method = "irlba"), "unused argument")
+})
+
 test_that("removed float32 solver entry points are absent", {
     expect_false(exists("metal_float32_irlba_cpp",
         envir = asNamespace("fastPLS"), inherits = FALSE))

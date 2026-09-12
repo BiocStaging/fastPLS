@@ -6,7 +6,7 @@ test_that("CPU rSVD certifies difficult spectra across seeds", {
   A <- U %*% (singular_values * t(V))
 
   for (seed in c(1L, 7L, 19L, 43L, 123L)) {
-    out <- fastsvd(A, ncomp = 30L, method = "rsvd", seed = seed)
+    out <- fastsvd(A, ncomp = 30L, seed = seed)
     expect_true(out$diagnostics$rsvd_case_audit$performed)
     expect_true(out$diagnostics$rsvd_case_audit$certified)
     expect_lte(out$diagnostics$rsvd_case_audit$triplet_residual, 1e-2)
@@ -18,7 +18,7 @@ test_that("rank-deficient CPU rSVD remains finite and audited", {
   set.seed(992)
   L <- matrix(rnorm(180L * 12L), 180L, 12L)
   R <- matrix(rnorm(12L * 75L), 12L, 75L)
-  out <- fastsvd(L %*% R, ncomp = 10L, method = "rsvd", seed = 11L)
+  out <- fastsvd(L %*% R, ncomp = 10L, seed = 11L)
 
   expect_true(all(is.finite(out$d)))
   expect_true(out$diagnostics$rsvd_case_audit$certified)
@@ -31,7 +31,7 @@ test_that("near-tied retained boundaries do not force deterministic recovery", {
   singular_values <- c(rep(10, 6L), seq(9, 1, length.out = 14L))
   A <- U %*% (singular_values * t(V))
 
-  out <- fastsvd(A, ncomp = 5L, method = "rsvd", seed = 23L)
+  out <- fastsvd(A, ncomp = 5L, seed = 23L)
 
   expect_true(out$diagnostics$rsvd_case_audit$certified)
   expect_false(out$diagnostics$rsvd_case_audit$deterministic_fallback)
@@ -66,7 +66,7 @@ test_that("float32 CPU rSVD performs a case-specific audit", {
   skip_on_os("windows")
   set.seed(994)
   A <- float::fl(matrix(rnorm(100L * 45L), 100L, 45L))
-  out <- fastsvd(A, ncomp = 8L, method = "rsvd", backend = "cpu")
+  out <- fastsvd(A, ncomp = 8L, backend = "cpu")
 
   expect_true(out$diagnostics$rsvd_case_audit$performed)
   expect_true(out$diagnostics$rsvd_case_audit$certified)

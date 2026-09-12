@@ -30,6 +30,13 @@ test_that("pls and predict support regression workflow", {
   expect_true(is.array(pr$Ypred))
   expect_length(pr$Q2Y, 3L)
   expect_true(is.matrix(pr$Ttest))
+  expect_identical(pr$metrics$task, "regression")
+  expect_equal(nrow(pr$metrics$metrics), 3L)
+  expect_equal(
+    unname(pr$metrics$metrics$Q2),
+    unname(pr$Q2Y),
+    tolerance = 1e-12
+  )
 })
 
 test_that("pls and predict support classification workflow", {
@@ -60,6 +67,12 @@ test_that("pls and predict support classification workflow", {
   pr <- predict(fit, X[idx, , drop = FALSE], Ytest = y[idx], proj = FALSE)
   expect_true(is.data.frame(pr$Ypred))
   expect_length(pr$Q2Y, 2L)
+  expect_identical(pr$metrics$task, "classification")
+  expect_equal(nrow(pr$metrics$metrics), 2L)
+  expect_equal(
+    unname(pr$metrics$metrics$accuracy),
+    unname(pr$accuracy)
+  )
 })
 
 test_that("classification Yfit uses the same decoding as predict", {
@@ -223,7 +236,7 @@ test_that("SVD utilities and helper functions are usable in practice", {
   set.seed(1005)
   A <- matrix(rnorm(70 * 14), nrow = 70, ncol = 14)
 
-  sr <- fastsvd(A, ncomp = 4, backend = "cpu", method = "rsvd")
+  sr <- fastsvd(A, ncomp = 4, backend = "cpu")
   expect_true(is.list(sr))
   expect_true(all(c("u", "d", "v", "backend", "method", "svd.method", "elapsed") %in% names(sr)))
   expect_identical(sr$backend, "cpu")

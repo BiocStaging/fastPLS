@@ -367,7 +367,7 @@ test_that("SIMPLS-LDA fold moments preserve the cross-validation result", {
     method = "simpls",
     backend = "cpu",
     classifier = "lda",
-    selection_metric = "accuracy",
+    selection = "accuracy",
     fit = FALSE,
     seed = 47L
   )

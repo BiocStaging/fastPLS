@@ -28,31 +28,21 @@ test_that("fastsvd returns decomposition outputs from public backends", {
   }
 })
 
-test_that("unsupported fastsvd method labels fail explicitly", {
+test_that("the retired fastsvd method argument is rejected", {
   set.seed(11)
   A <- matrix(rnorm(80 * 12), 80, 12)
-  expect_error(fastsvd(A, ncomp = 4, backend = "cpu", method = "unsupported"), "rsvd.*only")
-  expect_error(fastsvd(A, ncomp = 4, backend = "cpu", method = "full"), "rsvd.*only")
+  expect_false("method" %in% names(formals(fastsvd)))
+  expect_error(fastsvd(A, ncomp = 4, backend = "cpu", method = "rsvd"), "unused argument")
+  expect_error(fastsvd(A, ncomp = 4, backend = "cpu", method = "irlba"), "unused argument")
   expect_error(fastsvd(A, work = 10L), "unused argument")
 })
 
-test_that("fastsvd maps backend and method to the intended internal SVD", {
+test_that("fastsvd maps the backend to the native rSVD", {
   set.seed(12)
   A <- matrix(rnorm(70 * 10), 70, 10)
 
-  expect_error(fastsvd(A, ncomp = 4, backend = "cpu", method = "irlba"), "rsvd.*only")
-
-  cpu_rsvd <- fastsvd(A, ncomp = 4, backend = "cpu", method = "rsvd")
+  cpu_rsvd <- fastsvd(A, ncomp = 4, backend = "cpu")
   expect_identical(cpu_rsvd$svd.method, "cpu_rsvd")
-
-  expect_error(
-    fastsvd(A, ncomp = 4, backend = "cuda", method = "irlba"),
-    "rsvd.*only|No CPU fallback"
-  )
-  expect_error(
-    fastsvd(A, ncomp = 4, backend = "metal", method = "irlba"),
-    "rsvd.*only|No CPU fallback"
-  )
 })
 
 test_that("small rSVD inputs use the dense full-subspace calculation", {
@@ -60,20 +50,17 @@ test_that("small rSVD inputs use the dense full-subspace calculation", {
   A <- matrix(rnorm(40 * 5), 40, 5)
   ref <- base::svd(A, nu = 3, nv = 3)
 
-  for (method in "rsvd") {
-    out <- suppressWarnings(fastsvd(
-      A,
-      ncomp = 3,
-      backend = "cpu",
-      method = method,
-      oversample = 0L,
-      power = 0L,
-      seed = 99L
-    ))
-    expect_equal(out$d, ref$d[1:3], tolerance = 1e-8)
-    expect_equal(abs(out$u), abs(ref$u[, 1:3, drop = FALSE]), tolerance = 1e-6)
-    expect_equal(abs(out$v), abs(ref$v[, 1:3, drop = FALSE]), tolerance = 1e-6)
-  }
+  out <- suppressWarnings(fastsvd(
+    A,
+    ncomp = 3,
+    backend = "cpu",
+    oversample = 0L,
+    power = 0L,
+    seed = 99L
+  ))
+  expect_equal(out$d, ref$d[1:3], tolerance = 1e-8)
+  expect_equal(abs(out$u), abs(ref$u[, 1:3, drop = FALSE]), tolerance = 1e-6)
+  expect_equal(abs(out$v), abs(ref$v[, 1:3, drop = FALSE]), tolerance = 1e-6)
 })
 
 test_that("fastPLS does not mask base svd", {

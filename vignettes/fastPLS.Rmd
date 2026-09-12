@@ -182,9 +182,11 @@ compiled. Linux and Windows performance benchmarks should proceed only when
 this function returns `"OpenBLAS"`.
 Linking against multithreaded OpenBLAS enables eligible
 matrix operations to use multiple CPU cores. For example,
-`options(backend = "cpu", cores = 4L)` selects CPU execution and requests four
-threads from the linked BLAS/OpenMP runtime. An explicit `backend` argument
-overrides the session option. The sequential PLS deflation steps remain serial,
+`options(backend = "cpu", n.cores = 4L)` selects CPU execution and requests four
+threads from the linked BLAS/OpenMP runtime. Explicit `backend` and `n.cores`
+arguments override their respective session options. The same resolved
+`n.cores` value is retained by nested folds, refits, permutations, and
+predictions. The sequential PLS deflation steps remain serial,
 so additional cores do not guarantee a speed improvement for every matrix
 shape.
 Additional BLAS threads help only when the matrix products are sufficiently
@@ -246,7 +248,6 @@ hardware:
 
 ```r
 options(backend = "cuda")
-# Equivalent: fastPLS_backend("cuda")
 
 fit <- pls(X, y, method = "simpls")    # CUDA session default
 fit.cpu <- pls(X, y, backend = "cpu")  # explicit override
@@ -255,13 +256,13 @@ fit.cpu <- pls(X, y, backend = "cpu")  # explicit override
 Batch jobs may use
 `FASTPLS_BACKEND=cpu|cuda|metal`. Precedence is an explicit
 function argument, `options(backend = ...)`, `FASTPLS_BACKEND`, and finally
-CPU. For CPU execution, `options(cores = 4L)` requests four threads from the
+CPU. For CPU execution, `options(n.cores = 4L)` requests four threads from the
 linked BLAS/OpenMP runtime. Eligible matrix operations may use these threads,
 but sequential PLS deflation remains serial and multicore acceleration depends
-on matrix shape and the installed numerical library. Setting or retrieving an
-unavailable accelerator through `fastPLS_backend()` raises an error, as does
-the first operation that resolves an unavailable option or environment value;
-CPU is never substituted. An explicitly requested `backend = "auto"` in
+on matrix shape and the installed numerical library. An explicit
+`n.cores =` argument takes precedence over the option. The first operation that
+resolves an unavailable option or environment value raises an error; CPU is
+never substituted. An explicitly requested `backend = "auto"` in
 prediction retains model-aware prediction dispatch and errors if the fitted
 model requires an unavailable accelerator.
 
@@ -317,7 +318,6 @@ called directly.
 | `fastsvd()` | Run the stand-alone native CPU randomized SVD. |
 | `fastcor()` | Compute fast Pearson-style correlations. |
 | `ViP()` | Compute variable-importance-in-projection trajectories. |
-| `fastPLS_backend()` | Inspect or set the session backend. |
 | `fastPLS_blas()` | Report the CPU numerical library selected at compilation. |
 | `has_cuda()` | Check whether CUDA-native fastPLS support is available. |
 | `has_metal()` | Check for Apple Metal support. |
@@ -366,9 +366,8 @@ fit_bioc$accuracy
 | Float32 CPU input | `float::fl(X)`, `backend = "cpu"` |
 
 The public classification choices are `"argmax"` and `"lda"`; regression
-ignores `classifier`. The deprecated
-`lda_ridge` compatibility argument is ignored and warns when supplied because
-LDA uses the fixed scale-normalized Cholesky fallback sequence described above.
+ignores `classifier`. LDA uses the fixed scale-normalized Cholesky fallback
+sequence described above and does not expose a ridge-tuning argument.
 
 ## Classification Tasks
 
@@ -414,15 +413,17 @@ fit_cls$accuracy
 ```
 
 Classification models can also be fitted once and predicted later. `predict()`
-can optionally return ranked classes by setting `top` or `top5 = TRUE`. The
+returns only the predicted class by default and can optionally return ranked
+classes by setting `top` to a positive integer. The
 ordinary prediction in `Ypred` is always the rank-1 class. When `top > 1`,
 `Ypred_top` contains the ordered candidate labels for each sample: `rank1` is
 the predicted class, `rank2` is the next most likely class, and so on. If
 available, `Ypred_top_score` contains the corresponding class scores used to
-create that ranking. For float32 models, the default `raw_scores = FALSE`
-evaluates ranked predictions in bounded row blocks and retains only the
-requested ranks. Set `raw_scores = TRUE` only when the complete class-score
-arrays are needed, because those arrays can be substantially larger.
+create that ranking. For both float64 and float32 models, the default
+`raw_scores = FALSE` evaluates ranked predictions in bounded row blocks and
+retains only the requested ranks. Set `raw_scores = TRUE` only when the
+complete class-score arrays are needed, because those arrays can be
+substantially larger.
 
 ```{r chunk-004}
 fit_cls_train_only <- pls(
@@ -444,12 +445,15 @@ pred_cls_later <- predict(
 )
 
 pred_cls_later$accuracy
+pred_cls_later$metrics$metrics
 head(pred_cls_later$Ypred_top[["ncomp=2"]])
 ```
 
 ### Evaluate Classification Predictions
 
-Use `evaluate()` to summarize predicted class labels or class-score matrices.
+Use `evaluate()` to summarize predicted class labels, ranked labels,
+class-score matrices, or a complete object returned by `predict()`. The task
+and requested rank are inferred from these inputs.
 For classification, `lift_accuracy` is accuracy divided by the
 `no_information_rate`, the accuracy obtained by always predicting the most
 frequent observed class. Values above one therefore improve on this simple
@@ -458,11 +462,12 @@ For classification, the complete output includes global metrics, per-class
 metrics, and the confusion matrix.
 
 ```{r chunk-005}
-eval_cls <- evaluate(
+eval_cls_path <- evaluate(
     observed = Ytest_cls,
-    predicted = fit_cls$Ypred[["ncomp=2"]]
+    predicted = pred_cls_later
 )
 
+eval_cls <- eval_cls_path$by_component[["ncomp=2"]]
 eval_cls
 ```
 
@@ -497,8 +502,7 @@ score_last <- pred_cls_later$LDA_scores[
 
 evaluate(
     observed = Ytest_cls,
-    predicted = score_last,
-    top_k = c(1, 2)
+    predicted = score_last
 )
 ```
 
@@ -776,7 +780,8 @@ abline(0, 1, col = "#D55E00", lwd = 2)
 The alternative workflow is to fit the model once without a test set, then call
 `predict()` later. This is useful when the same model must be applied to several
 independent datasets. `predict()` automatically applies the centering/scaling
-stored in the fitted object.
+stored in the fitted object. When `Ytest` is supplied, it also passes the
+predictions to `evaluate()` and stores the complete evaluation under `metrics`.
 
 ```{r chunk-020}
 fit_reg_train_only <- pls(
@@ -795,6 +800,7 @@ pred_reg_later <- predict(
 )
 
 pred_reg_later$Q2Y
+pred_reg_later$metrics$metrics
 head(pred_reg_later$Ttest)
 ```
 
@@ -959,9 +965,10 @@ c(n_loocv_folds = length(unique(cv_loocv$fold)),
 
 `pls.single.cv()` repeats the same CV splitting strategy over several candidate
 component counts and returns the best value according to the predictive metric:
-accuracy for classification and RMSD for regression. Q2, held-out R2, or
-balanced accuracy can instead be requested explicitly through
-`selection_metric`. Predictive arguments can
+accuracy for classification and RMSD for regression. Fold-aware Q2Y,
+full-data fitted R2Y, balanced accuracy, and the other task-specific metrics
+documented below can instead be requested explicitly through `selection`.
+Predictive arguments can
 also be supplied as vectors to tune a compact grid. Fold-control arguments such
 as `kfold` remain single settings for the whole CV run.
 
@@ -1018,15 +1025,27 @@ classification accuracy. The exact convention used by each function is also
 reported in its `metrics$definitions` element. `RMSD` is not used for
 classification.
 
-For numeric responses, `selection_metric = "r2"` is a cross-validated
-observed-mean endpoint calculated from held-out predictions; it is not the
-full-data training `R2Y`. In contrast, `selection_metric = "q2"` uses the
-fold-training response mean in each denominator. The training `R2Y` returned
-when `fit = TRUE` is descriptive and is never used to select components.
-Classification can be selected by `accuracy`, `balanced_accuracy`, or
-dummy-response `q2`, but not by training R2. Use balanced accuracy when unequal
-class frequencies make majority-class accuracy misleading; ordinary accuracy
-is appropriate when overall row-level correctness is the intended endpoint.
+Use `selection = "R2Y"` to select from the full-data fitted-response path or
+`selection = "Q2Y"` to select from out-of-fold predictions standardized by
+each fold's training-response mean. Selecting R2Y automatically enables and
+returns the fitted path even if `fit = FALSE`; because it is a training
+criterion, Q2Y or another held-out metric is usually preferable for choosing
+model complexity. The former names `"r2"` and `"q2"` are rejected because they
+did not identify these two different quantities unambiguously.
+
+Classification settings can be selected by `accuracy`, `balanced_accuracy`,
+`lift_accuracy`, `macro_precision`, `macro_recall`, `macro_f1`, `kappa`, R2Y,
+or Q2Y. Use balanced accuracy when unequal class frequencies make
+majority-class accuracy misleading. Regression settings can be selected by
+R2Y, Q2Y, `RMSD`, `MAE`, `MAPE_percent`, `RPD`, `Pearson_r`, or
+`Spearman_r`. These additional aggregate metrics are useful for
+high-dimensional multivariate responses such as spectra. RMSD, MAE,
+and MAPE_percent are minimized; the other criteria are maximized. Signed bias
+and signed `MRE_percent` remain available from `evaluate()` but are not tuning
+criteria because they have no unambiguous one-sided optimization direction.
+The definitions match `evaluate()`, and an incompatible choice such as
+classification accuracy for a regression response raises an error before
+model fitting.
 
 ```{r chunk-027}
 data.frame(
@@ -1077,8 +1096,8 @@ within-group response structure, and class frequencies are preserved exactly.
 The observed and permuted analyses use identical outer and inner folds and the
 same randomized-SVD seeds, so null variation reflects the exchange operation
 rather than new folds or sketches. Model selection and permutation inference
-use the same `selection_metric`. For imbalanced
-classification, `selection_metric = "balanced_accuracy"` therefore selects the
+use the same `selection`. For imbalanced
+classification, `selection = "balanced_accuracy"` therefore selects the
 model by mean class-specific recall and tests that statistic against its
 permutation distribution; it does not substitute dummy-response Q2. The output
 records the statistic in `permutation_metric`, `permutation_observed`, and
@@ -1118,7 +1137,7 @@ dcv_balanced <- pls.double.cv(
     kfold_inner = 5,
     kfold_outer = 5,
     constrain = patient_id,
-    selection_metric = "balanced_accuracy",
+    selection = "balanced_accuracy",
     perm.test = TRUE,
     times = 100,
     seed = 109
@@ -1280,7 +1299,9 @@ Important elements returned by `pls.double.cv()` are:
     used. For regression, `Q2Y` reports held-out Q2, `RMSD` reports held-out
     RMSD, and `R2Y` reports the mean training-fit R2 of the selected outer-fold
     models.
-- `metric_name`: the held-out metric used for inner/outer model selection.
+- `metric_name`: the metric used for inner/outer model selection. It is based
+    on held-out predictions except when `selection = "R2Y"` explicitly requests
+    the fitted-response criterion.
 - `medianQ2Y`, `CI95Q2Y`, `medianR2Y`, `CI95R2Y`, `medianRMSD`, and
     `CI95RMSD`: summaries across repeated outer CV runs, returned only when
     `runn > 1`. They are omitted for the default `runn = 1` output.
@@ -1292,23 +1313,27 @@ Important elements returned by `pls.double.cv()` are:
     fold-level values are stored in `results[[run]]$best_parameters`.
 - `selection_metric`: the criterion used by the inner CV loop. The default
     `"auto"` means accuracy for classification and RMSD-style prediction error
-        for
-    multivariate regression. Use `"balanced_accuracy"` when each class should
-    contribute equally despite unequal class frequencies; nested permutation
-    testing then uses balanced accuracy as well.
+    for multivariate regression. All task-compatible selection criteria listed
+    above can also drive the nested permutation test.
 
 ## SVD Utility
 
 `fastsvd()` provides direct access to the native CPU randomized SVD used by
 PLS. It returns the left singular vectors (`u`), singular values (`d`), and
 right singular vectors (`v`) for users who want a truncated decomposition
-outside a PLS model. Stand-alone CUDA and Metal SVD routes are not exposed;
-their reduced decompositions are not device-native for every matrix shape.
+outside a PLS model. A standard R numeric matrix selects float64 computation.
+A matrix created with `float::fl()` selects the native float32 path
+automatically; its left and right singular vectors remain in float32 format.
+The function exposes no solver selector because rSVD is its only algorithm.
+Stand-alone CUDA and Metal SVD routes are not exposed; their reduced
+decompositions are not device-native for every matrix shape.
 
 ```{r chunk-034}
-s <- fastsvd(Xtrain, ncomp = 3, seed = 104)
-names(s)
-s$d
+s64 <- fastsvd(Xtrain, ncomp = 3, seed = 104)
+s32 <- fastsvd(float::fl(Xtrain), ncomp = 3, seed = 104)
+names(s64)
+s64$d
+inherits(s32$u, "float32")
 ```
 
 ## CUDA and Metal Availability
@@ -1433,8 +1458,8 @@ classes, label-aware products can avoid materializing a dense one-hot response
 matrix. Compact prediction instead retains the PLS latent factors and evaluates
 only the requested test-score blocks, avoiding dense coefficient and prediction
 paths when they are unnecessary.
-In ordinary use, leave `xprod = NULL`; fastPLS then chooses the matrix-free
-route automatically only when the cross-product is large enough to justify it.
+fastPLS chooses the matrix-free route automatically only when the
+cross-product is large enough to justify it.
 
 For `pls.single.cv()`, seeded grouped fold construction and the numerical CV
 path are compiled. For `pls.double.cv()`, CPU and Metal nested loops are

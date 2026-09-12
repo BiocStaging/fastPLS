@@ -660,6 +660,13 @@ evaluate_classification_core_cpp <- function(
     )
 }
 
+evaluate_ranked_accuracy_cpp <- function(observed, ranked) {
+    .Call(
+        "_fastPLS_evaluate_ranked_accuracy_cpp",
+        as.integer(observed), ranked, PACKAGE = "fastPLS"
+    )
+}
+
 evaluate_is_onehot_cpp <- function(values) {
     .Call("_fastPLS_evaluate_is_onehot_cpp", values, PACKAGE = "fastPLS")
 }
@@ -690,6 +697,15 @@ float32_topk_cpp <- function(scoresSEXP, top) {
     .Call(
         "_fastPLS_float32_topk_cpp",
         scoresSEXP,
+        top,
+        PACKAGE = "fastPLS"
+    )
+}
+
+double_topk_cpp <- function(scores, top) {
+    .Call(
+        "_fastPLS_double_topk_cpp",
+        scores,
         top,
         PACKAGE = "fastPLS"
     )

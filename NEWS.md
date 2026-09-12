@@ -1,3 +1,88 @@
+# fastPLS 0.99.65
+
+* Replaced the repository README with a focused installation guide for macOS,
+  Windows, Ubuntu, and Fedora. The guide documents platform toolchains,
+  OpenBLAS installation and verification, Apple Accelerate and Metal defaults,
+  and explicit accelerator failure behavior.
+
+* Audited the public API, vignette, and reference documentation after the CV
+  selection update. Corrected the vignette to distinguish fitted-response
+  `R2Y` from held-out `Q2Y` and removed avoidable condition-message diagnostics
+  reported by `BiocCheck()`.
+
+* Fixed Unix and Windows configuration so `FASTPLS_USE_OPENBLAS=1` accepts a
+  detected OpenBLAS installation instead of incorrectly treating the value as
+  invalid. Forced installations still fail clearly when OpenBLAS is absent.
+
+# fastPLS 0.99.64
+
+* Made cross-validation selection names explicit and task safe. `R2Y`, `Q2Y`,
+  and `RMSD` now use the same public spelling as the PLS outputs; ambiguous
+  `"r2"` and `"q2"` inputs are rejected. Selecting `R2Y` automatically enables
+  the fitted-response path, while `Q2Y` remains fold-aware and predictive.
+  Task-incompatible choices now fail before fitting.
+
+* Extended `selection` to task-appropriate `evaluate()` metrics. Classification
+  supports lift accuracy, macro precision/recall/F1, and kappa in addition to
+  accuracy and balanced accuracy. Regression supports MAE, MAPE, RPD, and
+  Pearson or Spearman correlation in addition to Q2Y and RMSD; this includes
+  aggregate selection for large multivariate responses such as NMR. Signed
+  bias and signed mean relative error remain evaluation outputs but are not
+  exposed as one-sided tuning criteria.
+
+* Renamed the public cross-validation tuning argument from
+  `selection_metric` to the shorter `selection` in `pls.single.cv()` and
+  `pls.double.cv()`. Returned audit fields `selection_metric` and
+  `selection_metrics` are unchanged.
+
+* Simplified `evaluate()` by removing `task` and `top_k`. The task is now
+  always inferred from the observed and predicted values, ranked depth is
+  inferred from score or ranked-label columns, and complete `predict()`
+  results can be evaluated directly. Multi-component prediction results return
+  a metric row and a complete evaluation for each component count.
+
+* `predict()` now passes its predictions through `evaluate()` whenever
+  `Ytest` is supplied. The complete component-wise evaluation is returned in
+  `metrics` consistently across CPU, CUDA, Metal, float32, and float64 routes.
+
+* Standardized CPU parallelism as `n.cores`. The explicit argument is
+  available in `pls()`, `pls.single.cv()`, `pls.double.cv()`, `fastsvd()`,
+  `predict()`, and `fastcor()` and takes precedence over the session-wide
+  `options(n.cores = ...)` value. Nested CV, refitting, permutation, and
+  prediction paths retain the resolved request; CUDA and Metal device
+  parallelism remains controlled by their native runtimes.
+
+* Simplified ranked classification prediction to one `top` argument. Its
+  default is `NULL`, which returns one predicted class per sample; a positive
+  integer requests that many ranked classes. The redundant `top5` and inactive
+  `flash.block_size` arguments were removed, and regression prediction now
+  warns when `top` is supplied.
+
+* Aligned float64 and float32 ranked prediction so both use bounded row blocks
+  and retain only the requested ranks unless `raw_scores = TRUE`.
+
+* Removed the redundant `method` argument from `fastsvd()`. The function now
+  selects native rSVD directly and automatically preserves float64 execution
+  for ordinary R matrices or end-to-end float32 execution for `float32`
+  matrices.
+
+* Corrected the portable Windows float32 SVD dispatch so it no longer expects
+  the retired solver argument.
+
+* Shortened the `pls()` reference details to practical model, precision,
+  backend, and diagnostic guidance; mathematical derivations remain outside
+  the function manual.
+
+* Removed the deprecated `lda_ridge` argument from all public PLS functions
+  and the obsolete `xprod` argument from `pls.single.cv()`. LDA stabilization
+  and matrix-free route selection are now exclusively automatic.
+
+# fastPLS 0.99.63
+
+* Removed the redundant `fastPLS_backend()` setter/getter. Backends are now
+  selected through an explicit `backend =` argument or the session-wide
+  `options(backend = ...)` setting.
+
 # fastPLS 0.99.62
 
 * Removed the redundant `svd.method` argument from `pls()`,

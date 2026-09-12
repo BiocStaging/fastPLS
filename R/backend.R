@@ -1,53 +1,3 @@
-#' Configure the default fastPLS execution backend
-#'
-#' An explicit function argument takes precedence over
-#' `options(backend = ...)`, then `FASTPLS_BACKEND`; CPU is the final
-#' default.
-#'
-#' For CPU execution, `options(cores = n)` requests `n` threads from the
-#' linked BLAS and OpenMP runtimes. Matrix operations can use those threads
-#' when the installed numerical library supports runtime thread control;
-#' sequential PLS deflation steps remain serial. macOS builds use Apple
-#' Accelerate by default. Linux and Windows builds prefer OpenBLAS when it is
-#' discovered through `OPENBLAS_ROOT`, `pkg-config`, or Rtools, and otherwise
-#' use the BLAS/LAPACK supplied by R. Setting `FASTPLS_USE_OPENBLAS=1` makes
-#' OpenBLAS mandatory for that installation.
-#'
-#' @param backend Optional backend: `"cpu"`, `"cuda"`, or `"metal"`. The
-#'   Metal route is a float32 Apple-silicon PLS route
-#'   with a fixed mathematical split. CPU code performs preprocessing, reduced
-#'   decompositions and sequential component updates. Persistent Metal
-#'   workspaces perform fitting products involving the training sample matrix,
-#'   including
-#'   explicit cross-covariance formation, fused score/loading products, and
-#'   randomized range-finder products for implicit cross-covariance operators.
-#'   Smaller cross-covariance and component-state products, LDA, and prediction
-#'   remain on the CPU. This assignment does not depend on dataset shape.
-#'   Setting or retrieving the session backend rejects an
-#'   unavailable accelerator immediately; fastPLS does not silently substitute
-#'   the CPU backend.
-#' @return The configured, available backend. Setting returns the previous
-#'   option invisibly.
-#' @examples
-#' old_options <- options(backend = NULL)
-#' current <- fastPLS_backend()
-#' current
-#' fastPLS_backend("cpu")
-#' options(old_options)
-#' @export
-fastPLS_backend <- function(backend = NULL) {
-    if (is.null(backend)) {
-        backend <- .fastpls_resolve_backend(NULL)
-        .fastpls_require_backend_available(backend, "fastPLS_backend()")
-        return(backend)
-    }
-    backend <- .fastpls_validate_backend(backend, "backend")
-    .fastpls_require_backend_available(backend, "fastPLS_backend()")
-    old <- getOption("backend", NULL)
-    options(backend = backend)
-    invisible(old)
-}
-
 #' Report the numerical library selected when fastPLS was compiled
 #'
 #' This reports the CPU matrix library selected by the package configuration,
@@ -153,31 +103,33 @@ fastPLS_blas <- function() {
     )
 }
 
-.fastpls_validate_cores <- function(cores) {
+.fastpls_validate_cores <- function(n.cores, source = "n.cores") {
     if (
-        length(cores) != 1L ||
-            !is.numeric(cores) ||
-            is.na(cores) ||
-            !is.finite(cores) ||
-            cores < 1 ||
-            cores != floor(cores)
+        length(n.cores) != 1L ||
+            !is.numeric(n.cores) ||
+            is.na(n.cores) ||
+            !is.finite(n.cores) ||
+            n.cores < 1 ||
+            n.cores != floor(n.cores)
     ) {
-        stop("`options(cores = ...)` must contain one positive integer.",
-            call. = FALSE)
+        stop("`", source, "` must contain one positive integer.", call. = FALSE)
     }
-    as.integer(cores)
+    as.integer(n.cores)
 }
 
-.fastpls_cpu_cores <- function() {
-    cores <- getOption("cores", NULL)
-    if (is.null(cores)) {
+.fastpls_cpu_cores <- function(n.cores = NULL) {
+    if (!is.null(n.cores)) {
+        return(.fastpls_validate_cores(n.cores))
+    }
+    n.cores <- getOption("n.cores", NULL)
+    if (is.null(n.cores)) {
         return(NULL)
     }
-    .fastpls_validate_cores(cores)
+    .fastpls_validate_cores(n.cores, "options(n.cores = ...)")
 }
 
-.fastpls_apply_cpu_cores <- function() {
-    cores <- .fastpls_cpu_cores()
+.fastpls_apply_cpu_cores <- function(n.cores = NULL) {
+    cores <- .fastpls_cpu_cores(n.cores)
     if (is.null(cores)) {
         return(invisible(NULL))
     }

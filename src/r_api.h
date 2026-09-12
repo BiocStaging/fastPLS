@@ -179,6 +179,7 @@ SEXP _fastPLS_evaluate_classification_core_cpp(
   SEXP observed, SEXP predicted, SEXP class_count, SEXP scores,
   SEXP score_observed, SEXP top_k
 );
+SEXP _fastPLS_evaluate_ranked_accuracy_cpp(SEXP observed, SEXP ranked);
 SEXP _fastPLS_evaluate_is_onehot_cpp(SEXP values);
 SEXP _fastPLS_evaluate_class_labels_cpp(SEXP values, SEXP reference_levels);
 SEXP _fastPLS_vip_core_cpp(SEXP model);
@@ -186,6 +187,7 @@ SEXP _fastPLS_fastcor_core_cpp(SEXP left, SEXP right, SEXP by_row,
                                SEXP diagonal);
 SEXP _fastPLS_float32_argmax_cpp(SEXP scores);
 SEXP _fastPLS_float32_topk_cpp(SEXP scores, SEXP top);
+SEXP _fastPLS_double_topk_cpp(SEXP scores, SEXP top);
 SEXP _fastPLS_float32_sweep_cols_cpp(SEXP matrix, SEXP statistics,
                                      SEXP operation);
 SEXP _fastPLS_float32_standardize_cpp(SEXP matrix, SEXP center, SEXP scale);

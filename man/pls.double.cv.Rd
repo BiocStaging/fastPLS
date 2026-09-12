@@ -12,6 +12,7 @@ pls.double.cv(
   scaling = c("centering", "autoscaling", "none"),
   method = c("simpls", "plssvd", "opls", "kernelpls"),
   backend = NULL,
+  n.cores = NULL,
   seed = 1L,
   perm.test = FALSE,
   times = 100,
@@ -24,9 +25,8 @@ pls.double.cv(
   degree = 3L,
   coef0 = 1,
   classifier = c("argmax", "lda"),
-  lda_ridge = NULL,
   bycol = FALSE,
-  selection_metric = "auto",
+  selection = "auto",
   ...
 )
 }
@@ -59,9 +59,14 @@ coordinator for fold loops, fitting, prediction, and metric accumulation.
 CUDA uses the R coordinator around CUDA-native single-CV and outer-fit
 kernels; supported CUDA fits do not substitute a CPU estimator. Metal uses
 the same fixed operation split as \code{pls()}. When omitted,
-\code{options(backend = ...)} defines the session default; \code{options(cores = n)}
-controls the CPU thread request. Every requested backend must be available;
+\code{options(backend = ...)} defines the session default. Every requested
+backend must be available;
 unavailable accelerator entries raise an error instead of using CPU.}
+
+\item{n.cores}{Number of CPU cores requested for supported BLAS/OpenMP host
+operations. An explicit value takes precedence over
+\code{options(n.cores = ...)}. CUDA and Metal device parallelism is managed by
+their native runtimes; \code{n.cores} applies only to their host-side stages.}
 
 \item{seed}{Random seed used for outer/inner fold assignment and randomized
 SVD steps.}
@@ -111,22 +116,26 @@ direction. Orthogonal components are not counted as predictive components.}
 standard PLS-DA response-score argmax. \code{lda} fits a regularized LDA
 classifier on the PLS latent scores.}
 
-\item{lda_ridge}{Deprecated compatibility argument. It is ignored and emits
-a warning when supplied. PLS-LDA uses a fixed, scale-normalized Cholesky
-fallback sequence rather than a user-tuned ridge.}
-
 \item{bycol}{For matrix-valued regression responses, calculate response-wise
 metrics in the returned \code{metrics} list. The default \code{FALSE} returns only
 aggregate metrics.}
 
-\item{selection_metric}{Metric used by inner CV and by the permutation test.
-Use \code{"auto"} (accuracy for classification and RMSD for regression),
-\code{"accuracy"}, \code{"balanced_accuracy"}, \code{"r2"}, \code{"q2"}, or \code{"rmsd"}.
-For numeric responses, \code{"r2"} is an observed-mean held-out endpoint and
-\code{"q2"} uses fold-training response means. Training \code{R2Y} is descriptive
-and is never optimized. Classification can use accuracy, balanced
-accuracy, or dummy-response Q2, but not training R2. Balanced accuracy
-gives each observed class equal weight.}
+\item{selection}{Metric used by inner CV and by the permutation test.
+\code{"auto"} uses accuracy for classification and RMSD for regression.
+Classification also supports \code{"balanced_accuracy"}, \code{"lift_accuracy"},
+\code{"macro_precision"}, \code{"macro_recall"}, \code{"macro_f1"}, \code{"kappa"},
+\code{"R2Y"}, and \code{"Q2Y"}. Regression also supports \code{"R2Y"}, \code{"Q2Y"},
+\code{"RMSD"}, \code{"MAE"}, \code{"MAPE_percent"}, \code{"RPD"},
+\code{"Pearson_r"}, and \code{"Spearman_r"}. R2Y uses fitted responses for inner
+selection and is averaged across the selected outer training fits for the
+reported endpoint; as a training criterion, it can favor more complex
+models. Q2Y and the other predictive criteria use held-out predictions.
+Q2Y uses fold-training response means; the remaining metrics use the
+aggregate definitions in \code{\link[=evaluate]{evaluate()}}. RMSD, MAE, and
+MAPE_percent are minimized; all other criteria are maximized. R2Y and Q2Y
+for classification operate on dummy-coded responses. Incompatible
+task/metric combinations raise an error before fitting. The former names
+\code{"r2"} and \code{"q2"} are rejected as ambiguous.}
 
 \item{...}{Optional SVD tuning controls forwarded to the selected backend.
 Use the same compact names documented in \code{\link[=fastsvd]{fastsvd()}}, such as
@@ -157,7 +166,8 @@ outer-training class proportions and is not classification accuracy.
 selected outer-fold models.
 \item \code{RMSD}: one held-out RMSD value per repeated run for numeric responses;
 \code{NA} for classification.
-\item \code{metric_name}: held-out metric used for each repeated run.
+\item \code{metric_name}: metric used for each repeated run. It is held-out unless
+\code{selection = "R2Y"} explicitly requests the fitted-response criterion.
 \item \code{bcomp}: most frequently selected component count across outer folds and
 repeated runs.
 \item \code{backend}, \code{method}: default backend and PLS method supplied to the call.

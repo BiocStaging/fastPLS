@@ -121,10 +121,12 @@ if [ "${use_openblas}" = "auto" ]; then
   else
     use_openblas="0"
   fi
-elif [ "${use_openblas}" = "1" ] && ! find_openblas; then
-  echo "ERROR: FASTPLS_USE_OPENBLAS=1 but OpenBLAS was not found." >&2
-  echo "Install the static OpenBLAS development archive for Rtools or set OPENBLAS_ROOT." >&2
-  exit 1
+elif [ "${use_openblas}" = "1" ]; then
+  if ! find_openblas; then
+    echo "ERROR: FASTPLS_USE_OPENBLAS=1 but OpenBLAS was not found." >&2
+    echo "Install the static OpenBLAS development archive for Rtools or set OPENBLAS_ROOT." >&2
+    exit 1
+  fi
 elif [ "${use_openblas}" != "0" ]; then
   echo "ERROR: FASTPLS_USE_OPENBLAS must be auto, 0, or 1." >&2
   exit 1
