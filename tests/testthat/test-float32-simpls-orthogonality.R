@@ -12,8 +12,7 @@ test_that("float32 SIMPLS retains score orthogonality on ill-conditioned paths",
     for (backend in backends) {
         solvers <- if (backend == "cuda") "rsvd" else "rsvd"
         for (solver in solvers) {
-            model <- suppressWarnings(pls(X, Y, ncomp = 30L,
-                svd.method = solver, backend = backend, seed = 29,
+            model <- suppressWarnings(pls(X, Y, ncomp = 30L, backend = backend, seed = 29,
                 fit = TRUE, return_variance = FALSE))
             internal <- fastPLS:::.fastpls_restore_internal_output_fields(model)
             scores <- float::dbl(internal$Ttrain)

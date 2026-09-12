@@ -12,7 +12,6 @@ pls.single.cv(
   scaling = c("centering", "autoscaling", "none"),
   method = c("simpls", "plssvd", "opls", "kernelpls"),
   backend = NULL,
-  svd.method = "rsvd",
   seed = 1L,
   kfold = 10,
   north = 1L,
@@ -57,9 +56,6 @@ orchestration and prediction. When omitted,
 \code{options(backend = ...)} defines the session default; \code{options(cores = n)}
 controls the CPU thread request. Every requested backend must be available;
 unavailable accelerator entries raise an error instead of using CPU.}
-
-\item{svd.method}{SVD algorithm. Only \code{rsvd}, the native randomized
-SVD for the selected backend, is supported.}
 
 \item{seed}{Random seed used for fold assignment and randomized SVD steps.}
 
@@ -198,13 +194,12 @@ X <- as.matrix(iris[idx, seq_len(4)])
 y <- factor(iris[idx, 5])
 opt <- pls.single.cv(X, y,
     ncomp = seq_len(2), kfold = 3, method = "simpls",
-    backend = "cpu", svd.method = "rsvd", seed = 1
+    backend = "cpu", seed = 1
 )
 opt$best_ncomp
 opt_kernel <- pls.single.cv(X, y,
     ncomp = seq_len(2), kfold = 3,
     method = "kernelpls", backend = "cpu",
-    svd.method = "rsvd",
     kernel = c("linear", "rbf"),
     gamma = c(0.1, 1), seed = 1
 )

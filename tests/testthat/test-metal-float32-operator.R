@@ -7,7 +7,7 @@ test_that("Metal float32 deflation updates the operation-split operator", {
         call_fit <- function(x, components) {
             suppressWarnings(pls(
                 x, Y, Xtest = X[101:120, , drop = FALSE],
-                ncomp = components, svd.method = solver, backend = "metal",
+                ncomp = components, backend = "metal",
                 oversample = 3, power = 2, fit = TRUE, seed = 51
             ))
         }

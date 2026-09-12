@@ -12,7 +12,6 @@ pls(
   ncomp = 2,
   scaling = c("centering", "autoscaling", "none"),
   method = c("simpls", "plssvd", "opls", "kernelpls"),
-  svd.method = "rsvd",
   classifier = c("argmax", "lda"),
   lda_ridge = NULL,
   fit = FALSE,
@@ -56,9 +55,6 @@ at the corresponding numerical rank and report the effective counts.}
 \item{method}{One of \code{simpls}, \code{plssvd}, \code{opls}, or
 \code{kernelpls}.
 \code{simpls} uses the fastPLS accelerated SIMPLS core.}
-
-\item{svd.method}{SVD algorithm. Only \code{rsvd}, the native randomized
-SVD for the selected backend, is supported.}
 
 \item{classifier}{Classification decision rule. \code{argmax} keeps the
 standard PLS-DA response-score argmax. \code{lda} fits a regularized LDA
@@ -335,13 +331,13 @@ X <- as.matrix(mtcars[, c("disp", "hp", "wt", "qsec")])
 y <- mtcars$mpg
 fit <- pls(X, y,
     ncomp = 2, method = "simpls", backend = "cpu",
-    svd.method = "rsvd", return_variance = FALSE
+    return_variance = FALSE
 )
 head(predict(fit, X)$Ypred)
 
 cv <- pls.single.cv(X, y,
     ncomp = seq_len(2), kfold = 3, method = "simpls",
-    backend = "cpu", svd.method = "rsvd", seed = 1
+    backend = "cpu", seed = 1
 )
 fit_cv <- pls(cv, Xtest = X, return_variance = FALSE)
 cv$best_ncomp

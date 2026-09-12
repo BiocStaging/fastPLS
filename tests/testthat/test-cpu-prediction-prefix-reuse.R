@@ -7,7 +7,7 @@ test_that("compiled CPU prediction reuses scores for rSVD and IRLBA paths", {
     for (family in c("simpls", "plssvd")) {
         for (solver in "rsvd") {
             fit <- suppressWarnings(pls(X[1:80, ], Y[1:80, ],
-                ncomp = c(1L, 3L, 6L), method = family, svd.method = solver,
+                ncomp = c(1L, 3L, 6L), method = family,
                 backend = "cpu", scaling = "autoscaling", seed = 11))
             raw <- fastPLS:::.fastpls_restore_internal_output_fields(fit)
             raw$B <- NULL

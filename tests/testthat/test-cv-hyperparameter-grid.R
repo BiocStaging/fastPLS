@@ -10,7 +10,6 @@ test_that("pls.single.cv tunes prediction hyperparameters", {
     kfold = 3,
     method = "kernelpls",
     backend = "cpu",
-    svd.method = "rsvd",
     kernel = c("linear", "rbf"),
     gamma = c(0.1, 1),
     seed = 1
@@ -37,7 +36,6 @@ test_that("pls.double.cv uses inner selected hyperparameters", {
     kfold_outer = 2,
     method = "kernelpls",
     backend = "cpu",
-    svd.method = "rsvd",
     kernel = c("linear", "rbf"),
     gamma = c(0.1, 1),
     seed = 1
@@ -112,7 +110,6 @@ test_that("pls refits and predicts from a pls.single.cv result", {
     kfold = 3,
     method = "simpls",
     backend = "cpu",
-    svd.method = "rsvd",
     classifier = c("argmax", "lda"),
     seed = 2106
   )
@@ -144,7 +141,6 @@ test_that("pls refits regression models selected by pls.single.cv", {
     kfold = 3,
     method = "simpls",
     backend = "cpu",
-    svd.method = "rsvd",
     seed = 2107,
     fit = FALSE
   )
@@ -175,7 +171,6 @@ test_that("OPLS component selection returns fitted R2 output", {
     kfold = 3,
     method = "opls",
     backend = "cpu",
-    svd.method = "rsvd",
     classifier = "argmax",
     fit = TRUE,
     seed = 7

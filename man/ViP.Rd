@@ -21,7 +21,7 @@ X <- as.matrix(mtcars[, c("disp", "hp", "wt", "qsec")])
 y <- mtcars$mpg
 fit <- pls(X, y,
     ncomp = 1, method = "plssvd", backend = "cpu",
-    svd.method = "rsvd", fit = TRUE, return_variance = FALSE
+    fit = TRUE, return_variance = FALSE
 )
 ViP(fit)
 }

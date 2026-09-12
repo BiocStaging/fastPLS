@@ -1,8 +1,9 @@
-test_that("public PLS APIs reject removed solvers and controls", {
+test_that("public PLS APIs do not expose an SVD selector", {
     X <- as.matrix(iris[, 1:4])
     y <- iris$Species
     for (fun in list(pls, pls.single.cv, pls.double.cv)) {
-        expect_identical(formals(fun)$svd.method, "rsvd")
+        expect_false("svd.method" %in% names(formals(fun)))
+        expect_error(fun(X, y, svd.method = "rsvd"), "has been removed")
         expect_error(fun(X, y, svd.method = "irlba"), "svd.method")
         expect_error(fun(X, y, svd.method = c("rsvd", "irlba")), "svd.method")
         expect_error(fun(X, y, work = 20L), "Unknown entr")
@@ -44,7 +45,6 @@ test_that("IRLBA environment and public control registries are removed", {
     expect_false(any(grepl("irlba", names(registry), ignore.case = TRUE)))
     expect_setequal(names(fastPLS:::.svd_direct_aliases()),
         c("oversample", "power"))
-    expect_identical(fastPLS:::.svd_methods_public, "rsvd")
     expect_error(fastPLS:::.svd_method_id("irlba"), "arg.*should be")
 })
 

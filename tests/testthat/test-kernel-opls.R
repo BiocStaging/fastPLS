@@ -12,8 +12,7 @@ test_that("kernel PLS C++ wrapper predicts classification labels", {
     ncomp = 1:2,
     method = "kernelpls",
     backend = "cpp",
-    kernel = "rbf",
-    svd.method = "cpu_rsvd"
+    kernel = "rbf"
   )
 
   expect_s3_class(fit_cpp, "fastPLSKernel")
@@ -30,7 +29,7 @@ test_that("linear kernel PLS retains internal fields for later double prediction
   fit <- pls(
     X[-idx, , drop = FALSE], y[-idx], X[idx, , drop = FALSE], y[idx],
     ncomp = 1:2, method = "kernelpls", kernel = "linear",
-    backend = "cpu", svd.method = "rsvd", seed = 2205
+    backend = "cpu", seed = 2205
   )
 
   # Supplying Xtest at fit time and calling predict() again must both work.
@@ -55,8 +54,7 @@ test_that("kernelpls high-level wrapper dispatches to simpls", {
     ncomp = 1:2,
     method = "kernelpls",
     backend = "cpp",
-    kernel = "rbf",
-    svd.method = "cpu_rsvd"
+    kernel = "rbf"
   )
 
   expect_s3_class(fit_fast, "fastPLSKernel")
@@ -77,8 +75,7 @@ test_that("OPLS C++ wrapper predicts regression matrices", {
     ncomp = 1:2,
     method = "opls",
     backend = "cpp",
-    north = 1L,
-    svd.method = "cpu_rsvd"
+    north = 1L
   )
 
   expect_s3_class(fit_cpp, "fastPLSOpls")
@@ -100,8 +97,7 @@ test_that("opls high-level wrapper dispatches to simpls", {
     ncomp = 1:2,
     method = "opls",
     backend = "cpp",
-    north = 1L,
-    svd.method = "cpu_rsvd"
+    north = 1L
   )
 
   expect_s3_class(fit, "fastPLSOpls")

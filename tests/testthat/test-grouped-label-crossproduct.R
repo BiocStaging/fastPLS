@@ -6,13 +6,12 @@ test_that("grouped-label BLAS products preserve SIMPLS predictions", {
     shuffled <- sample.int(nrow(X))
 
     grouped_fit <- pls(
-        X, labels, ncomp = 1:6, method = "simpls", backend = "cpu",
-        svd.method = "rsvd", seed = 19, oversample = 12, power = 3,
+        X, labels, ncomp = 1:6, method = "simpls", backend = "cpu", seed = 19, oversample = 12, power = 3,
         return_variance = FALSE
     )
     shuffled_fit <- pls(
         X[shuffled, , drop = FALSE], labels[shuffled], ncomp = 1:6,
-        method = "simpls", backend = "cpu", svd.method = "rsvd", seed = 19,
+        method = "simpls", backend = "cpu", seed = 19,
         oversample = 12, power = 3, return_variance = FALSE
     )
 
@@ -32,7 +31,7 @@ test_that("grouped-label float32 products preserve class predictions", {
     fit_once <- function(index) {
         suppressWarnings(pls(
             float::fl(X[index, , drop = FALSE]), labels[index], ncomp = 1:5,
-            method = "simpls", backend = "cpu", svd.method = "rsvd",
+            method = "simpls", backend = "cpu",
             seed = 23, oversample = 10, power = 3, return_variance = FALSE
         ))
     }
@@ -63,7 +62,7 @@ test_that("float32 class-sum fallback preserves preprocessing statistics", {
     fit_once <- function(index) {
         suppressWarnings(pls(
             float::fl(X[index, , drop = FALSE]), labels[index], ncomp = 1:4,
-            method = "simpls", backend = "cpu", svd.method = "rsvd",
+            method = "simpls", backend = "cpu",
             seed = 29, oversample = 10, power = 3,
             return_variance = FALSE
         ))
@@ -91,8 +90,7 @@ test_that("compact float32 class prediction matches retained-score paths", {
         for (classifier in c("argmax", "lda")) {
             fit <- suppressWarnings(pls(
                 predictors, labels, ncomp = 1:3, method = method,
-                classifier = classifier, backend = "cpu",
-                svd.method = "rsvd", oversample = 32L, power = 5L,
+                classifier = classifier, backend = "cpu", oversample = 32L, power = 5L,
                 seed = 123L, return_variance = FALSE
             ))
             compact <- predict(fit, predictors, backend = "cpu")$Ypred

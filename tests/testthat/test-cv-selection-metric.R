@@ -10,7 +10,6 @@ test_that("pls.single.cv can optimize explicit regression metrics", {
     kfold = 3,
     method = "simpls",
     backend = "cpu",
-    svd.method = "rsvd",
     seed = 11,
     selection_metric = "r2"
   )
@@ -31,7 +30,6 @@ test_that("pls.single.cv can optimize explicit regression metrics", {
     kfold = 3,
     method = "simpls",
     backend = "cpu",
-    svd.method = "rsvd",
     seed = 11,
     selection_metric = "rmsd"
   )
@@ -116,7 +114,6 @@ test_that("classification cannot select on descriptive training R2", {
       kfold = 3,
       method = "simpls",
       backend = "cpu",
-      svd.method = "rsvd",
       seed = 15,
       selection_metric = "r2"
     ),
@@ -137,7 +134,6 @@ test_that("classification CV selects by accuracy and nested CV forwards the rule
     kfold = 3,
     method = "plssvd",
     backend = "cpu",
-    svd.method = "rsvd",
     seed = 12,
     selection_metric = "accuracy"
   )
@@ -156,7 +152,6 @@ test_that("classification CV selects by accuracy and nested CV forwards the rule
     kfold_outer = 3,
     method = "plssvd",
     backend = "cpu",
-    svd.method = "rsvd",
     seed = 13,
     selection_metric = "accuracy"
   )
@@ -180,7 +175,6 @@ test_that("balanced accuracy drives both classification selection and permutatio
     kfold = 3,
     method = "plssvd",
     backend = "cpu",
-    svd.method = "rsvd",
     seed = 121,
     selection_metric = "bacc",
     fit = FALSE
@@ -199,7 +193,6 @@ test_that("balanced accuracy drives both classification selection and permutatio
     kfold_outer = 2,
     method = "plssvd",
     backend = "cpu",
-    svd.method = "rsvd",
     classifier = "lda",
     seed = 122,
     selection_metric = "balanced_accuracy",
@@ -230,7 +223,6 @@ test_that("SIMPLS CV always stores prediction scores", {
     kfold = 3,
     method = "simpls",
     backend = "cpu",
-    svd.method = "rsvd",
     seed = 21,
     selection_metric = "rmsd"
   )
@@ -252,7 +244,6 @@ test_that("regression CV reports distinct training R2 and held-out Q2", {
     ncomp = 3,
     method = "simpls",
     backend = "cpu",
-    svd.method = "rsvd",
     fit = TRUE,
     return_variance = FALSE,
     seed = 31
@@ -263,7 +254,6 @@ test_that("regression CV reports distinct training R2 and held-out Q2", {
     ncomp = 1:3,
     method = "simpls",
     backend = "cpu",
-    svd.method = "rsvd",
     fit = TRUE,
     return_variance = FALSE,
     seed = 31
@@ -277,7 +267,6 @@ test_that("regression CV reports distinct training R2 and held-out Q2", {
     kfold = 4,
     method = "simpls",
     backend = "cpu",
-    svd.method = "rsvd",
     seed = 32,
     selection_metric = "q2"
   )
@@ -294,7 +283,6 @@ test_that("regression CV reports distinct training R2 and held-out Q2", {
     kfold_outer = 3,
     method = "simpls",
     backend = "cpu",
-    svd.method = "rsvd",
     seed = 33,
     selection_metric = "q2"
   )
@@ -316,7 +304,6 @@ test_that("pls.single.cv can skip the extra full-data fit", {
     kfold = 4,
     method = "simpls",
     backend = "cpu",
-    svd.method = "rsvd",
     seed = 21045,
     fit = TRUE
   )
@@ -327,7 +314,6 @@ test_that("pls.single.cv can skip the extra full-data fit", {
     kfold = 4,
     method = "simpls",
     backend = "cpu",
-    svd.method = "rsvd",
     seed = 21045,
     fit = FALSE
   )
@@ -352,7 +338,6 @@ test_that("classification CV keeps held-out accuracy separate from training R2",
     kfold = 3,
     method = "simpls",
     backend = "cpu",
-    svd.method = "rsvd",
     seed = 21046,
     fit = TRUE
   )
@@ -363,7 +348,6 @@ test_that("classification CV keeps held-out accuracy separate from training R2",
     kfold = 3,
     method = "simpls",
     backend = "cpu",
-    svd.method = "rsvd",
     seed = 21046,
     fit = FALSE
   )
@@ -373,7 +357,6 @@ test_that("classification CV keeps held-out accuracy separate from training R2",
     ncomp = 2,
     method = "simpls",
     backend = "cpu",
-    svd.method = "rsvd",
     fit = TRUE,
     return_variance = FALSE,
     seed = 21046
@@ -405,7 +388,6 @@ test_that("classification double CV reports Q2, R2, and accuracy separately", {
     kfold_outer = 3,
     method = "simpls",
     backend = "cpu",
-    svd.method = "rsvd",
     seed = 21047
   )
 
@@ -430,7 +412,6 @@ test_that("double CV omits repeated-run summaries for a single run", {
     kfold_outer = 2,
     method = "simpls",
     backend = "cpu",
-    svd.method = "rsvd",
     seed = 21048
   )
   repeated <- pls.double.cv(
@@ -442,7 +423,6 @@ test_that("double CV omits repeated-run summaries for a single run", {
     kfold_outer = 2,
     method = "simpls",
     backend = "cpu",
-    svd.method = "rsvd",
     seed = 21048
   )
 
@@ -464,7 +444,6 @@ test_that("RMSD selection does not overwrite Q2Y", {
     kfold = 4,
     method = "simpls",
     backend = "cpu",
-    svd.method = "rsvd",
     seed = 34,
     selection_metric = "rmsd"
   )
@@ -481,7 +460,6 @@ test_that("RMSD selection does not overwrite Q2Y", {
     kfold_outer = 3,
     method = "simpls",
     backend = "cpu",
-    svd.method = "rsvd",
     seed = 35,
     selection_metric = "rmsd"
   )

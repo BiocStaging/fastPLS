@@ -24,7 +24,6 @@ test_that("compiled LDA CV compacts classes absent from a training fold", {
                 kfold = 5,
                 method = method,
                 backend = backend,
-                svd.method = "rsvd",
                 classifier = "lda",
                 fit = FALSE,
                 seed = 104
@@ -51,7 +50,6 @@ test_that("PLS-LDA drops unused factor levels before fitting", {
         ncomp = 1:2,
         method = "simpls",
         backend = "cpu",
-        svd.method = "rsvd",
         classifier = "lda",
         seed = 105
     )
@@ -74,7 +72,6 @@ test_that("nested LDA CV retains rare-class holdouts without failing", {
         runn = 1,
         method = "simpls",
         backend = "cpu",
-        svd.method = "rsvd",
         classifier = "lda",
         seed = 106
     )

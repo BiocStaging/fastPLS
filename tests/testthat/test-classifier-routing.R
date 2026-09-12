@@ -20,7 +20,6 @@ test_that("retired classifier ABI is absent and top-k argmax remains available",
     ncomp = 1:2,
     method = "simpls",
     backend = "cpu",
-    svd.method = "rsvd",
     classifier = "argmax",
     return_variance = FALSE
   )

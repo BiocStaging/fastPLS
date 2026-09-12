@@ -77,12 +77,12 @@ test_that("factor and character labels use the same compact public route", {
     character_labels <- as.character(task$labels)
     factor_fit <- pls(
         task$X, task$labels, ncomp = 1:3, method = "simpls",
-        backend = "cpu", svd.method = "rsvd", seed = 73L,
+        backend = "cpu", seed = 73L,
         return_variance = FALSE
     )
     character_fit <- pls(
         task$X, character_labels, ncomp = 1:3, method = "simpls",
-        backend = "cpu", svd.method = "rsvd", seed = 73L,
+        backend = "cpu", seed = 73L,
         return_variance = FALSE
     )
 
@@ -128,7 +128,6 @@ test_that("dependency-free double PLS-SVD preserves compact predictions", {
         ncomp = components,
         method = "plssvd",
         backend = "cpu",
-        svd.method = "rsvd",
         fit = FALSE,
         return_variance = FALSE,
         oversample = 32L,
@@ -175,7 +174,6 @@ test_that("dependency-free double SIMPLS preserves compact predictions", {
         ncomp = components,
         method = "simpls",
         backend = "cpu",
-        svd.method = "rsvd",
         fit = FALSE,
         return_variance = FALSE,
         oversample = 32L,

@@ -13,7 +13,6 @@ test_that("pls metric paths are named by component count", {
     ncomp = ncomp,
     method = "simpls",
     backend = "cpu",
-    svd.method = "rsvd",
     fit = TRUE,
     return_variance = FALSE
   )
@@ -32,7 +31,6 @@ test_that("pls metric paths are named by component count", {
     ncomp = ncomp,
     method = "simpls",
     backend = "cpu",
-    svd.method = "rsvd",
     classifier = "argmax",
     fit = TRUE
   )
@@ -58,7 +56,6 @@ test_that("single-CV training R2 path is a named vector", {
     kfold = 3,
     method = "simpls",
     backend = "cpu",
-    svd.method = "rsvd",
     classifier = "argmax",
     fit = TRUE
   )
@@ -75,7 +72,6 @@ test_that("pls hides internal implementation fields from public output", {
     ncomp = 1:2,
     method = "simpls",
     backend = "cpu",
-    svd.method = "rsvd",
     classifier = "argmax",
     return_variance = FALSE
   )

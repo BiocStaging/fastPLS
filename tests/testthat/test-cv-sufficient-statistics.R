@@ -128,7 +128,6 @@ test_that("compiled implicit CV preserves the public large-response path", {
         ncomp = c(1L, 2L),
         kfold = 2L,
         scaling = "centering",
-        svd.method = "rsvd",
         seed = 19L,
         rsvd_oversample = 12L,
         rsvd_power = 1L,
@@ -193,8 +192,7 @@ test_that("sample-Gram centering preserves wide-response SIMPLS CV", {
         )
         pls.single.cv(
             X, Y, ncomp = c(3L, 5L), kfold = 2L,
-            method = "simpls", backend = "cpu", scaling = "centering",
-            svd.method = "rsvd", rsvd_oversample = 12L,
+            method = "simpls", backend = "cpu", scaling = "centering", rsvd_oversample = 12L,
             rsvd_power = 2L, seed = 31L, fit = FALSE
         )
     }
@@ -225,7 +223,7 @@ test_that("CUDA CV honors padded float32 response strides", {
     )
     common <- list(
         Xdata = X, Ydata = Y, ncomp = c(1L, 2L), kfold = 2L,
-        method = "plssvd", scaling = "centering", svd.method = "rsvd",
+        method = "plssvd", scaling = "centering",
         rsvd_oversample = 32L, rsvd_power = 5L, seed = 37L, fit = FALSE
     )
 

@@ -12,7 +12,6 @@ pls.double.cv(
   scaling = c("centering", "autoscaling", "none"),
   method = c("simpls", "plssvd", "opls", "kernelpls"),
   backend = NULL,
-  svd.method = "rsvd",
   seed = 1L,
   perm.test = FALSE,
   times = 100,
@@ -63,9 +62,6 @@ the same fixed operation split as \code{pls()}. When omitted,
 \code{options(backend = ...)} defines the session default; \code{options(cores = n)}
 controls the CPU thread request. Every requested backend must be available;
 unavailable accelerator entries raise an error instead of using CPU.}
-
-\item{svd.method}{SVD algorithm. Only \code{rsvd}, the native randomized
-SVD for the selected backend, is supported.}
 
 \item{seed}{Random seed used for outer/inner fold assignment and randomized
 SVD steps.}
@@ -216,8 +212,7 @@ X <- as.matrix(iris[idx, seq_len(4)])
 y <- factor(iris[idx, 5])
 dcv <- pls.double.cv(X, y,
     ncomp = seq_len(2), runn = 1, kfold_inner = 2,
-    kfold_outer = 2, method = "simpls", backend = "cpu",
-    svd.method = "rsvd", seed = 1
+    kfold_outer = 2, method = "simpls", backend = "cpu", seed = 1
 )
 names(dcv)
 }

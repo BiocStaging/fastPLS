@@ -52,7 +52,7 @@ test_that("CV metric outputs use the same complete-pair Spearman statistic", {
         matrix(rnorm(64 * 80), 64, 80)
     for (solver in "rsvd") {
         single <- pls.single.cv(X, Y, ncomp = 1:2, kfold = 2,
-            backend = "cpu", svd.method = solver, seed = 11)
+            backend = "cpu", seed = 11)
         for (index in seq_along(single$ncomp)) {
             prediction <- fastPLS:::.fastpls_component_prediction(
                 single$pred, index, single$ncomp, FALSE)
@@ -63,7 +63,7 @@ test_that("CV metric outputs use the same complete-pair Spearman statistic", {
         }
         nested <- pls.double.cv(X, Y, ncomp = 1:2,
             kfold_inner = 2, kfold_outer = 2, runn = 1,
-            backend = "cpu", svd.method = solver, seed = 11)
+            backend = "cpu", seed = 11)
         expected <- cor(as.vector(Y), as.vector(as.matrix(nested$Ypred)),
             method = "spearman")
         expect_equal(nested$metrics$aggregate$metrics$Spearman_r, expected,

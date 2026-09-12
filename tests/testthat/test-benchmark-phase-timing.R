@@ -14,16 +14,14 @@ test_that("SIMPLS phase timing is opt-in and hidden from public output", {
 
   Sys.unsetenv("FASTPLS_BENCH_PHASE_TIMING")
   ordinary <- pls(
-    X, y, ncomp = 1:3, method = "simpls", backend = "cpu",
-    svd.method = "rsvd", return_variance = FALSE
+    X, y, ncomp = 1:3, method = "simpls", backend = "cpu", return_variance = FALSE
   )
   expect_false("benchmark_phase_timing" %in% names(ordinary))
   expect_null(attr(ordinary, "fastPLS_internal", exact = TRUE)$benchmark_phase_timing)
 
   Sys.setenv(FASTPLS_BENCH_PHASE_TIMING = "1")
   measured <- pls(
-    X, y, ncomp = 1:3, method = "simpls", backend = "cpu",
-    svd.method = "rsvd", return_variance = FALSE
+    X, y, ncomp = 1:3, method = "simpls", backend = "cpu", return_variance = FALSE
   )
   expect_false("benchmark_phase_timing" %in% names(measured))
   timing <- attr(measured, "fastPLS_internal", exact = TRUE)$benchmark_phase_timing

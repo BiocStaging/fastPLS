@@ -1,3 +1,14 @@
+# fastPLS 0.99.62
+
+* Removed the redundant `svd.method` argument from `pls()`,
+  `pls.single.cv()`, and `pls.double.cv()`. These functions now select the
+  native rSVD implementation automatically for the requested CPU, CUDA, or
+  Metal backend; rSVD accuracy controls remain available through `...`.
+
+* Removed the solver field from cross-validation tuning output and automatic
+  refit calls. Calls that still supply the retired argument fail with a clear
+  migration message rather than silently ignoring it.
+
 # fastPLS 0.99.61
 
 * Corrected nested-CV endpoint handling so explicit R2 and Q2 selection can no

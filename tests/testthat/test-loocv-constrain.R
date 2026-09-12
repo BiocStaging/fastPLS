@@ -12,7 +12,6 @@ test_that("LOOCV leaves out one constraint group at a time", {
     kfold = "loocv",
     method = "simpls",
     backend = "cpu",
-    svd.method = "rsvd",
     seed = 11
   )
 
@@ -37,7 +36,6 @@ test_that("numeric kfold at group count also means constrained LOOCV", {
     kfold = nrow(X),
     method = "simpls",
     backend = "cpu",
-    svd.method = "rsvd",
     seed = 12
   )
 
@@ -62,7 +60,6 @@ test_that("LOOCV grouped splitting also works for regression responses", {
     kfold = "loocv",
     method = "plssvd",
     backend = "cpu",
-    svd.method = "rsvd",
     seed = 14
   )
 
@@ -89,7 +86,6 @@ test_that("double CV accepts LOOCV for the outer grouped split", {
     kfold_outer = "loocv",
     method = "simpls",
     backend = "cpu",
-    svd.method = "rsvd",
     seed = 13
   )
 

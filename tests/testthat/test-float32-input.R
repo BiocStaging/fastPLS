@@ -184,7 +184,7 @@ test_that("portable core CPU implementation preserves float32 PLS data", {
   y <- float::fl(matrix(mtcars$mpg, ncol = 1L))
   fit <- pls(
     X, y, ncomp = 1:2, scaling = "centering", method = "simpls",
-    backend = "cpu", svd.method = "rsvd", rsvd_oversample = 5L,
+    backend = "cpu", rsvd_oversample = 5L,
     rsvd_power = 1L, seed = 149L, fit = TRUE,
     return_variance = FALSE
   )
@@ -211,7 +211,7 @@ test_that("Windows public float32 OPLS and nonlinear kernel PLS support LDA", {
     fit <- suppressWarnings(pls(
       Xtrain, ytrain, Xtest, ytest,
       ncomp = 2L, method = method, kernel = "rbf", north = 1L,
-      backend = "cpu", svd.method = "rsvd", classifier = "lda",
+      backend = "cpu", classifier = "lda",
       return_variance = FALSE, seed = 1491L
     ))
     expect_identical(attr(fit, "fastPLS_internal")$precision, "float32")
@@ -226,7 +226,7 @@ test_that("portable Windows float32 SVD implementation returns float32 vectors",
   set.seed(150)
   A <- float::fl(matrix(rnorm(48), nrow = 12L))
   out <- fastPLS:::.fastsvd_float32_windows(
-    A, k = 3L, backend = "cpu", svd.method = "cpu_rsvd",
+    A, k = 3L, backend = "cpu",
     oversample = 4L, power = 1L, seed = 150L
   )
 
@@ -250,7 +250,6 @@ test_that("pls accepts float32 regression input without upcasting predictions", 
     ncomp = 1:2,
     method = "simpls",
     backend = "cpu",
-    svd.method = "rsvd",
     fit = TRUE,
     return_variance = FALSE
   )
@@ -288,7 +287,6 @@ test_that("float32 detection handles S4 float matrices used in the vignette", {
     ncomp = 1:2,
     method = "simpls",
     backend = "cpu",
-    svd.method = "rsvd",
     return_variance = FALSE
   )
 
@@ -305,7 +303,6 @@ test_that("float32 detection handles S4 float matrices used in the vignette", {
     ncomp = 1:2,
     method = "simpls",
     backend = "cpu",
-    svd.method = "rsvd",
     return_variance = FALSE
   )
   expect_equal(unname(fit_reg32$Q2Y), unname(fit_reg64$Q2Y), tolerance = 1e-3)
@@ -325,7 +322,6 @@ test_that("pls accepts float32 classification input with argmax", {
     ncomp = 2,
     method = "plssvd",
     backend = "cpu",
-    svd.method = "rsvd",
     classifier = "argmax",
     return_variance = FALSE
   )
@@ -415,7 +411,6 @@ test_that("dependency-free float32 PLS-SVD preserves compact predictions", {
     ncomp = components,
     method = "plssvd",
     backend = "cpu",
-    svd.method = "rsvd",
     classifier = "argmax",
     fit = FALSE,
     return_variance = FALSE,
@@ -448,7 +443,6 @@ test_that("float32 classification avoids fitted and double-score work by default
     ncomp = c(2L, 4L),
     method = "simpls",
     backend = "cpu",
-    svd.method = "rsvd",
     fit = FALSE,
     return_variance = FALSE,
     power = 2L,
@@ -499,7 +493,6 @@ test_that("float32 input supports CPU rSVD for regression and classification", {
       ncomp = 1:2,
       method = "simpls",
       backend = "cpu",
-      svd.method = "rsvd",
       return_variance = FALSE
     )
   )
@@ -517,7 +510,6 @@ test_that("float32 input supports CPU rSVD for regression and classification", {
     ncomp = 2,
     method = "plssvd",
     backend = "cpu",
-    svd.method = "rsvd",
     classifier = "argmax",
     return_variance = FALSE
   )
@@ -539,7 +531,6 @@ test_that("pls.single.cv preserves float32 input instead of entering the double 
     kfold = 3,
     method = "simpls",
     backend = "cpu",
-    svd.method = "rsvd",
     fit = FALSE,
     seed = 148
   )
@@ -577,7 +568,6 @@ test_that("public CUDA float32 PLS is resident and standalone SVD is rejected", 
     ncomp = 2,
     method = "simpls",
     backend = "cuda",
-    svd.method = "rsvd",
     classifier = "argmax",
     return_variance = FALSE
   )
@@ -704,7 +694,6 @@ test_that("float32 accelerator SIMPLS retains a nonempty reduced left basis", {
       ncomp = 3L,
       method = "simpls",
       backend = backend,
-      svd.method = "rsvd",
       classifier = "argmax",
       oversample = 8L,
       power = 2L,
@@ -735,7 +724,6 @@ test_that("pls supports float32 Metal backend when available", {
     ncomp = 1:2,
     method = "simpls",
     backend = "metal",
-    svd.method = "rsvd",
     return_variance = FALSE
   )
   expect_s3_class(fit, "fastPLS")
@@ -767,7 +755,6 @@ test_that("pls supports the float32 LDA classifier", {
     ncomp = 2:3,
     method = "simpls",
     backend = "cpu",
-    svd.method = "rsvd",
     classifier = "lda",
     return_variance = FALSE
   )
@@ -821,7 +808,6 @@ test_that("float32 argmax top-k uses bounded output with unchanged rankings", {
     ncomp = 1:3,
     method = "simpls",
     backend = "cpu",
-    svd.method = "rsvd",
     classifier = "argmax",
     return_variance = FALSE,
     seed = 19
@@ -857,14 +843,12 @@ test_that("float32 OPLS supports regression, classification, and independent pre
 
   fit32 <- pls(
     float::fl(Xtrain), ytrain, float::fl(Xtest), ytest,
-    ncomp = 2, method = "opls", north = 1, backend = "cpu",
-    svd.method = "rsvd", classifier = "lda", return_variance = FALSE,
+    ncomp = 2, method = "opls", north = 1, backend = "cpu", classifier = "lda", return_variance = FALSE,
     seed = 12
   )
   fit64 <- pls(
     Xtrain, ytrain, Xtest, ytest,
-    ncomp = 2, method = "opls", north = 1, backend = "cpu",
-    svd.method = "rsvd", classifier = "lda", return_variance = FALSE,
+    ncomp = 2, method = "opls", north = 1, backend = "cpu", classifier = "lda", return_variance = FALSE,
     seed = 12
   )
 
@@ -883,8 +867,7 @@ test_that("float32 OPLS supports regression, classification, and independent pre
     float::fl(Yreg[1:24, , drop = FALSE]),
     float::fl(Xreg[25:32, , drop = FALSE]),
     float::fl(Yreg[25:32, , drop = FALSE]),
-    ncomp = 1:2, method = "opls", backend = "cpu",
-    svd.method = "rsvd", fit = TRUE, return_variance = FALSE, seed = 13
+    ncomp = 1:2, method = "opls", backend = "cpu", fit = TRUE, return_variance = FALSE, seed = 13
   )
   expect_true(all(is.finite(reg32$Q2Y)))
   expect_true(all(vapply(reg32$Ypred, inherits, logical(1L), "float32")))
@@ -904,15 +887,13 @@ test_that("float32 kernel PLS-LDA supports linear, RBF, and polynomial kernels",
     fit32 <- suppressWarnings(
       pls(
         float::fl(Xtrain), ytrain, float::fl(Xtest), ytest,
-        ncomp = 2, method = "kernelpls", kernel = kernel, backend = "cpu",
-        svd.method = "rsvd", classifier = "lda", return_variance = FALSE,
+        ncomp = 2, method = "kernelpls", kernel = kernel, backend = "cpu", classifier = "lda", return_variance = FALSE,
         seed = 14
       )
     )
     fit64 <- pls(
       Xtrain, ytrain, Xtest, ytest,
-      ncomp = 2, method = "kernelpls", kernel = kernel, backend = "cpu",
-      svd.method = "rsvd", classifier = "lda", return_variance = FALSE,
+      ncomp = 2, method = "kernelpls", kernel = kernel, backend = "cpu", classifier = "lda", return_variance = FALSE,
       seed = 14
     )
     expect_identical(attr(fit32, "fastPLS_internal")$precision, "float32")
@@ -962,7 +943,7 @@ test_that("CUDA runs native OPLS and nonlinear kernel PLS routes", {
   )) {
     fit <- do.call(pls, c(list(
       X, y, X[1:12, ], y[1:12], ncomp = 2,
-      backend = "cuda", svd.method = "rsvd",
+      backend = "cuda",
       classifier = "lda", return_variance = FALSE, seed = 16
     ), arguments))
     expect_identical(

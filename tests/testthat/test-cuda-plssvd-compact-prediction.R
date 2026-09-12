@@ -21,7 +21,6 @@ test_that("resident CUDA PLS-SVD stays compact across storage hints", {
     ncomp = 1:2,
     method = "plssvd",
     backend = "cuda",
-    svd.method = "rsvd",
     seed = 902,
     return_variance = FALSE
   )
@@ -32,7 +31,6 @@ test_that("resident CUDA PLS-SVD stays compact across storage hints", {
     ncomp = 1:2,
     method = "plssvd",
     backend = "cuda",
-    svd.method = "rsvd",
     seed = 902,
     return_variance = FALSE
   )

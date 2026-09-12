@@ -16,7 +16,6 @@ test_that("pls supports the CPU method, solver, and task grid", {
         y_reg[idx, , drop = FALSE],
         ncomp = 1:2,
         method = m,
-        svd.method = s,
         fit = TRUE
       )
       expect_s3_class(fit_reg, "fastPLS")
@@ -30,7 +29,6 @@ test_that("pls supports the CPU method, solver, and task grid", {
         y_cls[idx],
         ncomp = 1:2,
         method = m,
-        svd.method = s,
         fit = TRUE
       )
       expect_s3_class(fit_cls, "fastPLS")
@@ -44,7 +42,6 @@ test_that("pls supports the CPU method, solver, and task grid", {
         y_cls[idx],
         ncomp = 1:2,
         method = m,
-        svd.method = s,
         classifier = "lda",
         fit = TRUE
       )
@@ -69,8 +66,7 @@ test_that("pls.single.cv and pls.double.cv support accelerated simpls", {
         Ydata = y_reg,
         ncomp = 1:2,
         kfold = 3,
-        method = m,
-        svd.method = s
+        method = m
       )
       expect_true(is.list(cv_reg))
       expect_true("Q2Y" %in% names(cv_reg))
@@ -80,8 +76,7 @@ test_that("pls.single.cv and pls.double.cv support accelerated simpls", {
         Ydata = y_cls,
         ncomp = 1:2,
         kfold = 3,
-        method = m,
-        svd.method = s
+        method = m
       )
       expect_true(is.list(cv_cls))
       expect_true("Q2Y" %in% names(cv_cls))
@@ -93,8 +88,7 @@ test_that("pls.single.cv and pls.double.cv support accelerated simpls", {
         runn = 1,
         kfold_inner = 3,
         kfold_outer = 3,
-        method = m,
-        svd.method = s
+        method = m
       )
       expect_true(is.list(dcv_reg))
       expect_true("Q2Y" %in% names(dcv_reg))
@@ -106,8 +100,7 @@ test_that("pls.single.cv and pls.double.cv support accelerated simpls", {
         runn = 1,
         kfold_inner = 3,
         kfold_outer = 3,
-        method = m,
-        svd.method = s
+        method = m
       )
       expect_true(is.list(dcv_cls))
       expect_true("Ypred" %in% names(dcv_cls))
@@ -120,19 +113,19 @@ test_that("unsupported backend labels are rejected", {
   X <- matrix(rnorm(24 * 6), nrow = 24, ncol = 6)
   Y <- matrix(rnorm(24), ncol = 1)
   expect_error(
-    pls(X, Y, ncomp = 1, backend = "r", svd.method = "cpu_rsvd"),
+    pls(X, Y, ncomp = 1, backend = "r"),
     "must be one of"
   )
 })
 
-test_that("all public decomposition and PLS functions default to rsvd", {
+test_that("public PLS functions use rSVD without a solver argument", {
   expect_identical(formals(fastsvd)$method, "rsvd")
-  expect_identical(formals(pls)$svd.method, "rsvd")
-  expect_identical(formals(pls.single.cv)$svd.method, "rsvd")
-  expect_identical(formals(pls.double.cv)$svd.method, "rsvd")
+  expect_false("svd.method" %in% names(formals(pls)))
+  expect_false("svd.method" %in% names(formals(pls.single.cv)))
+  expect_false("svd.method" %in% names(formals(pls.double.cv)))
 })
 
-test_that("omitted public SVD settings are equivalent to explicit rsvd", {
+test_that("the fixed public PLS solver remains reproducible", {
   set.seed(20260815)
   X <- matrix(rnorm(48 * 7), nrow = 48)
   Y <- matrix(rnorm(48 * 2), ncol = 2)
@@ -145,8 +138,7 @@ test_that("omitted public SVD settings are equivalent to explicit rsvd", {
 
   fit_default <- pls(X, Y, X, Y, ncomp = 1:2, backend = "cpu", seed = 19)
   fit_explicit <- pls(
-    X, Y, X, Y, ncomp = 1:2, backend = "cpu",
-    svd.method = "rsvd", seed = 19
+    X, Y, X, Y, ncomp = 1:2, backend = "cpu", seed = 19
   )
   expect_equal(fit_default$Ypred, fit_explicit$Ypred, tolerance = 1e-12)
 
@@ -154,8 +146,7 @@ test_that("omitted public SVD settings are equivalent to explicit rsvd", {
     X, Y, ncomp = 1:2, kfold = 3, backend = "cpu", seed = 19
   )
   single_explicit <- pls.single.cv(
-    X, Y, ncomp = 1:2, kfold = 3, backend = "cpu",
-    svd.method = "rsvd", seed = 19
+    X, Y, ncomp = 1:2, kfold = 3, backend = "cpu", seed = 19
   )
   expect_identical(single_default$best_ncomp, single_explicit$best_ncomp)
   expect_equal(single_default$Q2Y, single_explicit$Q2Y, tolerance = 1e-12)

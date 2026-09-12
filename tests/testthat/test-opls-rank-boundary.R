@@ -32,8 +32,7 @@ for (rank_backend in c("cpu", "cuda", "metal")) {
                     if (backend == "metal" && precision == "float64") {
                         expect_error(
                             pls(X, task$Y, method = "opls", north = 1L,
-                                ncomp = 1:3, backend = backend,
-                                svd.method = solver, seed = 19L),
+                                ncomp = 1:3, backend = backend, seed = 19L),
                             "does not provide native float64"
                         )
                         next
@@ -46,12 +45,12 @@ for (rank_backend in c("cpu", "cuda", "metal")) {
                             }
                             expect_error(suppressWarnings(pls(X, Y,
                                 method = "opls", north = 1L, ncomp = 8L,
-                                backend = backend, svd.method = solver,
+                                backend = backend,
                                 classifier = head, seed = 19L)),
                                 "OPLS requested 8 predictive components, but at most 7 remain")
                             fit <- suppressWarnings(pls(X, Y,
                                 method = "opls", north = 1L, ncomp = 1:3,
-                                backend = backend, svd.method = solver,
+                                backend = backend,
                                 classifier = head, seed = 19L))
                             model <- fastPLS:::.fastpls_restore_internal_output_fields(fit)
                             expect_equal(as.integer(model$ncomp), 1:3)

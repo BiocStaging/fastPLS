@@ -46,7 +46,6 @@ test_that("grouped nested permutation reports its inferential contract", {
     kfold_outer = 2,
     method = "simpls",
     backend = "cpu",
-    svd.method = "rsvd",
     classifier = "argmax",
     selection_metric = "balanced_accuracy",
     perm.test = TRUE,

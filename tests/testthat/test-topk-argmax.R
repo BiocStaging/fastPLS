@@ -9,7 +9,6 @@ test_that("top-k classification prediction preserves argmax by default", {
     y[-idx],
     ncomp = 1:3,
     method = "plssvd",
-    svd.method = "cpu_rsvd",
     seed = 123L
   )
 

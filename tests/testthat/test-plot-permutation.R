@@ -10,7 +10,6 @@ test_that("plot.permutation renders stored PLS permutation diagnostics", {
     ncomp = 2,
     method = "simpls",
     backend = "cpu",
-    svd.method = "rsvd",
     fit = TRUE,
     perm.test = TRUE,
     times = 3,

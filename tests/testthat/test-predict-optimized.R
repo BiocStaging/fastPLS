@@ -41,7 +41,6 @@ test_that("optimized prediction core preserves regression outputs", {
     Y[idx, , drop = FALSE],
     ncomp = c(1L, 3L, 5L),
     method = "simpls",
-    svd.method = "cpu_rsvd",
     fit = TRUE,
     seed = 123L
   )

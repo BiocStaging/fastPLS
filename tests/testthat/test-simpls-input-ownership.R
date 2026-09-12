@@ -9,8 +9,7 @@ test_that("SIMPLS fitting and prediction leave shared input matrices unchanged",
     for (backend in names(available)[available]) {
         for (scaling in c("none", "centering", "autoscaling")) {
             fit <- pls(
-                X, Y, ncomp = 3, scaling = scaling, backend = backend,
-                svd.method = "rsvd", seed = 17, return_variance = FALSE
+                X, Y, ncomp = 3, scaling = scaling, backend = backend, seed = 17, return_variance = FALSE
             )
             prediction <- predict(fit, Xtest, backend = backend)$Ypred
             expect_true(all(is.finite(prediction)))

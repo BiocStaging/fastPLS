@@ -12,7 +12,6 @@ test_that("SIMPLS reports the release direction-refresh rule", {
     ncomp = 1:3,
     method = "simpls",
     backend = "cpu",
-    svd.method = "rsvd",
     return_variance = FALSE,
     seed = 17
   )
@@ -33,8 +32,7 @@ test_that("rejected refresh environment variables no longer affect SIMPLS", {
   Y <- cbind(X[, 1] + rnorm(64, sd = 0.1), X[, 2] + rnorm(64, sd = 0.1))
 
   fit_reference <- pls(
-    X, Y, ncomp = 1:3, method = "simpls", backend = "cpu",
-    svd.method = "rsvd", return_variance = FALSE, seed = 19
+    X, Y, ncomp = 1:3, method = "simpls", backend = "cpu", return_variance = FALSE, seed = 19
   )
 
   old <- Sys.getenv(
@@ -49,8 +47,7 @@ test_that("rejected refresh environment variables no longer affect SIMPLS", {
   Sys.setenv(FASTPLS_FAST_INCREMENTAL = "1", FASTPLS_FAST_ADAPTIVE_RSVD = "1")
 
   fit_obsolete_env <- pls(
-    X, Y, ncomp = 1:3, method = "simpls", backend = "cpu",
-    svd.method = "rsvd", return_variance = FALSE, seed = 19
+    X, Y, ncomp = 1:3, method = "simpls", backend = "cpu", return_variance = FALSE, seed = 19
   )
 
   expect_equal(fit_obsolete_env$R, fit_reference$R, tolerance = 0)
@@ -71,8 +68,7 @@ test_that("available accelerator dispatches expose their SIMPLS rule", {
     X_backend <- if (backend == "metal") float::fl(X) else X
     Y_backend <- if (backend == "metal") float::fl(Y) else Y
     fit <- suppressWarnings(pls(
-      X_backend, Y_backend, ncomp = 1:2, method = "simpls", backend = backend,
-      svd.method = "rsvd", return_variance = FALSE, seed = 23
+      X_backend, Y_backend, ncomp = 1:2, method = "simpls", backend = backend, return_variance = FALSE, seed = 23
     ))
     expect_equal(ncol(fit$R), 2L, info = backend)
     expect_equal(ncol(fit$Q), 2L, info = backend)
@@ -350,7 +346,6 @@ test_that("CUDA rSVD repeats exactly when the seed is fixed", {
       ncomp = 4L,
       method = "simpls",
       backend = "cuda",
-      svd.method = "rsvd",
       seed = 77L,
       fit = TRUE,
       return_variance = FALSE
@@ -401,7 +396,6 @@ test_that("SIMPLS-family backends attach fresh-start diagnostics", {
         method = method,
         kernel = kernel,
         backend = backend,
-        svd.method = "rsvd",
         return_variance = FALSE,
         seed = 29
       ))

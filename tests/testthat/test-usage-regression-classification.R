@@ -11,7 +11,6 @@ test_that("pls and predict support regression workflow", {
     Y[idx, , drop = FALSE],
     ncomp = 1:3,
     method = "simpls",
-    svd.method = "cpu_rsvd",
     fit = TRUE
   )
 
@@ -46,7 +45,6 @@ test_that("pls and predict support classification workflow", {
     y[idx],
     ncomp = 1:2,
     method = "plssvd",
-    svd.method = "cpu_rsvd",
     fit = TRUE
   )
 
@@ -74,7 +72,6 @@ test_that("classification Yfit uses the same decoding as predict", {
     ncomp = 3,
     method = "simpls",
     backend = "cpu",
-    svd.method = "rsvd",
     classifier = "argmax",
     seed = 123
   )
@@ -86,7 +83,6 @@ test_that("classification Yfit uses the same decoding as predict", {
     ncomp = 3,
     method = "simpls",
     backend = "cpu",
-    svd.method = "rsvd",
     classifier = "argmax",
     seed = 123,
     fit = TRUE
@@ -109,8 +105,7 @@ test_that("pls.single.cv and pls.double.cv run in both contexts", {
     Ydata = Yreg,
     ncomp = 1:2,
     kfold = 3,
-    method = "simpls",
-    svd.method = "cpu_rsvd"
+    method = "simpls"
   )
   expect_true(is.list(cv_reg))
   expect_true("Q2Y" %in% names(cv_reg))
@@ -120,8 +115,7 @@ test_that("pls.single.cv and pls.double.cv run in both contexts", {
     Ydata = ycls,
     ncomp = 1:2,
     kfold = 3,
-    method = "simpls",
-    svd.method = "cpu_rsvd"
+    method = "simpls"
   )
   expect_true(is.list(cv_cls))
   expect_true("Q2Y" %in% names(cv_cls))
@@ -133,8 +127,7 @@ test_that("pls.single.cv and pls.double.cv run in both contexts", {
     runn = 2,
     kfold_inner = 3,
     kfold_outer = 3,
-    method = "simpls",
-    svd.method = "cpu_rsvd"
+    method = "simpls"
   )
   expect_true(is.list(dcv_reg))
   expect_true("Q2Y" %in% names(dcv_reg))
@@ -149,8 +142,7 @@ test_that("pls.single.cv and pls.double.cv run in both contexts", {
     runn = 2,
     kfold_inner = 3,
     kfold_outer = 3,
-    method = "simpls",
-    svd.method = "cpu_rsvd"
+    method = "simpls"
   )
   expect_true(is.list(dcv_cls))
   expect_true(is.factor(dcv_cls$Ypred))
@@ -169,7 +161,6 @@ test_that("compiled CV reports the prediction backend", {
     kfold = 3,
     method = "plssvd",
     backend = "cpu",
-    svd.method = "cpu_rsvd",
     seed = 123L
   )
   expect_identical(cpu_cv$backend, "cpu")
@@ -182,7 +173,6 @@ test_that("compiled CV reports the prediction backend", {
     kfold = 3,
     method = "plssvd",
     backend = "cpu",
-    svd.method = "cpu_rsvd",
     seed = 123L
   )
   expect_identical(cpu_opt$backend, "cpu")
@@ -197,7 +187,6 @@ test_that("compiled CV reports the prediction backend", {
     kfold_outer = 3,
     method = "plssvd",
     backend = "cpu",
-    svd.method = "cpu_rsvd",
     seed = 123L
   )
   expect_identical(cpu_double$backend, "cpu")
@@ -211,7 +200,6 @@ test_that("compiled CV reports the prediction backend", {
     kfold = 3,
     method = "plssvd",
     backend = "cuda",
-    svd.method = "rsvd",
     seed = 123L
   )
   expect_identical(cuda_cv$backend, "cuda")
@@ -225,7 +213,6 @@ test_that("compiled CV reports the prediction backend", {
     kfold = 3,
     method = "plssvd",
     backend = "cuda",
-    svd.method = "rsvd",
     seed = 123L
   )
   expect_identical(cuda_opt$backend, "cuda")
@@ -247,7 +234,7 @@ test_that("SVD utilities and helper functions are usable in practice", {
 
   y <- factor(sample(c("a", "b", "c"), nrow(A), replace = TRUE))
 
-  cls_model <- pls(A, y, ncomp = 1:2, method = "plssvd", svd.method = "cpu_rsvd")
+  cls_model <- pls(A, y, ncomp = 1:2, method = "plssvd")
   cls_pred <- predict(cls_model, A[1:5, , drop = FALSE])
   expect_true(is.data.frame(cls_pred$Ypred))
   expect_equal(nrow(cls_pred$Ypred), 5L)
@@ -259,7 +246,6 @@ test_that("SVD utilities and helper functions are usable in practice", {
     y[61:70],
     ncomp = 1:2,
     method = "opls",
-    svd.method = "cpu_rsvd",
     fit = TRUE,
     proj = TRUE
   )
@@ -280,12 +266,12 @@ test_that("SVD utilities and helper functions are usable in practice", {
   expect_true(is.numeric(C2))
   expect_equal(length(C2), 5L)
 
-  model_uni <- pls(A, matrix(rnorm(nrow(A)), ncol = 1), ncomp = 1:3, method = "simpls", svd.method = "cpu_rsvd", fit = TRUE)
+  model_uni <- pls(A, matrix(rnorm(nrow(A)), ncol = 1), ncomp = 1:3, method = "simpls", fit = TRUE)
   expect_identical(dim(model_uni$P), c(0L, 0L))
   vip_uni <- ViP(model_uni)
   expect_true(is.matrix(vip_uni))
 
-  model_multi <- pls(A, matrix(rnorm(nrow(A) * 2), ncol = 2), ncomp = 1:3, method = "simpls", svd.method = "cpu_rsvd", fit = TRUE)
+  model_multi <- pls(A, matrix(rnorm(nrow(A) * 2), ncol = 2), ncomp = 1:3, method = "simpls", fit = TRUE)
   expect_identical(dim(model_multi$P), c(0L, 0L))
   vip_multi <- ViP(model_multi)
   expect_true(is.list(vip_multi))
@@ -296,7 +282,6 @@ test_that("SVD utilities and helper functions are usable in practice", {
     matrix(rnorm(nrow(A) * 2), ncol = 2),
     ncomp = 1:3,
     method = "simpls",
-    svd.method = "cpu_rsvd",
     fit = TRUE,
     return_loadings = TRUE
   )

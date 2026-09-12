@@ -32,7 +32,6 @@ test_that("pls backend='cuda' requires CUDA or returns fastPLS output", {
       y[idx],
       ncomp = 1:3,
       method = "plssvd",
-      svd.method = "cpu_rsvd",
       fit = TRUE,
       seed = 77L
     )

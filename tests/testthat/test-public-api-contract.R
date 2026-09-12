@@ -15,12 +15,12 @@ test_that("deprecated lda_ridge warns and cannot change the fitted estimator", {
   X <- as.matrix(iris[idx, 1:4])
   y <- factor(iris[idx, 5])
   base <- pls(
-    X, y, X, y, ncomp = 2, method = "simpls", svd.method = "rsvd",
+    X, y, X, y, ncomp = 2, method = "simpls",
     classifier = "lda", backend = "cpu", return_variance = FALSE
   )
   expect_warning(
     deprecated <- pls(
-      X, y, X, y, ncomp = 2, method = "simpls", svd.method = "rsvd",
+      X, y, X, y, ncomp = 2, method = "simpls",
       classifier = "lda", lda_ridge = 0.5, backend = "cpu",
       return_variance = FALSE
     ),
@@ -37,8 +37,7 @@ test_that("cross-validation does not tune deprecated lda_ridge", {
   y <- factor(iris[idx, 5])
   expect_warning(
     cv <- pls.single.cv(
-      X, y, ncomp = 1:2, kfold = 3, method = "simpls",
-      svd.method = "rsvd", classifier = "lda", lda_ridge = 0.25,
+      X, y, ncomp = 1:2, kfold = 3, method = "simpls", classifier = "lda", lda_ridge = 0.25,
       backend = "cpu", fit = FALSE, seed = 12
     ),
     "deprecated and ignored"
@@ -55,7 +54,7 @@ test_that("double CV deprecates lda_ridge without propagating it", {
   expect_warning(
     cv <- pls.double.cv(
       X, y, ncomp = 1, kfold_inner = 2, kfold_outer = 2, runn = 1,
-      method = "simpls", svd.method = "rsvd", classifier = "lda",
+      method = "simpls", classifier = "lda",
       lda_ridge = 0.1, backend = "cpu", seed = 13
     ),
     "deprecated and ignored"

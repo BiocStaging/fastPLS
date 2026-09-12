@@ -8,7 +8,6 @@ dense_simpls_reference <- function(X, Y, ncomp, ...) {
     ncomp = ncomp,
     method = "simpls",
     backend = "cpu",
-    svd.method = "rsvd",
     oversample = min(ncol(X), ncol(Y)),
     power = 0L,
     seed = 1L,
@@ -22,7 +21,7 @@ test_that("pls defaults to randomized SVD", {
   Y <- matrix(rnorm(70 * 4), nrow = 70, ncol = 4)
 
   m_default <- pls(X, Y, ncomp = 1:3, fit = TRUE)
-  m_explicit <- pls(X, Y, ncomp = 1:3, fit = TRUE, svd.method = "rsvd")
+  m_explicit <- pls(X, Y, ncomp = 1:3, fit = TRUE)
 
   align_signs <- function(ref, x) {
     out <- x
@@ -50,7 +49,6 @@ test_that("pls accepts SVD tuning through compact dots", {
     Y,
     ncomp = 1:3,
     fit = TRUE,
-    svd.method = "cpu_rsvd",
     oversample = 8L,
     power = 2L,
     seed = 123L
@@ -60,7 +58,6 @@ test_that("pls accepts SVD tuning through compact dots", {
     Y,
     ncomp = 1:3,
     fit = TRUE,
-    svd.method = "cpu_rsvd",
     oversample = 8L,
     power = 2L,
     seed = 123L
@@ -70,7 +67,6 @@ test_that("pls accepts SVD tuning through compact dots", {
     Y,
     ncomp = 1:3,
     fit = TRUE,
-    svd.method = "cpu_rsvd",
     rsvd_oversample = 8L,
     rsvd_power = 2L,
     seed = 123L
@@ -91,8 +87,7 @@ test_that("cpu_rsvd tracks dense-SVD SIMPLS on PLS outputs", {
     X,
     Y,
     ncomp = 1:4,
-    fit = TRUE,
-    svd.method = "rsvd"
+    fit = TRUE
   )
 
   rsvd <- pls(
@@ -100,7 +95,6 @@ test_that("cpu_rsvd tracks dense-SVD SIMPLS on PLS outputs", {
     Y,
     ncomp = 1:4,
     fit = TRUE,
-    svd.method = "cpu_rsvd",
     rsvd_oversample = 12L,
     rsvd_power = 2L,
     seed = 123L
@@ -123,7 +117,6 @@ test_that("cpu_rsvd is deterministic with a fixed seed", {
     Y,
     ncomp = 1:5,
     fit = TRUE,
-    svd.method = "cpu_rsvd",
     rsvd_oversample = 5L,
     rsvd_power = 1L,
     seed = 777L
@@ -134,7 +127,6 @@ test_that("cpu_rsvd is deterministic with a fixed seed", {
     Y,
     ncomp = 1:5,
     fit = TRUE,
-    svd.method = "cpu_rsvd",
     rsvd_oversample = 5L,
     rsvd_power = 1L,
     seed = 777L
@@ -145,7 +137,6 @@ test_that("cpu_rsvd is deterministic with a fixed seed", {
     Y,
     ncomp = 1:5,
     fit = TRUE,
-    svd.method = "cpu_rsvd",
     rsvd_oversample = 5L,
     rsvd_power = 1L,
     seed = 778L
@@ -231,7 +222,6 @@ test_that("core prediction is stable for compiled PLS", {
       ncomp = 1:4,
       method = method,
       backend = "cpp",
-      svd.method = "cpu_rsvd",
       rsvd_oversample = 32L,
       rsvd_power = 5L,
       seed = 17L
@@ -242,7 +232,6 @@ test_that("core prediction is stable for compiled PLS", {
       ncomp = 1:4,
       method = method,
       backend = "cpp",
-      svd.method = "cpu_rsvd",
       rsvd_oversample = 32L,
       rsvd_power = 5L,
       seed = 17L
@@ -266,11 +255,14 @@ test_that("GPU availability helpers return scalar logical values", {
   expect_length(metal_flag, 1L)
 })
 
-test_that("pls validates svd.method through the compact CPU backend choices", {
+test_that("pls rejects the removed svd.method argument", {
   set.seed(1)
   X <- matrix(rnorm(40 * 10), nrow = 40, ncol = 10)
   Y <- matrix(rnorm(40 * 3), nrow = 40, ncol = 3)
-  expect_error(pls(X, Y, ncomp = 1:2, svd.method = "cuda_rsvd"), "arg.*should be")
+  expect_error(
+    pls(X, Y, ncomp = 1:2, svd.method = "rsvd"),
+    "svd.method has been removed"
+  )
 })
 
 test_that("simpls path agrees with a dense-SVD reference", {
@@ -283,8 +275,7 @@ test_that("simpls path agrees with a dense-SVD reference", {
     Y,
     ncomp = 1:5,
     fit = TRUE,
-    method = "simpls",
-    svd.method = "rsvd"
+    method = "simpls"
   )
 
   rsvd <- pls(
@@ -293,7 +284,6 @@ test_that("simpls path agrees with a dense-SVD reference", {
     ncomp = 1:5,
     fit = TRUE,
     method = "simpls",
-    svd.method = "cpu_rsvd",
     rsvd_oversample = 20L,
     rsvd_power = 2L,
     seed = 99L
@@ -310,20 +300,6 @@ test_that("simpls path agrees with a dense-SVD reference", {
   expect_true(isTRUE(rsvd$diagnostics$stochastic))
   expect_equal(rsvd$diagnostics$effective_components, 5L)
 
-  expect_error(
-    pls(
-      X,
-      Y,
-      ncomp = 1:5,
-      fit = TRUE,
-      method = "simpls",
-      svd.method = "cuda_rsvd",
-      rsvd_oversample = 10L,
-      rsvd_power = 1L,
-      seed = 99L
-    ),
-    "arg.*should be"
-  )
 })
 
 test_that("accelerated SIMPLS preserves prediction despite coefficient changes", {
@@ -336,12 +312,10 @@ test_that("accelerated SIMPLS preserves prediction despite coefficient changes",
     matrix(rnorm(n * 20, sd = 0.1), n, 20)
 
   reference <- dense_simpls_reference(
-    X, Y, ncomp = 1:8, method = "simpls", backend = "cpu",
-    svd.method = "rsvd", fit = TRUE, return_variance = FALSE
+    X, Y, ncomp = 1:8, method = "simpls", backend = "cpu", fit = TRUE, return_variance = FALSE
   )
   approximate <- pls(
-    X, Y, ncomp = 1:8, method = "simpls", backend = "cpu",
-    svd.method = "rsvd", oversample = 20L, power = 5L, seed = 204L,
+    X, Y, ncomp = 1:8, method = "simpls", backend = "cpu", oversample = 20L, power = 5L, seed = 204L,
     fit = TRUE, return_variance = FALSE
   )
 
@@ -364,7 +338,7 @@ test_that("the PLS-SVD core caps ncomp at the response rank", {
   idx <- sample(seq_len(180), 40)
 
   expect_warning({
-    fit <- pls(X[-idx, ], y[-idx], X[idx, ], ncomp = 60, method = "plssvd", svd.method = "cpu_rsvd")
+    fit <- pls(X[-idx, ], y[-idx], X[idx, ], ncomp = 60, method = "plssvd")
     expect_s3_class(fit, "fastPLS")
     expect_true(is.data.frame(fit$Ypred))
   }, "rank is limited")
@@ -382,7 +356,6 @@ test_that("centered factor-response PLSSVD respects the C minus 1 rank bound", {
       ncomp = 3,
       method = "plssvd",
       backend = "cpu",
-      svd.method = "rsvd",
       return_variance = FALSE
     ),
     "rank is limited to 2"
@@ -402,7 +375,6 @@ test_that("rank-capped PLS-SVD component paths remain unique", {
       ncomp = 1:5,
       method = "plssvd",
       backend = "cpu",
-      svd.method = "rsvd",
       fit = TRUE,
       return_variance = FALSE
     ),

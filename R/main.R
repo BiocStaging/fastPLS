@@ -3093,6 +3093,17 @@ print.fastPLS <- function(x, ...) {
     list(dots = dots)
 }
 
+.reject_removed_svd_method <- function(dots, context) {
+    if ("svd.method" %in% names(dots)) {
+        stop(
+            "svd.method has been removed from ", context,
+            "; fastPLS now uses rSVD automatically.",
+            call. = FALSE
+        )
+    }
+    invisible(dots)
+}
+
 .check_duplicate_svd_controls <- function(sources, context) {
     supplied <- unlist(sources, use.names = FALSE)
     duplicated <- unique(supplied[duplicated(supplied)])
@@ -5024,7 +5035,7 @@ print.fastPLS <- function(x, ...) {
 #' y <- mtcars$mpg
 #' fit <- pls(X, y,
 #'     ncomp = 2, method = "simpls", backend = "cpu",
-#'     svd.method = "rsvd", return_variance = FALSE
+#'     return_variance = FALSE
 #' )
 #' pred <- predict(fit, X[seq_len(3), , drop = FALSE])
 #' pred$Ypred
@@ -5340,7 +5351,6 @@ predict.fastPLS <- function(object, newdata, Ytest = NULL, proj = FALSE,
     .kernel_pls_fit(Xtrain, Ytrain, Xtest, Ytest, ncomp, match.arg(scaling),
         match.arg(kernel),
         gamma, degree, coef0, fit, proj, "cpp", pls, list(method = "simpls",
-            svd.method = svd.method,
             rsvd_oversample = rsvd_oversample, rsvd_power = rsvd_power,
             seed = seed,
             classifier = classifier,
@@ -5459,7 +5469,7 @@ predict.fastPLSKernel <- function(object, newdata, Ytest = NULL, proj = FALSE,
     svd.method <- match.arg(.normalize_svd_method(svd.method), c("cpu_rsvd"))
     .opls_fit(Xtrain, Ytrain, Xtest, Ytest, ncomp, match.arg(scaling), north,
         fit,
-        proj, "cpp", pls, list(method = "simpls", svd.method = svd.method,
+        proj, "cpp", pls, list(method = "simpls",
             rsvd_oversample = rsvd_oversample,
             rsvd_power = rsvd_power, seed = seed, classifier = classifier,
             return_variance = return_variance))
@@ -5695,7 +5705,7 @@ predict.fastPLSOpls <- function(object, newdata, Ytest = NULL, proj = FALSE,
     out <- tryCatch({
         fit <- pls(Xtrain = Xdata, Ytrain = Ydata, ncomp = ncomp,
             scaling = scaling,
-            method = method, svd.method = svd.method,
+            method = method,
             rsvd_oversample = rsvd_oversample,
             rsvd_power = rsvd_power, seed = seed,
             fit = TRUE, return_variance = FALSE,
@@ -5743,7 +5753,6 @@ predict.fastPLSOpls <- function(object, newdata, Ytest = NULL, proj = FALSE,
             ncomp = as.integer(cv$best_ncomp[[1L]]),
             scaling = params$scaling %||% "centering",
             method = params$method %||% "simpls",
-            svd.method = params$svd.method %||% "rsvd",
             classifier = params$classifier %||% "argmax",
             fit = options$fit,
             bycol = options$bycol,
@@ -7020,7 +7029,6 @@ stop("Could not extract regression predictions from fold fit.", call. = FALSE)
         ncomp = context$ncomp,
         scaling = context$scaling,
         method = context$method,
-        svd.method = ctl$svd.method,
         rsvd_oversample = ctl$rsvd_oversample,
         rsvd_power = ctl$rsvd_power,
         seed = as.integer(ctl$seed) + as.integer(fold_id),
@@ -7359,9 +7367,6 @@ stop("Could not extract regression predictions from fold fit.", call. = FALSE)
     "cuda_rsvd",
     "metal_rsvd"
 )
-.svd_methods_public <- "rsvd"
-.svd_methods_cpu <- "cpu_rsvd"
-
 .svd_method_id <- function(method) {
     method <- .normalize_svd_method(method)
     method <- match.arg(method, .svd_methods_internal)
@@ -9354,8 +9359,6 @@ plot.permutation <- function(
 #' @param method One of \code{simpls}, \code{plssvd}, \code{opls}, or
 #' \code{kernelpls}.
 #'   `simpls` uses the fastPLS accelerated SIMPLS core.
-#' @param svd.method SVD algorithm. Only \code{rsvd}, the native randomized
-#'   SVD for the selected backend, is supported.
 #' @param classifier Classification decision rule. \code{argmax} keeps the
 #'   standard PLS-DA response-score argmax. \code{lda} fits a regularized LDA
 #'   classifier on the PLS latent scores.
@@ -9495,13 +9498,13 @@ plot.permutation <- function(
 #' y <- mtcars$mpg
 #' fit <- pls(X, y,
 #'     ncomp = 2, method = "simpls", backend = "cpu",
-#'     svd.method = "rsvd", return_variance = FALSE
+#'     return_variance = FALSE
 #' )
 #' head(predict(fit, X)$Ypred)
 #'
 #' cv <- pls.single.cv(X, y,
 #'     ncomp = seq_len(2), kfold = 3, method = "simpls",
-#'     backend = "cpu", svd.method = "rsvd", seed = 1
+#'     backend = "cpu", seed = 1
 #' )
 #' fit_cv <- pls(cv, Xtest = X, return_variance = FALSE)
 #' cv$best_ncomp
@@ -9511,13 +9514,14 @@ pls <- function(Xtrain, Ytrain, Xtest = NULL, Ytest = NULL, ncomp = 2,
     scaling = c("centering",
         "autoscaling", "none"), method = c("simpls", "plssvd", "opls",
         "kernelpls"),
-    svd.method = "rsvd", classifier = c("argmax", "lda"),
-    lda_ridge = NULL,
+    classifier = c("argmax", "lda"), lda_ridge = NULL,
     fit = FALSE, bycol = FALSE, return_variance = TRUE,
     return_loadings = FALSE,
     proj = FALSE, perm.test = FALSE, times = 100, backend = NULL, north = 1L,
     kernel = c("linear",
         "rbf", "poly"), gamma = NULL, degree = 3L, coef0 = 1, ...) {
+    dots <- list(...)
+    .reject_removed_svd_method(dots, "pls()")
     lda_ridge <- .resolve_deprecated_lda_ridge(lda_ridge, !missing(lda_ridge),
         "pls()")
     if (.is_single_pls_cv_result(Xtrain)) {
@@ -9540,12 +9544,10 @@ pls <- function(Xtrain, Ytrain, Xtest = NULL, Ytest = NULL, ncomp = 2,
     north <- .fastpls_validate_integer_control(north, "north", 0L)
     degree <- .fastpls_validate_integer_control(degree, "degree", 1L)
     times <- .fastpls_validate_integer_control(times, "times", 1L)
-    context <- .pls_context(Xtrain, Ytrain, Xtest, Ytest, method,
-        if (missing(svd.method))
-            NULL
-        else svd.method, .svd_control_from_dots(list(...))$dots, backend,
-        classifier,
-        scaling)
+    context <- .pls_context(
+        Xtrain, Ytrain, Xtest, Ytest, method, NULL,
+        .svd_control_from_dots(dots)$dots, backend, classifier, scaling
+    )
     kernel <- match.arg(kernel)
     if (context$method %in% c("simpls", "kernelpls")) {
         component_kernel <- if (identical(context$method, "simpls")) {
@@ -9874,7 +9876,7 @@ pls <- function(Xtrain, Ytrain, Xtest = NULL, Ytest = NULL, ncomp = 2,
 
 .cv_config_record <- function(cfg) {
     svd_dots <- cfg$svd_dots
-    cfg <- cfg[setdiff(names(cfg), "svd_dots")]
+    cfg <- cfg[setdiff(names(cfg), c("svd_dots", "svd.method"))]
     if (length(svd_dots)) {
         cfg <- c(cfg, svd_dots)
     }
@@ -9896,7 +9898,7 @@ pls <- function(Xtrain, Ytrain, Xtest = NULL, Ytest = NULL, ncomp = 2,
 }
 
 .cv_prune_config_for_output <- function(cfg) {
-keep <- c("scaling", "method", "backend", "svd.method", "classifier", "xprod")
+keep <- c("scaling", "method", "backend", "classifier", "xprod")
     if (identical(cfg$method, "opls")) {
         keep <- c(keep, "north")
     }
@@ -10039,7 +10041,6 @@ keep <- c("scaling", "method", "backend", "svd.method", "classifier", "xprod")
             scaling = config$scaling,
             method = config$method,
             backend = config$backend,
-            svd.method = config$svd.method,
             seed = parameters$seed,
             kfold = parameters$kfold,
             north = config$north,
@@ -10073,7 +10074,7 @@ keep <- c("scaling", "method", "backend", "svd.method", "classifier", "xprod")
         result$status <- "ok"
     }
     result <- .cv_drop_fit_data(result)
-    result$tuning_config_full <- config
+    result$tuning_config_full <- config[setdiff(names(config), "svd.method")]
     result$tuning_config <- .cv_prune_config_for_output(config)
     ok <- identical(result$status, "ok")
     summary <- cbind(
@@ -10719,13 +10720,12 @@ keep <- c("scaling", "method", "backend", "svd.method", "classifier", "xprod")
 #' y <- factor(iris[idx, 5])
 #' opt <- pls.single.cv(X, y,
 #'     ncomp = seq_len(2), kfold = 3, method = "simpls",
-#'     backend = "cpu", svd.method = "rsvd", seed = 1
+#'     backend = "cpu", seed = 1
 #' )
 #' opt$best_ncomp
 #' opt_kernel <- pls.single.cv(X, y,
 #'     ncomp = seq_len(2), kfold = 3,
 #'     method = "kernelpls", backend = "cpu",
-#'     svd.method = "rsvd",
 #'     kernel = c("linear", "rbf"),
 #'     gamma = c(0.1, 1), seed = 1
 #' )
@@ -10735,12 +10735,14 @@ pls.single.cv <- function(Xdata, Ydata, ncomp = 2, constrain = NULL,
     scaling = c("centering",
         "autoscaling", "none"), method = c("simpls", "plssvd", "opls",
         "kernelpls"),
-    backend = NULL, svd.method = "rsvd", seed = 1L, kfold = 10,
+    backend = NULL, seed = 1L, kfold = 10,
     north = 1L,
     kernel = c("linear", "rbf", "poly"), gamma = NULL, degree = 3L, coef0 = 1,
     classifier = c("argmax", "lda"), lda_ridge = NULL, fit = TRUE,
     bycol = FALSE,
     xprod = NULL, selection_metric = "auto", ...) {
+    dots <- list(...)
+    .reject_removed_svd_method(dots, "pls.single.cv()")
     .resolve_deprecated_lda_ridge(lda_ridge, !missing(lda_ridge),
         "pls.single.cv()")
     if (sum(is.na(Xdata)) > 0) {
@@ -10761,10 +10763,10 @@ pls.single.cv <- function(Xdata, Ydata, ncomp = 2, constrain = NULL,
     .fastpls_validate_cv_groups(constrain, nrow(Xdata))
     selection <- .single_cv_selection(selection_metric,
         missing(selection_metric),
-        list(...))
+        dots)
     grid <- .cv_make_prediction_grid(scaling, missing(scaling), method,
         missing(method),
-        backend, missing(backend), svd.method, missing(svd.method), north,
+        backend, missing(backend), "cpu_rsvd", TRUE, north,
         kernel,
         missing(kernel), gamma, degree, coef0, classifier, missing(classifier),
         xprod, selection$dots, "pls.single.cv()")
@@ -10899,7 +10901,6 @@ pls.single.cv <- function(Xdata, Ydata, ncomp = 2, constrain = NULL,
             scaling = base$scaling,
             method = base$method,
             backend = base$backend,
-            svd.method = base$svd.method,
             north = base$north,
             kernel = base$kernel,
             gamma = base$gamma,
@@ -10977,7 +10978,6 @@ pls.single.cv <- function(Xdata, Ydata, ncomp = 2, constrain = NULL,
         scaling = base$scaling,
         method = base$method,
         backend = base$backend,
-        svd.method = base$svd.method,
         north = base$north,
         kernel = base$kernel,
         gamma = base$gamma,
@@ -11321,7 +11321,6 @@ pls.single.cv <- function(Xdata, Ydata, ncomp = 2, constrain = NULL,
             scaling = grid$scaling,
             method = grid$method,
             backend = grid$backend,
-            svd.method = grid$svd.method,
             seed = as.integer(context$seed) + 1000L * run_index + fold_index,
             kfold = config$kfold_inner,
             north = grid$north,
@@ -11387,7 +11386,6 @@ pls.single.cv <- function(Xdata, Ydata, ncomp = 2, constrain = NULL,
         ncomp = ncomp,
         scaling = config$scaling,
         method = config$method,
-        svd.method = config$svd.method,
         rsvd_oversample = config$rsvd_oversample,
         rsvd_power = config$rsvd_power,
         seed = as.integer(context$seed) + 2000L * run_index + fold_index,
@@ -11709,7 +11707,6 @@ pls.single.cv <- function(Xdata, Ydata, ncomp = 2, constrain = NULL,
         scaling = base$scaling,
         method = base$method,
         backend = base$backend,
-        svd.method = control$svd.method,
         rsvd_oversample = control$rsvd_oversample,
         rsvd_power = control$rsvd_power,
         seed = control$seed,
@@ -11943,8 +11940,7 @@ pls.single.cv <- function(Xdata, Ydata, ncomp = 2, constrain = NULL,
 #' y <- factor(iris[idx, 5])
 #' dcv <- pls.double.cv(X, y,
 #'     ncomp = seq_len(2), runn = 1, kfold_inner = 2,
-#'     kfold_outer = 2, method = "simpls", backend = "cpu",
-#'     svd.method = "rsvd", seed = 1
+#'     kfold_outer = 2, method = "simpls", backend = "cpu", seed = 1
 #' )
 #' names(dcv)
 #' @export
@@ -11952,7 +11948,7 @@ pls.double.cv <- function(Xdata, Ydata, ncomp = 2,
     constrain = seq_len(nrow(Xdata)),
     scaling = c("centering", "autoscaling", "none"), method = c("simpls",
         "plssvd",
-        "opls", "kernelpls"), backend = NULL, svd.method = "rsvd",
+        "opls", "kernelpls"), backend = NULL,
     seed = 1L, perm.test = FALSE, times = 100, runn = 1, kfold_inner = 10,
     kfold_outer = 10,
     north = 1L, kernel = c("linear", "rbf", "poly"), gamma = NULL, degree = 3L,
@@ -11960,6 +11956,7 @@ pls.double.cv <- function(Xdata, Ydata, ncomp = 2,
     bycol = FALSE,
     selection_metric = "auto", ...) {
     dots <- list(...)
+    .reject_removed_svd_method(dots, "pls.double.cv()")
     if ("xprod" %in% names(dots)) {
         stop(
             "xprod has been removed from pls.double.cv(); the compiled engine selects its numerical route automatically.",
@@ -11996,7 +11993,7 @@ pls.double.cv <- function(Xdata, Ydata, ncomp = 2,
         dots)
     grid <- .cv_make_prediction_grid(scaling, missing(scaling), method,
         missing(method),
-        backend, missing(backend), svd.method, missing(svd.method), north,
+        backend, missing(backend), "cpu_rsvd", TRUE, north,
         kernel,
         missing(kernel), gamma, degree, coef0, classifier, missing(classifier),
         NULL, selection$dots, "pls.double.cv()")
@@ -12309,7 +12306,7 @@ evaluate <- function(
 #' y <- mtcars$mpg
 #' fit <- pls(X, y,
 #'     ncomp = 1, method = "plssvd", backend = "cpu",
-#'     svd.method = "rsvd", fit = TRUE, return_variance = FALSE
+#'     fit = TRUE, return_variance = FALSE
 #' )
 #' ViP(fit)
 #' @export

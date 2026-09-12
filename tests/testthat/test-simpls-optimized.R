@@ -24,7 +24,6 @@ test_that("accelerated simpls returns valid fit structure", {
     y[idx],
     ncomp = 1:4,
     method = "simpls",
-    svd.method = "cpu_rsvd",
     fit = TRUE,
     seed = 77L
   ))
@@ -62,7 +61,6 @@ test_that("accelerated simpls stays close to legacy baseline on a controlled reg
     Ytest = Y[idx, , drop = FALSE],
     ncomp = c(2L, 4L, 6L),
     method = "simpls",
-    svd.method = "cpu_rsvd",
     fit = FALSE,
     seed = 123L
   )
@@ -104,7 +102,6 @@ test_that("pls backend='cuda' for simpls returns valid structure and stays close
     Ytest = Y[idx],
     ncomp = c(2L, 4L),
     method = "simpls",
-    svd.method = "cpu_rsvd",
     fit = FALSE,
     seed = 91L
   )

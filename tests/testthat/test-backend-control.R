@@ -15,7 +15,6 @@ test_that("pls does not expose backend-control metadata in fitted objects", {
     ncomp = 2,
     method = "simpls",
     backend = "cpu",
-    svd.method = "rsvd",
     return_variance = FALSE
   )
 

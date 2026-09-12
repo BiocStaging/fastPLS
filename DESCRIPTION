@@ -1,8 +1,8 @@
 Package: fastPLS
 Type: Package
 Title: Fast Partial Least Squares for High-Dimensional Data
-Version: 0.99.61
-Date: 2026-09-11
+Version: 0.99.62
+Date: 2026-09-12
 Authors@R: c(
     person(
         "Stefano", "Cacciatore", role = c("aut", "cre"),

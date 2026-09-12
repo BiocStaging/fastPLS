@@ -16,8 +16,7 @@ test_that("resident CUDA SIMPLS remains compact across storage hints", {
     fit_once <- function(storage) {
         Sys.setenv(FASTPLS_STORE_B = storage)
         pls(
-            X, Y, ncomp = 1:4, method = "simpls", backend = "cuda",
-            svd.method = "rsvd", seed = 902, fit = TRUE,
+            X, Y, ncomp = 1:4, method = "simpls", backend = "cuda", seed = 902, fit = TRUE,
             return_variance = FALSE
         )
     }

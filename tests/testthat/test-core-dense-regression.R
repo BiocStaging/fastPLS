@@ -40,7 +40,6 @@ test_that("public dense CPU rSVD uses the standalone core", {
             ncomp = 1:3,
             method = method,
             backend = "cpu",
-            svd.method = "rsvd",
             fit = FALSE,
             return_variance = FALSE,
             oversample = 32L,
@@ -82,7 +81,7 @@ test_that("float32 dense CPU rSVD agrees with the float64 core", {
 
         fit <- pls(
             X, Y, ncomp = components, method = names(method),
-            backend = "cpu", svd.method = "rsvd", fit = FALSE,
+            backend = "cpu", fit = FALSE,
             return_variance = FALSE, oversample = 32L, power = 5L,
             seed = 9551L
         )
@@ -120,7 +119,7 @@ test_that("implicit PLS-SVD avoids the dense cross-covariance", {
     Sys.setenv(FASTPLS_ABLATION_MODE = "1", FASTPLS_ABLATION_XPROD = "1")
     fit <- pls(
         task$X, task$Y, task$Xtest, ncomp = components,
-        method = "plssvd", backend = "cpu", svd.method = "rsvd",
+        method = "plssvd", backend = "cpu",
         fit = FALSE, return_variance = FALSE, oversample = 32L,
         power = 5L, seed = 9551L
     )
@@ -158,7 +157,7 @@ test_that("implicit SIMPLS preserves dense predictions", {
     Sys.setenv(FASTPLS_ABLATION_MODE = "1", FASTPLS_ABLATION_XPROD = "1")
     fit <- pls(
         task$X, task$Y, task$Xtest, ncomp = components,
-        method = "simpls", backend = "cpu", svd.method = "rsvd",
+        method = "simpls", backend = "cpu",
         fit = FALSE, return_variance = FALSE, oversample = 32L,
         power = 5L, seed = 9551L
     )

@@ -147,8 +147,7 @@ test_that("reported rSVD screening criteria match the current qualification", {
   X <- matrix(rnorm(80 * 14), 80, 14)
   Y <- matrix(rnorm(80 * 3), 80, 3)
   fit <- pls(
-    X, Y, ncomp = 3, method = "simpls", backend = "cpu",
-    svd.method = "rsvd", seed = 19, return_variance = FALSE
+    X, Y, ncomp = 3, method = "simpls", backend = "cpu", seed = 19, return_variance = FALSE
   )
 
   criteria <- fit$diagnostics$rsvd$validation_failure_criteria
